@@ -4,7 +4,7 @@ Bitácora viva de desarrollo. Se actualiza **en cada iteración** del bucle de t
 
 - **Proyecto:** DotForge IDE — distribución de IDE para C# / .NET 9+ / Blazor
 - **Inicio:** 2026-08-23
-- **Estado global:** 🟢 Completado — v1.3.0 empaquetada y verificada
+- **Estado global:** 🟢 Completado — v1.3.1 empaquetada y verificada
 
 Leyenda: `[ ]` pendiente · `[~]` en curso · `[x]` completado y **verificado con un comando**
 
@@ -929,3 +929,8 @@ apuntaban a carpetas borradas.
 - Camino bueno intacto: tras abrir una solución real, arrancar sin argumentos la reabre sola
   (`{"title":"Ok.Shop","disponibles":1}`).
 - `npm test` en verde (329 pruebas unitarias) y `--smoke-test` → `SMOKE_OK`.
+
+**Versión:** el arreglo del historial de recientes es una corrección de comportamiento sobre la
+1.3.0, sin funcionalidad nueva ni cambios de contrato para el usuario, así que por semver le
+corresponde el tercer número: **1.3.1**. Los canales `workspace:recents` y `workspace:open-recent`
+son internos —superficie IPC, no API pública— y existen sólo para poder hacer la corrección.

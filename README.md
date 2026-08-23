@@ -146,10 +146,10 @@ Descarga el artefacto de tu plataforma desde `dist/` o desde los artefactos del 
 
 | Plataforma | Artefacto | Notas |
 |---|---|---|
-| Windows | `DotForge IDE-1.3.0-Setup-x64.exe` | Instalador NSIS; permite elegir carpeta |
-| Windows | `DotForge IDE-1.3.0-win-x64.zip` | Portable, sin instalación |
-| macOS | `DotForge IDE-1.3.0-arm64.dmg` | Apple Silicon |
-| macOS | `DotForge IDE-1.3.0-x64.dmg` | Intel |
+| Windows | `DotForge IDE-1.3.1-Setup-x64.exe` | Instalador NSIS; permite elegir carpeta |
+| Windows | `DotForge IDE-1.3.1-win-x64.zip` | Portable, sin instalación |
+| macOS | `DotForge IDE-1.3.1-arm64.dmg` | Apple Silicon |
+| macOS | `DotForge IDE-1.3.1-x64.dmg` | Intel |
 
 > Los artefactos no están firmados: Windows mostrará el aviso de SmartScreen y macOS pedirá
 > confirmación en Gatekeeper. Es lo esperado sin certificado de desarrollador.
