@@ -270,6 +270,23 @@ const ICONS = {
 
   'git-branch': [{ c: [6.5, 5.5, 2.4] }, { c: [6.5, 18.5, 2.4] }, { c: [17.5, 8.5, 2.4] }, { p: 'M6.5 7.9v8.2' }, { p: 'M17.5 10.9a5.6 5.6 0 0 1-5.6 5.6H8.9' }],
 
+  /**
+   * Control de código fuente: un commit en una rama.
+   *
+   * Es la marca que todo el mundo asocia a git sin necesidad de una etiqueta, y a 16 px sigue
+   * distinguiéndose de `git-branch` porque el círculo está centrado y hay dos tramos de línea.
+   */
+  'source-control': [{ c: [12, 12, 3.4] }, { p: 'M2.8 12h5.8' }, { p: 'M15.4 12h5.8' }],
+
+  /** Confirmar: un commit con la marca de aceptación. */
+  'git-commit': [{ c: [12, 12, 3.4] }, { p: 'M12 3v5.6' }, { p: 'M12 15.4V21' }],
+
+  /** Publicar (push). Es `download` del revés, a propósito: el par se lee de un vistazo. */
+  upload: [{ p: 'M12 20.5v-11' }, { p: 'm7.4 13.8 4.6-4.6 4.6 4.6' }, { p: 'M4.5 4.5h15' }],
+
+  /** Descartar cambios: la flecha de deshacer. */
+  undo: [{ p: 'M4 9.5h10.5a5.5 5.5 0 1 1 0 11H8' }, { p: 'M7.6 5.4 3.4 9.5l4.2 4.1' }],
+
   'alert-circle': [{ c: [12, 12, 8.6] }, { p: 'M12 7.8v4.6' }, { fc: [12, 16, 1.1] }],
   'alert-triangle': [{ p: 'M10.3 3.9 2.6 17.2a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z' }, { p: 'M12 9v4' }, { fc: [12, 16.6, 1.1] }],
   info: [{ c: [12, 12, 8.6] }, { p: 'M12 16.2v-4.6' }, { fc: [12, 8, 1.1] }],

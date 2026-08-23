@@ -34,6 +34,24 @@ export type {
 } from './ai.js';
 import type { ArchitectureId, BlueprintInfo, ScaffoldOptions, ScaffoldResult } from './scaffold-types.js';
 import type { RunMode, StartupConfig } from './startup.js';
+import type { DotnetVerbosity } from './dotnet-verbosity.js';
+import { DEFAULT_DOTNET_VERBOSITY } from './dotnet-verbosity.js';
+
+// El control de código fuente tiene su propio módulo de modelo (parseo de `git status`, diffs),
+// pero su superficie IPC es parte del contrato: se reexporta para que preload, los handlers y el
+// renderer importen de un único sitio.
+export type {
+  GitBranchState,
+  GitChangeArea,
+  GitChangeLetter,
+  GitDiffRequest,
+  GitDiffSide,
+  GitFileChange,
+  GitRepositoryStatus,
+  GitSyncSummary,
+} from './git.js';
+import type { GitDiffRequest, GitRepositoryStatus } from './git.js';
+export type { DotnetVerbosity } from './dotnet-verbosity.js';
 
 // ---------------------------------------------------------------------------------------------
 // Modelos compartidos
@@ -267,6 +285,34 @@ export interface GitStatus {
   dirtyFiles: number;
 }
 
+/**
+ * Resultado de una operación de git que puede tardar o fallar (commit, push, pull, checkout).
+ *
+ * No se lanza una excepción por un fallo de git: "no hay nada que confirmar" o "el remoto ha
+ * rechazado el push" son respuestas normales del sistema, y el panel las enseña tal cual en vez
+ * de convertirlas en un error del IDE.
+ */
+export interface GitCommandResult {
+  ok: boolean;
+  /** Resumen para la barra de avisos. */
+  message: string;
+  /** Salida cruda de git (stdout + stderr), para el canal de salida. */
+  detail: string;
+  /** Estado del repositorio ya refrescado, para no tener que pedirlo otra vez. */
+  status: GitRepositoryStatus | null;
+}
+
+/** Contenido de los dos lados de una comparación, listo para el editor de diferencias. */
+export interface GitFileDiff {
+  request: GitDiffRequest;
+  original: string;
+  modified: string;
+  /** Id de lenguaje de Monaco deducido de la extensión. */
+  languageId: string;
+  /** Ruta absoluta del archivo en el disco, para poder abrirlo desde el diff. */
+  absolutePath: string;
+}
+
 export interface AppInfo {
   name: string;
   version: string;
@@ -294,6 +340,11 @@ export interface AppSettings {
   autoSaveDelayMs: number;
   recentWorkspaces: string[];
   lspEnabled: boolean;
+  /**
+   * Nivel de detalle de la salida de la CLI de .NET. Gobierna `build`, `run`, `watch`, `test`,
+   * `clean`, `restore`, `format` y el entorno del proceso depurado.
+   */
+  dotnetVerbosity: DotnetVerbosity;
   /** Preferencias del asistente de IA. Las claves de API NO viven aquí: ver `secret-store.ts`. */
   ai: AiSettings;
 }
@@ -310,6 +361,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoSaveDelayMs: 1000,
   recentWorkspaces: [],
   lspEnabled: true,
+  dotnetVerbosity: DEFAULT_DOTNET_VERBOSITY,
   ai: DEFAULT_AI_SETTINGS,
 };
 
@@ -344,6 +396,17 @@ export const IPC = {
   solutionLoad: 'solution:load',
   gitStatus: 'git:status',
   gitBranches: 'git:branches',
+  gitRepository: 'git:repository',
+  gitStage: 'git:stage',
+  gitUnstage: 'git:unstage',
+  gitDiscard: 'git:discard',
+  gitCommit: 'git:commit',
+  gitPush: 'git:push',
+  gitPull: 'git:pull',
+  gitSync: 'git:sync',
+  gitCheckout: 'git:checkout',
+  gitCreateBranch: 'git:create-branch',
+  gitFileDiff: 'git:file-diff',
 
   startupGet: 'startup:get',
   startupSave: 'startup:save',
@@ -418,6 +481,7 @@ export type MenuCommand =
   | 'edit.format'
   | 'view.command-palette'
   | 'view.explorer'
+  | 'view.source-control'
   | 'view.nuget'
   | 'view.problems'
   | 'view.terminal'
@@ -437,6 +501,10 @@ export type MenuCommand =
   | 'debug.step-in'
   | 'debug.step-out'
   | 'view.output'
+  | 'git.commit'
+  | 'git.push'
+  | 'git.pull'
+  | 'git.sync'
   | 'scaffold.wizard'
   | 'ai.chat'
   | 'ai.inline'
@@ -493,6 +561,29 @@ export interface DotForgeApi {
     status(): Promise<GitStatus | null>;
     /** Ramas locales y remotas, para el autocompletado de la terminal. Vacío si no hay repo. */
     branches(): Promise<string[]>;
+    /**
+     * Estado completo para el panel de control de código fuente: rama, upstream, adelanto y
+     * retraso, y la lista de archivos preparados y sin preparar. Null si no hay repositorio.
+     */
+    repository(): Promise<GitRepositoryStatus | null>;
+    /** Prepara archivos (`git add`). Las rutas son relativas a la raíz del repositorio. */
+    stage(paths: string[]): Promise<GitCommandResult>;
+    /** Saca archivos del área de preparación (`git restore --staged`). */
+    unstage(paths: string[]): Promise<GitCommandResult>;
+    /**
+     * Descarta los cambios locales de un archivo. Un archivo sin rastrear se borra, porque no hay
+     * ninguna versión anterior a la que volver: la operación pide confirmación en la interfaz.
+     */
+    discard(paths: string[]): Promise<GitCommandResult>;
+    commit(message: string, options?: { amend?: boolean }): Promise<GitCommandResult>;
+    push(): Promise<GitCommandResult>;
+    pull(): Promise<GitCommandResult>;
+    /** `pull` seguido de `push`: el botón que la gente pulsa sin pensar. */
+    sync(): Promise<GitCommandResult>;
+    checkout(branch: string): Promise<GitCommandResult>;
+    createBranch(name: string): Promise<GitCommandResult>;
+    /** Contenido de los dos lados de la comparación de un archivo. */
+    fileDiff(request: GitDiffRequest): Promise<GitFileDiff>;
   };
   startup: {
     /** Perfiles de inicio guardados para el workspace abierto. */

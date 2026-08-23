@@ -22,7 +22,9 @@ NuGet sin salir de la ventana.
 Su módulo diferencial es el **asistente de arquitecturas**: genera soluciones .NET completas —
 Clean Architecture, Hexagonal o DDD + CQRS — que **compilan, pasan sus pruebas y se ejecutan**
 desde el primer minuto, con un CRUD funcional de ejemplo. Desde la v1.4.0 lleva además un
-**asistente de IA que conoce esa arquitectura** y ayuda sin romperla.
+**asistente de IA que conoce esa arquitectura** y ayuda sin romperla, y desde la v1.5.0 un
+**panel visual de control de código fuente**, pastillas de estado de los procesos en marcha y un
+control del nivel de detalle de la salida de la CLI de .NET.
 
 ![DotForge IDE con una solución DDD abierta](docs/screenshot-workspace.png)
 
@@ -31,6 +33,7 @@ desde el primer minuto, con un CRUD funcional de ejemplo. Desde la v1.4.0 lleva 
 ## Índice
 
 - [Características](#características)
+- [Control de código fuente](#control-de-código-fuente)
 - [Asistente de IA](#asistente-de-ia)
 - [Instalación](#instalación)
 - [El generador de arquitecturas](#el-generador-de-arquitecturas)
@@ -100,8 +103,16 @@ desde el primer minuto, con un CRUD funcional de ejemplo. Desde la v1.4.0 lleva 
   ("Backend + Web"). Se guardan por solución, fuera del repositorio.
 - Dos modos claros: **Depurar** (F5), que engancha NetCoreDbg y aplica `launchSettings.json`, y
   **Sin depurar** (Ctrl+F5), que arranca las webs con Hot Reload.
-- **Un canal de salida por proceso**: cada proyecto arrancado tiene su pestaña con su nombre, su
-  estado y el puerto en el que escucha, clicable para abrirlo en el navegador.
+- **Pastillas de estado en la barra superior**: con un perfil multiproyecto en marcha, cada
+  proceso aparece con su color de estado y su puerto (`● Adapters.Web :5585`). Un clic enfoca su
+  salida; un clic en el puerto abre la aplicación en el navegador.
+- **Un canal de salida por proceso**, con el nombre del proyecto, su insignia de tipo (Web API,
+  Blazor, CLI…), el estado (`En ejecución`, `Detenido`, `Error`), el enlace HTTPS y botones para
+  **reiniciar o detener sólo ese proceso**, sin tocar los demás del perfil.
+- **Nivel de salida de la CLI de .NET** configurable en Ajustes (`Minimal`, `Normal`, `Detailed`,
+  `Diagnostic`). Se aplica a `build`, `run`, `watch`, `test`, `clean`, `restore` y a la depuración;
+  en los niveles altos añade el registro de ASP.NET Core, los errores detallados y la traza de
+  carga de ensamblados del host.
 - Tareas de `dotnet`: `build`, `rebuild`, `clean`, `restore`, `test`, `run` y `watch`.
 - La salida de MSBuild se convierte en **diagnósticos clicables** que llevan a la línea exacta, y
   se pintan como marcadores en el editor.
@@ -116,6 +127,29 @@ desde el primer minuto, con un CRUD funcional de ejemplo. Desde la v1.4.0 lleva 
 - **NetCoreDbg** (MIT) hablando Debug Adapter Protocol.
 - Breakpoints en el margen del editor, pila de llamadas, variables expandibles, evaluación de
   expresiones y controles de paso (F5 / F9 / F10 / F11).
+
+### Control de código fuente
+
+Un panel de git completo en la barra lateral (`Ctrl+Shift+G`), con lo que se usa a diario:
+
+- **Dos secciones colapsables**: *Cambios preparados* y *Cambios*, con una letra por archivo —
+  `M` modificado, `A` añadido, `D` eliminado, `U` sin rastrear— y los conflictos marcados aparte.
+- **Acciones al pasar el ratón**: `+` prepara, `-` quita de preparados y `↩` descarta. Descartar
+  pide confirmación y dice qué va a pasar: un archivo con seguimiento vuelve a su última versión,
+  uno sin rastrear **se borra del disco**.
+- **Editor de diferencias lado a lado**: al pulsar un archivo se abre la comparación real —
+  `HEAD ↔ Índice` para lo preparado, `Índice ↔ Local` para lo que no lo está— en su propia pestaña.
+  Doble clic abre el archivo para editarlo.
+- **Caja de mensaje multilínea** con `Ctrl+Enter` para confirmar, y casilla para enmendar el
+  último commit.
+- **Commit, Push, Pull y Sync**, con el indicador de commits por delante y por detrás (`↑2 ↓1`).
+  La primera publicación de una rama crea su rama de seguimiento sola; `Pull` es siempre
+  `--ff-only`, para no fusionar nada a tus espaldas.
+- **Selector de rama** en la cabecera, con las ramas locales y remotas y la creación de una rama
+  nueva (`git checkout -b`).
+
+Se usa el `git` del sistema, no una reimplementación: worktrees, submódulos, hooks y gestores de
+credenciales se comportan exactamente igual que en tu terminal.
 
 ### Asistente de IA
 
@@ -134,6 +168,9 @@ proyecto de dominio, te dice por qué no y dónde va.
   lo que desaparece listado. `Enter` acepta, `Esc` descarta, `Ctrl+Z` deshace.
 - **Acciones rápidas** en el menú contextual del editor y del árbol de archivos: *Explicar el código
   con IA*, *Generar pruebas xUnit* y *Corregir violación de arquitectura*.
+- **Se puede apagar** desde Ajustes. Al hacerlo, su icono sigue en la barra de actividad pero
+  atenuado y sin responder al clic, con un aviso que recuerda dónde volver a encenderlo: una
+  herramienta desactivada no debería desaparecer sin dejar rastro.
 - **Tres proveedores**, elegibles en Ajustes:
 
   | Proveedor | Modelos | Notas |
@@ -353,6 +390,8 @@ En macOS, `Ctrl` es `Cmd`.
 | Guardar / Guardar todo | `Ctrl+S` / `Ctrl+Alt+S` |
 | Paleta de comandos | `Ctrl+Shift+P` |
 | Explorador de soluciones | `Ctrl+Shift+E` |
+| **Control de código fuente** | `Ctrl+Shift+G` |
+| Confirmar el commit (con el foco en el mensaje) | `Ctrl+Enter` |
 | Paquetes NuGet | `Ctrl+Shift+U` |
 | **Asistente de IA** | `Ctrl+Shift+A` |
 | **Editar con IA la selección** | `Ctrl+I` |
@@ -379,7 +418,9 @@ En macOS, `Ctrl` es `Cmd`.
 ```
 src/
 ├── shared/        Contratos IPC y tipos compartidos (sin dependencias de Node ni Electron)
-│   └── ai*.ts         Catálogo de proveedores, contexto RAG y diferencias del asistente
+│   ├── ai*.ts         Catálogo de proveedores, contexto RAG y diferencias del asistente
+│   ├── git.ts         Parseo de `git status` y construcción de las comparaciones
+│   └── dotnet-verbosity.ts  Nivel de salida -> argumentos y variables de entorno
 ├── scaffold/      ★ Generador de arquitecturas — Node puro, sin Electron
 │   ├── engine.ts      Motor de plantillas estricto: {{token}}, {{#if}}, {{else}}
 │   ├── generator.ts   Recorrido, render y escritura
@@ -388,13 +429,13 @@ src/
 ├── cli/           CLI `dotforge`, headless
 ├── main/          Proceso principal de Electron
 │   ├── ipc/           Única superficie expuesta al renderer
-│   ├── services/      .sln/.csproj, NuGet, tareas MSBuild, terminal, rutas, ZIP
+│   ├── services/      .sln/.csproj, NuGet, tareas MSBuild, terminal, rutas, ZIP, git
 │   │   └── ai/        ★ Asistente: proveedores, streaming, claves cifradas
 │   ├── lsp/           Adquisición y cliente del servidor de lenguaje
 │   └── debug/         Adquisición de NetCoreDbg y bridge DAP
 └── renderer/      UI
     ├── languages/     Gramática Razor y auto-cierre de etiquetas
-    ├── views/         Explorador, editor, NuGet, panel, wizard, paleta, depuración, chat de IA
+    ├── views/         Explorador, git, editor, NuGet, panel, wizard, paleta, depuración, IA
     └── styles/        Tokens de tema y componentes
 ```
 

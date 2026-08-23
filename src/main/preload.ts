@@ -29,6 +29,8 @@ import type {
   DotnetTaskStarted,
   EditorDocument,
   FileNode,
+  GitCommandResult,
+  GitFileDiff,
   GitStatus,
   LspState,
   MenuCommand,
@@ -37,6 +39,7 @@ import type {
   SolutionInfo,
 } from '../shared/contracts.js';
 import { IPC, IPC_EVENTS } from '../shared/contracts.js';
+import type { GitDiffRequest, GitRepositoryStatus } from '../shared/git.js';
 import type { BlueprintInfo, ScaffoldOptions, ScaffoldResult } from '../shared/scaffold-types.js';
 import type { StartupConfig } from '../shared/startup.js';
 
@@ -83,6 +86,18 @@ const api: DotForgeApi = {
   git: {
     status: () => ipcRenderer.invoke(IPC.gitStatus) as Promise<GitStatus | null>,
     branches: () => ipcRenderer.invoke(IPC.gitBranches) as Promise<string[]>,
+    repository: () => ipcRenderer.invoke(IPC.gitRepository) as Promise<GitRepositoryStatus | null>,
+    stage: (paths: string[]) => ipcRenderer.invoke(IPC.gitStage, paths) as Promise<GitCommandResult>,
+    unstage: (paths: string[]) => ipcRenderer.invoke(IPC.gitUnstage, paths) as Promise<GitCommandResult>,
+    discard: (paths: string[]) => ipcRenderer.invoke(IPC.gitDiscard, paths) as Promise<GitCommandResult>,
+    commit: (message: string, options?: { amend?: boolean }) =>
+      ipcRenderer.invoke(IPC.gitCommit, message, options ?? {}) as Promise<GitCommandResult>,
+    push: () => ipcRenderer.invoke(IPC.gitPush) as Promise<GitCommandResult>,
+    pull: () => ipcRenderer.invoke(IPC.gitPull) as Promise<GitCommandResult>,
+    sync: () => ipcRenderer.invoke(IPC.gitSync) as Promise<GitCommandResult>,
+    checkout: (branch: string) => ipcRenderer.invoke(IPC.gitCheckout, branch) as Promise<GitCommandResult>,
+    createBranch: (name: string) => ipcRenderer.invoke(IPC.gitCreateBranch, name) as Promise<GitCommandResult>,
+    fileDiff: (request: GitDiffRequest) => ipcRenderer.invoke(IPC.gitFileDiff, request) as Promise<GitFileDiff>,
   },
 
   startup: {

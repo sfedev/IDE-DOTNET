@@ -80,6 +80,7 @@ export function buildApplicationMenu(): Menu {
         item('Paleta de comandos', 'view.command-palette', 'CmdOrCtrl+Shift+P'),
         { type: 'separator' },
         item('Explorador de soluciones', 'view.explorer', 'CmdOrCtrl+Shift+E'),
+        item('Control de código fuente', 'view.source-control', 'CmdOrCtrl+Shift+G'),
         item('Paquetes NuGet', 'view.nuget', 'CmdOrCtrl+Shift+U'),
         item('Problemas', 'view.problems', 'CmdOrCtrl+Shift+M'),
         item('Salida y terminal', 'view.terminal', 'CmdOrCtrl+J'),
@@ -102,6 +103,17 @@ export function buildApplicationMenu(): Menu {
         { type: 'separator' },
         item('Explicar el código', 'ai.explain'),
         item('Generar pruebas xUnit', 'ai.tests'),
+      ],
+    },
+    {
+      label: 'Git',
+      submenu: [
+        item('Abrir el control de código fuente', 'view.source-control', 'CmdOrCtrl+Shift+G'),
+        { type: 'separator' },
+        item('Confirmar los cambios preparados', 'git.commit'),
+        item('Publicar (push)', 'git.push'),
+        item('Traer del remoto (pull)', 'git.pull'),
+        item('Sincronizar', 'git.sync'),
       ],
     },
     {

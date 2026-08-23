@@ -46,3 +46,24 @@ export {
   summarizeDiff,
 } from '../shared/ai-diff.js';
 export type { CodeBlock, DiffKind, DiffLine, DiffSummary } from '../shared/ai-diff.js';
+
+/**
+ * Estado del asistente en la barra de actividad.
+ *
+ * Es una regla de producto con consecuencias visibles —el icono se atenúa, no navega y explica
+ * dónde encenderlo— y por eso vive en una función pura que se puede probar sin DOM.
+ */
+export { aiEntryState, aiActionBlockedReason, AI_DISABLED_MESSAGE } from './ai-availability.js';
+export type { AiEntryState } from './ai-availability.js';
+
+/** Modelo del control de código fuente: lo consumen el panel lateral y el editor de diferencias. */
+export {
+  buildDiffRequest,
+  describeLetter,
+  diffKey,
+  isValidBranchName,
+  normalizeCommitMessage,
+  parseGitStatus,
+  syncSummary,
+} from '../shared/git.js';
+export type { GitDiffRequest, GitFileChange, GitRepositoryStatus } from '../shared/git.js';

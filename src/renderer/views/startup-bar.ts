@@ -26,6 +26,8 @@ import {
 import { clear, el } from '../dom.js';
 import { presentProject } from '../file-icons.js';
 import { icon } from '../icons.js';
+import type { ServiceInfo } from './panel.js';
+import { portOf } from '../run-output.js';
 
 export interface StartupBarHost {
   /** Arranca el perfil activo con el modo activo. */
@@ -37,6 +39,12 @@ export interface StartupBarHost {
   /** Hay algo ejecutándose ahora mismo. */
   isRunning(): boolean;
   notify(message: string, level: 'info' | 'warn' | 'error'): void;
+  /** Procesos arrancados desde el selector, con su estado y su URL. */
+  services(): ServiceInfo[];
+  /** Enfoca el canal de salida de un proceso: es lo que hace clic en su pastilla. */
+  focusService(service: ServiceInfo): void;
+  /** Abre la URL de un proceso en el navegador del sistema. */
+  openUrl(url: string): void;
 }
 
 const MODE_LABEL: Record<RunMode, string> = {
@@ -124,6 +132,70 @@ export class StartupBar {
     }
 
     container.append(this.renderProfilePicker(), this.renderModeToggle(), this.renderActions());
+
+    const services = this.renderServices();
+    if (services) container.appendChild(services);
+  }
+
+  /**
+   * Pastillas de los procesos en marcha.
+   *
+   * Con un perfil multiproyecto, el botón de Play arranca tres cosas y la barra superior no decía
+   * ni cuáles ni si seguían vivas: había que bajar al panel y recorrer pestañas. Ahora cada
+   * proceso tiene su pastilla con su color de estado y su puerto, un clic la enfoca en el panel
+   * y un clic en el puerto abre la aplicación en el navegador.
+   *
+   * Se pintan también los que han muerto, en rojo: enterarse de que la API se ha caído es más
+   * importante que tener la barra limpia.
+   */
+  private renderServices(): HTMLElement | null {
+    const services = this.host.services().filter((service) => service.status !== 'idle');
+    if (services.length === 0) return null;
+
+    const strip = el('div', { className: 'service-pills', role: 'group', attrs: { 'aria-label': 'Procesos activos' } });
+
+    for (const service of services) {
+      const port = service.url ? portOf(service.url) : null;
+      const presentation = presentProject(service.projectKind ?? 'console');
+
+      const pill = el(
+        'button',
+        {
+          className: `service-pill ${service.status}`,
+          title: [
+            `${service.label} · ${presentation.description}`,
+            service.url,
+            'Clic para ver su salida',
+          ]
+            .filter((line): line is string => typeof line === 'string' && line !== '')
+            .join('\n'),
+          on: { click: () => this.host.focusService(service) },
+        },
+        el('span', { className: 'service-pill-dot' }),
+        el('span', { className: 'service-pill-name', text: service.label }),
+      );
+
+      if (port !== null && service.url) {
+        const url = service.url;
+        pill.appendChild(
+          el('span', {
+            className: 'service-pill-port',
+            text: `:${port}`,
+            title: `Abrir ${url}`,
+            on: {
+              click: (event) => {
+                event.stopPropagation();
+                this.host.openUrl(url);
+              },
+            },
+          }),
+        );
+      }
+
+      strip.appendChild(pill);
+    }
+
+    return strip;
   }
 
   private renderProfilePicker(): HTMLElement {

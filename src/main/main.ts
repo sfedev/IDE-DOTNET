@@ -224,6 +224,31 @@ function iconPath(): string | undefined {
   return candidates.find((candidate) => existsSync(candidate));
 }
 
+/**
+ * `--wait=<ms>`: amplía la espera antes de capturar o de medir.
+ *
+ * Existe porque hay cosas que sólo se pueden comprobar cuando ya han pasado: las pastillas de
+ * proceso de la barra superior no aparecen hasta que `dotnet run` arranca y anuncia su URL, y eso
+ * tarda más que los cinco segundos que basta esperar para que se monte la interfaz.
+ */
+function millisecondsFlag(name: string): number | null {
+  const flag = process.argv.find((argument) => argument.startsWith(`${name}=`));
+  const parsed = flag ? Number.parseInt(flag.slice(name.length + 1), 10) : Number.NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 600_000) : null;
+}
+
+const extraWaitMs = millisecondsFlag('--wait');
+
+/**
+ * `--ui-wait=<ms>`: cuánto se espera antes de **pulsar** la acción de `--ui=`.
+ *
+ * Los 3,2 s por defecto bastan con la pantalla de bienvenida, pero no cuando se arranca con una
+ * solución abierta: cargar Monaco y leer la solución tarda más, y la acción acababa pulsando un
+ * control que todavía no existía. El síntoma era el peor posible: ningún error, simplemente no
+ * pasaba nada.
+ */
+const uiWaitMs = millisecondsFlag('--ui-wait');
+
 /** `--screenshot=<ruta>`: guarda una captura de la ventana y sale. Sirve para el README y el QA. */
 const screenshotTarget = (() => {
   const flag = process.argv.find((argument) => argument.startsWith('--screenshot='));
@@ -233,7 +258,7 @@ const screenshotTarget = (() => {
 function captureScreenshot(window: BrowserWindow, target: string): void {
   window.webContents.once('did-finish-load', () => {
     // Margen para que Monaco termine de cargar, se ejecute la acción de UI y el shell quede
-    // pintado del todo.
+    // pintado del todo. Con `--wait=` se espera lo que haga falta.
     setTimeout(() => {
       void window.webContents
         .capturePage()
@@ -269,7 +294,7 @@ function captureScreenshot(window: BrowserWindow, target: string): void {
           console.error(`SCREENSHOT_FAIL ${error instanceof Error ? error.message : String(error)}`);
           app.exit(1);
         });
-    }, 5000);
+    }, extraWaitMs ?? 5000);
   });
 }
 
@@ -356,23 +381,26 @@ const uiAction = (() => {
 })();
 
 const UI_ACTIONS: Record<string, string> = {
-  // La barra de actividad, en orden: solución, generador, NuGet, depuración, IA, [spacer], ajustes.
-  wizard: "document.querySelectorAll('.activity-item')[1]?.click()",
-  nuget: "document.querySelectorAll('.activity-item')[2]?.click()",
-  debug: "document.querySelectorAll('.activity-item')[3]?.click()",
-  ai: "document.querySelectorAll('.activity-item')[4]?.click()",
-  settings: "document.querySelectorAll('.activity-item')[5]?.click()",
+  // La barra de actividad, en orden: solución, control de código fuente, generador, NuGet,
+  // depuración, IA, [spacer], ajustes. Los índices son posicionales: si se añade una herramienta,
+  // hay que moverlos aquí, y por eso el orden está escrito arriba.
+  git: "document.querySelectorAll('.activity-item')[1]?.click()",
+  wizard: "document.querySelectorAll('.activity-item')[2]?.click()",
+  nuget: "document.querySelectorAll('.activity-item')[3]?.click()",
+  debug: "document.querySelectorAll('.activity-item')[4]?.click()",
+  ai: "document.querySelectorAll('.activity-item')[5]?.click()",
+  settings: "document.querySelectorAll('.activity-item')[6]?.click()",
   palette: "document.querySelector('#statusbar button:last-of-type')?.click()",
   terminal: "[...document.querySelectorAll('.panel-tab')].find((tab) => tab.textContent?.includes('Terminal'))?.click()",
   // Dos pasos: abrir ajustes y pulsar "Claro". Se encadenan con un retardo porque la vista se
   // repinta entre uno y otro.
   light:
-    "document.querySelectorAll('.activity-item')[5]?.click();" +
+    "document.querySelectorAll('.activity-item')[6]?.click();" +
     "setTimeout(() => [...document.querySelectorAll('.segmented button')]" +
     ".find((button) => button.textContent?.includes('Claro'))?.click(), 400)",
   // Despliega el grupo de archivos satélite de appsettings.json.
   'probe-theme':
-    "document.querySelectorAll('.activity-item')[5]?.click();" +
+    "document.querySelectorAll('.activity-item')[6]?.click();" +
     "setTimeout(() => {" +
     "  [...document.querySelectorAll('.segmented button')].find((b) => b.textContent?.includes('Claro'))?.click();" +
     "  setTimeout(() => {" +
@@ -400,6 +428,24 @@ const UI_ACTIONS: Record<string, string> = {
     "  input.value = 'git ';" +
     "  input.dispatchEvent(new Event('input', { bubbles: true }));" +
     "}, 300)",
+  // Fase 11: arranca el perfil activo, para revisar las pastillas de proceso de la barra superior.
+  'startup-play': "document.querySelector('.startup-play')?.click()",
+  'startup-run-mode':
+    "[...document.querySelectorAll('.startup-mode-btn')].find((b) => b.textContent?.includes('Sin depurar'))?.click();" +
+    "setTimeout(() => document.querySelector('.startup-play')?.click(), 400)",
+  // Fase 11: conmuta "Activar el asistente" en Ajustes. Sirve para revisar a ojo el icono
+  // atenuado de la barra de actividad; ejecutarlo dos veces deja la preferencia como estaba.
+  'ai-toggle':
+    "document.querySelectorAll('.activity-item')[6]?.click();" +
+    'setTimeout(() => {' +
+    "  const row = [...document.querySelectorAll('.settings-toggle')]" +
+    "    .find((label) => label.textContent?.includes('Activar el asistente'));" +
+    "  row?.querySelector('input')?.click();" +
+    '}, 500)',
+  // Fase 11: el panel de control de fuentes con una comparación abierta.
+  'git-diff':
+    "document.querySelectorAll('.activity-item')[1]?.click();" +
+    "setTimeout(() => document.querySelector('.git-row')?.click(), 700)",
   nesting:
     "[...document.querySelectorAll('.tree-row')]" +
     ".find((row) => row.textContent?.includes('appsettings.json'))" +
@@ -415,7 +461,7 @@ function runUiAction(window: BrowserWindow, action: string): void {
 
   window.webContents.once('did-finish-load', () => {
     // Se espera a que el renderer termine de montarse (Monaco tarda) antes de pulsar nada.
-    setTimeout(() => void window.webContents.executeJavaScript(script, true), 3200);
+    setTimeout(() => void window.webContents.executeJavaScript(script, true), uiWaitMs ?? 3200);
   });
 }
 
@@ -443,7 +489,7 @@ function runProbe(window: BrowserWindow, expression: string): void {
           console.error(`PROBE_FAIL ${error instanceof Error ? error.message : String(error)}`);
           app.exit(1);
         });
-    }, uiAction ? 6000 : 4500);
+    }, extraWaitMs ?? (uiAction ? 6000 : 4500));
   });
 }
 

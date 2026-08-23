@@ -11,8 +11,9 @@
  *    peor, destruía el input de la terminal mientras se escribía en él. Ahora se añade sólo la
  *    línea nueva al log visible.
  */
-import type { BuildDiagnostic, DotnetTaskExit, DotnetTaskStarted } from '../../shared/contracts.js';
+import type { BuildDiagnostic, DotnetTaskExit, DotnetTaskStarted, ProjectKind } from '../../shared/contracts.js';
 import { byId, clear, el } from '../dom.js';
+import { presentProject } from '../file-icons.js';
 import { icon, type IconName } from '../icons.js';
 import { detectListeningUrl, portOf } from '../run-output.js';
 import {
@@ -41,6 +42,30 @@ export interface PanelHost {
   suggestContext(): SuggestContext;
   /** Abre una URL en el navegador del sistema. */
   openUrl(url: string): void;
+  /** Vuelve a lanzar el proceso de un canal (el botón de reinicio de su pestaña). */
+  restartService(service: ServiceInfo): void;
+  /**
+   * Algo ha cambiado en la lista de procesos: uno ha arrancado, ha muerto o acaba de anunciar su
+   * URL. Lo escucha la barra superior, que pinta una pastilla por proceso vivo.
+   */
+  servicesChanged(): void;
+}
+
+/**
+ * Un proceso arrancado desde el selector de inicio, visto desde fuera del panel.
+ *
+ * Lo consumen la barra superior (para pintar sus "pills" de estado) y el propio panel. Se expone
+ * como dato plano y no como el canal entero para que nadie de fuera pueda tocarle el búfer.
+ */
+export interface ServiceInfo {
+  /** Id del canal de salida. Es lo que hay que pasar a `showChannel`. */
+  id: string;
+  label: string;
+  status: 'idle' | 'running' | 'ok' | 'failed';
+  url: string | null;
+  taskId: string | null;
+  projectPath: string | null;
+  projectKind: ProjectKind | null;
 }
 
 type LineKind = 'plain' | 'error' | 'ok' | 'command';
@@ -74,7 +99,18 @@ interface Channel {
   taskId: string | null;
   url: string | null;
   status: ChannelStatus;
+  /** Proyecto del que salió el proceso, para la insignia de tipo y para poder reiniciarlo. */
+  projectPath: string | null;
+  projectKind: ProjectKind | null;
 }
+
+/** Texto del estado de un proceso. Es lo que se lee en la cabecera de su canal. */
+const STATUS_LABEL: Record<ChannelStatus, string> = {
+  idle: 'Preparado',
+  running: 'En ejecución',
+  ok: 'Detenido',
+  failed: 'Error',
+};
 
 const BUILD_CHANNEL = 'build';
 const TERMINAL_CHANNEL = 'terminal';
@@ -87,9 +123,18 @@ export class PanelView {
 
   /** Canales de salida. El de build siempre existe; los de proceso se crean al arrancar. */
   private readonly channels = new Map<string, Channel>([
-    [BUILD_CHANNEL, { id: BUILD_CHANNEL, label: 'Compilación', kind: 'build', lines: [], taskId: null, url: null, status: 'idle' }],
-    [TERMINAL_CHANNEL, { id: TERMINAL_CHANNEL, label: 'Terminal', kind: 'build', lines: [], taskId: null, url: null, status: 'idle' }],
+    [BUILD_CHANNEL, { id: BUILD_CHANNEL, label: 'Compilación', kind: 'build', lines: [], taskId: null, url: null, status: 'idle', projectPath: null, projectKind: null }],
+    [TERMINAL_CHANNEL, { id: TERMINAL_CHANNEL, label: 'Terminal', kind: 'build', lines: [], taskId: null, url: null, status: 'idle', projectPath: null, projectKind: null }],
   ]);
+
+  /**
+   * Metadatos del proyecto de cada canal, registrados **antes** de lanzar la tarea.
+   *
+   * La tarea sólo trae una etiqueta; el tipo de proyecto y su ruta los conoce quien orquesta el
+   * arranque. Sin esto, la pestaña del canal podría decir el nombre pero no si eso es una Web API,
+   * un Blazor o una consola, que es justo lo que se quiere distinguir de un vistazo.
+   */
+  private readonly serviceMeta = new Map<string, { projectPath: string; projectKind: ProjectKind }>();
 
   private activeChannel = BUILD_CHANNEL;
 
@@ -158,7 +203,17 @@ export class PanelView {
     const found = this.channels.get(id);
     if (found) return found;
 
-    const created: Channel = { id, label: id, kind: 'process', lines: [], taskId: null, url: null, status: 'idle' };
+    const created: Channel = {
+      id,
+      label: id,
+      kind: 'process',
+      lines: [],
+      taskId: null,
+      url: null,
+      status: 'idle',
+      projectPath: null,
+      projectKind: null,
+    };
     this.channels.set(id, created);
     return created;
   }
@@ -168,6 +223,42 @@ export class PanelView {
     return [...this.channels.values()].filter(
       (channel) => channel.id !== TERMINAL_CHANNEL && (channel.id === BUILD_CHANNEL || channel.lines.length > 0),
     );
+  }
+
+  /**
+   * Declara de qué proyecto va a salir el canal de una etiqueta.
+   *
+   * Se llama justo antes de lanzar la tarea. La tarea sólo lleva una etiqueta legible; el tipo de
+   * proyecto y su ruta —lo que hace falta para la insignia y para el botón de reinicio— los sabe
+   * quien orquesta el arranque, no el proceso principal.
+   */
+  registerService(label: string, meta: { projectPath: string; projectKind: ProjectKind }): void {
+    const channel = this.channel(`task:${label}`);
+    channel.label = label;
+    channel.kind = 'process';
+    channel.projectPath = meta.projectPath;
+    channel.projectKind = meta.projectKind;
+    this.serviceMeta.set(label, meta);
+  }
+
+  /** Procesos con canal propio, para las pastillas de la barra superior. */
+  services(): ServiceInfo[] {
+    return [...this.channels.values()]
+      .filter((channel) => channel.kind === 'process')
+      .map((channel) => ({
+        id: channel.id,
+        label: channel.label,
+        status: channel.status,
+        url: channel.url,
+        taskId: channel.taskId,
+        projectPath: channel.projectPath,
+        projectKind: channel.projectKind,
+      }));
+  }
+
+  /** Sólo los que están vivos: es lo que la barra superior enseña en verde. */
+  runningServices(): ServiceInfo[] {
+    return this.services().filter((service) => service.status === 'running');
   }
 
   /** Cierra los canales de procesos que ya han terminado. */
@@ -210,6 +301,7 @@ export class PanelView {
         if (channel.url === null) {
           channel.url = url;
           this.renderChannelBar();
+          this.host.servicesChanged();
         }
       }
 
@@ -262,12 +354,18 @@ export class PanelView {
     // Una tarea etiquetada es un proyecto arrancado desde el selector de inicio: canal propio.
     if (task.label) {
       const channel = this.channel(`task:${task.label}`);
+      const meta = this.serviceMeta.get(task.label);
+
       channel.label = task.label;
       channel.kind = 'process';
       channel.taskId = task.taskId;
       channel.status = 'running';
       channel.url = null;
       channel.lines = [];
+      if (meta) {
+        channel.projectPath = meta.projectPath;
+        channel.projectKind = meta.projectKind;
+      }
       this.taskChannel.set(task.taskId, channel.id);
       this.activeChannel = channel.id;
       this.push(channel.id, `❯ ${task.command}`, 'command');
@@ -278,6 +376,7 @@ export class PanelView {
       this.push(this.taskChannel.get(task.taskId) ?? BUILD_CHANNEL, `❯ ${task.command}`, 'command');
     }
 
+    this.host.servicesChanged();
     this.render();
   }
 
@@ -299,6 +398,7 @@ export class PanelView {
     );
 
     this.taskChannel.delete(exit.taskId);
+    this.host.servicesChanged();
     this.render();
   }
 
@@ -353,13 +453,24 @@ export class PanelView {
     }
   }
 
-  /** Repinta sólo la barra de canales: se llama al detectar una URL, sin tocar el log. */
+  /**
+   * Repinta sólo la cabecera de la salida: se llama al detectar una URL, sin tocar el log.
+   *
+   * Repintar el panel entero aquí sería un error caro: la URL aparece a mitad del arranque, justo
+   * cuando el proceso está escupiendo líneas, y un repintado completo por cada una destruiría el
+   * log que se está leyendo.
+   */
   private renderChannelBar(): void {
-    const existing = document.getElementById('channel-bar');
-    if (!existing || this.tab !== 'output') return;
+    if (this.tab !== 'output') return;
 
-    const fresh = this.buildChannelBar();
-    existing.replaceWith(fresh);
+    const bar = document.getElementById('channel-bar');
+    if (bar) bar.replaceWith(this.buildChannelBar());
+
+    const head = document.getElementById('service-head');
+    if (head) {
+      const fresh = this.buildServiceHead(this.channel(this.activeChannel));
+      if (fresh) head.replaceWith(fresh);
+    }
   }
 
   private buildChannelBar(): HTMLElement {
@@ -410,12 +521,106 @@ export class PanelView {
     return bar;
   }
 
+  /**
+   * Cabecera del canal de un proceso.
+   *
+   * Responde de un vistazo a las cuatro preguntas que uno se hace mirando una consola: qué es
+   * esto (nombre + insignia de tipo), si está vivo, en qué URL escucha y cómo pararlo o
+   * reiniciarlo **sin tocar los demás procesos del perfil**.
+   */
+  private buildServiceHead(channel: Channel): HTMLElement | null {
+    if (channel.kind !== 'process') return null;
+
+    const presentation = presentProject(channel.projectKind ?? 'console');
+    const head = el('div', { className: 'service-head', id: 'service-head' });
+
+    head.append(
+      icon(presentation.icon, { size: 15, className: `tone-${presentation.tone}` }),
+      el('span', { className: 'service-name', text: channel.label }),
+      el('span', {
+        className: 'service-badge',
+        text: presentation.badge,
+        title: presentation.description,
+      }),
+      el(
+        'span',
+        { className: `service-status ${channel.status}` },
+        el('span', {
+          className: `channel-dot${channel.status === 'running' ? ' running' : channel.status === 'failed' ? ' failed' : ''}`,
+        }),
+        el('span', { text: STATUS_LABEL[channel.status] }),
+      ),
+    );
+
+    if (channel.url) {
+      const url = channel.url;
+      head.appendChild(
+        el(
+          'button',
+          {
+            className: 'service-link',
+            title: `Abrir ${url} en el navegador`,
+            on: { click: () => this.host.openUrl(url) },
+          },
+          icon('globe', { size: 13 }),
+          el('span', { text: url }),
+          icon('external-link', { size: 11 }),
+        ),
+      );
+    }
+
+    head.appendChild(el('span', { className: 'spacer', style: { flex: '1' } }));
+
+    head.append(
+      el(
+        'button',
+        {
+          className: 'icon-btn small',
+          title: channel.status === 'running' ? `Reiniciar ${channel.label}` : `Volver a arrancar ${channel.label}`,
+          disabled: channel.projectPath === null,
+          on: {
+            click: () =>
+              this.host.restartService({
+                id: channel.id,
+                label: channel.label,
+                status: channel.status,
+                url: channel.url,
+                taskId: channel.taskId,
+                projectPath: channel.projectPath,
+                projectKind: channel.projectKind,
+              }),
+          },
+        },
+        icon('refresh', { size: 13 }),
+      ),
+      el(
+        'button',
+        {
+          className: 'icon-btn small',
+          title: `Detener sólo ${channel.label}`,
+          disabled: channel.status !== 'running' || channel.taskId === null,
+          on: {
+            click: () => {
+              if (channel.taskId) this.host.cancelTask(channel.taskId);
+            },
+          },
+        },
+        icon('stop', { size: 13 }),
+      ),
+    );
+
+    return head;
+  }
+
   private renderOutput(): HTMLElement {
     const container = el('div', { style: { display: 'flex', flexDirection: 'column', height: '100%' } });
 
     if (this.visibleChannels().length > 1) container.appendChild(this.buildChannelBar());
 
     const channel = this.channel(this.activeChannel);
+
+    const head = this.buildServiceHead(channel);
+    if (head) container.appendChild(head);
 
     if (channel.lines.length === 0) {
       container.appendChild(

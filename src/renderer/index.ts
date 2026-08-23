@@ -11,6 +11,7 @@ import type {
   AppSettings,
   BuildDiagnostic,
   DotnetTaskKind,
+  GitFileDiff,
   GitStatus,
   LspState,
   MenuCommand,
@@ -21,6 +22,7 @@ import type { AiContext, AiProviderId, AiStatus, AiTask } from '../shared/ai.js'
 import { architectureLabel, buildContext, detectArchitecture } from '../shared/ai-context.js';
 import type { RunMode, StartupConfig } from '../shared/startup.js';
 import { launchPlan, runnableProjects, shortProjectName } from '../shared/startup.js';
+import { aiEntryState, AI_DISABLED_MESSAGE } from './ai-availability.js';
 import { byId, clear, el } from './dom.js';
 import { installIconGallery } from './icon-gallery.js';
 import { icon, type IconName } from './icons.js';
@@ -30,8 +32,9 @@ import { AiChatView } from './views/ai-chat.js';
 import { InlineAssistant } from './views/ai-inline.js';
 import { EditorView, type OpenTab } from './views/editor.js';
 import { ExplorerView } from './views/explorer.js';
+import { GitView } from './views/git.js';
 import { NuGetView } from './views/nuget.js';
-import { PanelView } from './views/panel.js';
+import { PanelView, type ServiceInfo } from './views/panel.js';
 import { DebugView } from './views/debug.js';
 import { CommandPalette, type Command } from './views/palette.js';
 import { SettingsView } from './views/settings.js';
@@ -40,7 +43,7 @@ import { StatusBar } from './views/statusbar.js';
 import { WelcomeView } from './views/welcome.js';
 import { WizardView } from './views/wizard.js';
 
-type SidebarView = 'explorer' | 'nuget' | 'settings' | 'ai';
+type SidebarView = 'explorer' | 'git' | 'nuget' | 'settings' | 'ai';
 
 class DotForgeApp {
   private info: AppInfo | null = null;
@@ -62,6 +65,9 @@ class DotForgeApp {
     save: (config) => void this.saveStartupConfig(config),
     isRunning: () => this.panel.hasRunningTasks() || this.debug.getState().status !== 'idle',
     notify: (message, level) => this.notify(message, level),
+    services: () => this.panel.services(),
+    focusService: (service) => this.panel.showChannel(service.id),
+    openUrl: (url) => void window.dotforge.app.openExternal(url),
   });
 
   /** Lista blanca de la terminal; el autocompletado la ofrece como primer nivel. */
@@ -119,6 +125,17 @@ class DotForgeApp {
       programs: this.allowedCommands,
     }),
     openUrl: (url) => void window.dotforge.app.openExternal(url),
+    restartService: (service) => void this.restartService(service),
+    servicesChanged: () => this.startupBar.render(),
+  });
+
+  /** Panel de control de código fuente. Comparte contenedor con el resto de la barra lateral. */
+  private readonly gitView = new GitView({
+    notify: (message, level) => this.notify(message, level),
+    openDiff: (diff) => this.openDiff(diff),
+    openFile: (path) => void this.openFile(path),
+    reloadSolution: () => void this.reloadSolution(),
+    statusChanged: () => void this.refreshGit(),
   });
 
   private readonly settingsView = new SettingsView({
@@ -150,7 +167,7 @@ class DotForgeApp {
     buildContext: () => this.buildAiContext(),
     notify: (message, level) => this.notify(message, level),
     openSettings: () => this.showSettings(),
-    isReady: () => this.aiStatus?.ready === true,
+    isReady: () => this.settings?.ai.enabled !== false && this.aiStatus?.ready === true,
   });
 
   private readonly palette = new CommandPalette();
@@ -446,8 +463,17 @@ class DotForgeApp {
     await this.editor.saveAll();
     this.panel.clearFinishedChannels();
 
+    const byPath = new Map((this.solution?.projects ?? []).map((project) => [project.path, project]));
+
     for (const step of steps) {
       const label = shortProjectName(step.projectName, this.solution?.name ?? null);
+      const project = byPath.get(step.projectPath);
+
+      // El canal se declara antes de lanzar: así su pestaña ya sabe si esto es una Web API, un
+      // Blazor o una consola desde la primera línea de salida, y no a posteriori.
+      if (project && step.action !== 'debug') {
+        this.panel.registerService(label, { projectPath: project.path, projectKind: project.kind });
+      }
 
       try {
         if (step.action === 'debug') {
@@ -593,15 +619,66 @@ class DotForgeApp {
       );
 
     const errors = this.panel.getDiagnostics().filter((diagnostic) => diagnostic.severity === 'error').length;
+    const changes = this.git?.dirtyFiles ?? 0;
 
     bar.append(
       button('Explorador de soluciones', 'solution', this.sidebarView === 'explorer', () => this.showExplorer()),
+      this.sourceControlButton(changes),
       button('Generador de arquitecturas', 'wand', false, () => void this.wizard.open()),
       button('Paquetes NuGet', 'package', this.sidebarView === 'nuget', () => this.showNuGet()),
       button('Depuración y pruebas', 'bug', false, () => this.panel.show('debug'), errors > 0),
-      button('DotForge AI Assistant', 'sparkles', this.sidebarView === 'ai', () => this.showAi()),
+      this.aiButton(),
       el('div', { className: 'spacer' }),
       button('Ajustes', 'settings', this.sidebarView === 'settings', () => this.showSettings()),
+    );
+  }
+
+  /** Control de código fuente, con el número de archivos con cambios como insignia. */
+  private sourceControlButton(changes: number): HTMLElement {
+    return el(
+      'button',
+      {
+        className: `activity-item${this.sidebarView === 'git' ? ' active' : ''}`,
+        title: changes > 0 ? `Control de código fuente — ${changes} cambio(s)` : 'Control de código fuente',
+        attrs: { 'aria-label': 'Control de código fuente' },
+        on: { click: () => this.showGit() },
+      },
+      icon('source-control', { size: 20 }),
+      changes > 0 ? el('span', { className: 'activity-count', text: changes > 99 ? '99+' : String(changes) }) : null,
+    );
+  }
+
+  /**
+   * Icono del asistente.
+   *
+   * Con el asistente apagado en Ajustes el icono **sigue ahí**, atenuado y sin navegar a ninguna
+   * parte, y el tooltip dice dónde se enciende. Un icono que desaparece no enseña nada: quien lo
+   * apagó hace tres semanas no sabría que existe.
+   */
+  private aiButton(): HTMLElement {
+    const state = aiEntryState(
+      this.settings?.ai.enabled ?? this.aiStatus?.enabled ?? true,
+      this.aiStatus?.ready === true,
+    );
+
+    return el(
+      'button',
+      {
+        className: `${state.className}${this.sidebarView === 'ai' && state.navigates ? ' active' : ''}`,
+        title: state.title,
+        attrs: {
+          'aria-label': state.title,
+          'aria-disabled': String(state.disabled),
+        },
+        on: {
+          click: () => {
+            // Deshabilitado: se bloquea la navegación y no se hace absolutamente nada.
+            if (!state.navigates) return;
+            this.showAi();
+          },
+        },
+      },
+      icon('sparkles', { size: 20 }),
     );
   }
 
@@ -609,10 +686,15 @@ class DotForgeApp {
   private showSidebar(view: SidebarView): void {
     this.sidebarView = view;
     this.explorer.setVisible(view === 'explorer');
+    this.gitView.setVisible(view === 'git');
     this.nuget.setVisible(view === 'nuget');
     this.settingsView.setVisible(view === 'settings');
     this.aiChat.setVisible(view === 'ai');
     this.renderActivityBar();
+  }
+
+  private showGit(): void {
+    this.showSidebar('git');
   }
 
   private showSettings(): void {
@@ -620,6 +702,13 @@ class DotForgeApp {
   }
 
   private showAi(): void {
+    // El interruptor de Ajustes manda también aquí: la paleta y el menú nativo llegan por este
+    // mismo camino, así que basta con comprobarlo una vez.
+    if (this.settings?.ai.enabled === false) {
+      this.notify(AI_DISABLED_MESSAGE, 'warn');
+      return;
+    }
+
     this.aiChat.setArchitecture(architectureLabel(detectArchitecture(this.solution)));
     this.showSidebar('ai');
   }
@@ -717,7 +806,20 @@ class DotForgeApp {
     }
 
     // Cambiar de proveedor o de modelo cambia si el asistente está listo: hay que releerlo.
-    if (patch.ai !== undefined) void this.refreshAiStatus();
+    // Y encender o apagar el asistente cambia su icono de la barra de actividad.
+    if (patch.ai !== undefined) {
+      this.renderActivityBar();
+      void this.refreshAiStatus();
+    }
+
+    // El nivel de salida cambia el comando de la próxima tarea, no la que ya está corriendo:
+    // decirlo evita el "pues a mí me sigue saliendo lo mismo".
+    if (patch.dotnetVerbosity !== undefined) {
+      this.notify(
+        `Nivel de salida de .NET: ${patch.dotnetVerbosity}. Se aplica a la próxima compilación o ejecución.`,
+        'info',
+      );
+    }
   }
 
   // -------------------------------------------------------------------------------------------
@@ -729,6 +831,7 @@ class DotForgeApp {
       this.aiStatus = await window.dotforge.ai.status();
       this.aiChat.setStatus(this.aiStatus);
       this.settingsView.render();
+      this.renderActivityBar();
     } catch {
       // Sin estado del asistente el IDE sigue siendo un IDE: no se rompe nada.
     }
@@ -785,6 +888,11 @@ class DotForgeApp {
    * un método marcado sería ignorar lo único que había dicho.
    */
   private askAi(action: 'explain' | 'tests' | 'fix'): void {
+    if (this.settings?.ai.enabled === false) {
+      this.notify(AI_DISABLED_MESSAGE, 'warn');
+      return;
+    }
+
     const tab = this.editor.activeTab();
     if (!tab) {
       this.notify('Abre un archivo antes de preguntarle al asistente.', 'warn');
@@ -851,21 +959,76 @@ class DotForgeApp {
     });
   }
 
-  /** Refresca el estado de Git y repinta la barra si ha cambiado. */
+  /** Refresca el estado de Git y repinta lo que dependa de él si ha cambiado. */
   private async refreshGit(): Promise<void> {
     try {
       const status = await window.dotforge.git.status();
       const changed = status?.branch !== this.git?.branch || status?.dirtyFiles !== this.git?.dirtyFiles;
       this.git = status;
-      if (changed) this.renderStatus();
+
+      if (changed) {
+        this.renderStatus();
+        // La insignia del icono de control de fuentes cuenta los archivos con cambios.
+        this.renderActivityBar();
+      }
 
       // Las ramas alimentan el autocompletado de la terminal. El servicio del proceso principal
       // cachea 15 s, así que este sondeo no lanza un `git branch` cada seis segundos.
       if (status) this.branches = await window.dotforge.git.branches();
       else this.branches = [];
+
+      // El panel sólo se relee si está a la vista: es una llamada más y no la paga quien no mira.
+      if (changed && this.gitView.isVisible()) void this.gitView.refresh();
     } catch {
       this.git = null;
       this.branches = [];
+    }
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // Control de código fuente
+  // -------------------------------------------------------------------------------------------
+
+  /** Abre una comparación en el editor de diferencias y deja la pestaña activa. */
+  private openDiff(diff: GitFileDiff): void {
+    this.editor.openDiff(diff);
+    this.updateTitle();
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // Procesos en marcha
+  // -------------------------------------------------------------------------------------------
+
+  /**
+   * Reinicia un solo proceso del perfil.
+   *
+   * Es lo que falta cuando se arrancan tres proyectos y sólo uno hay que rearrancar: parar todo y
+   * volver a darle a Play cuesta el tiempo de arranque de los otros dos. Se para el suyo, se
+   * espera a que muera de verdad y se vuelve a lanzar con el mismo modo del selector.
+   */
+  private async restartService(service: ServiceInfo): Promise<void> {
+    const project = this.solution?.projects.find((entry) => entry.path === service.projectPath);
+    if (!project) {
+      this.notify('No se sabe de qué proyecto salió ese proceso: vuelve a arrancar el perfil.', 'warn');
+      return;
+    }
+
+    if (service.taskId) {
+      await window.dotforge.dotnet.cancelTask(service.taskId).catch(() => undefined);
+    }
+
+    await this.editor.saveAll();
+
+    const label = shortProjectName(project.name, this.solution?.name ?? null);
+    const kind: DotnetTaskKind = this.startupBar.mode() === 'run' && project.isWebProject ? 'watch' : 'run';
+
+    this.panel.registerService(label, { projectPath: project.path, projectKind: project.kind });
+
+    try {
+      await window.dotforge.dotnet.runTask({ kind, target: project.path, label });
+      this.panel.showChannel(service.id);
+    } catch (error) {
+      this.notify(`No se ha podido reiniciar ${label}: ${this.messageOf(error)}`, 'error');
     }
   }
 
@@ -1039,6 +1202,14 @@ class DotForgeApp {
         run: () => this.showExplorer(),
       },
       {
+        id: 'view.source-control',
+        icon: 'source-control',
+        title: 'Control de código fuente',
+        group: 'Ver',
+        keybinding: `${modifier}+Shift+G`,
+        run: () => this.showGit(),
+      },
+      {
         id: 'view.nuget',
         icon: 'package',
         title: 'Paquetes NuGet',
@@ -1150,6 +1321,46 @@ class DotForgeApp {
         title: 'DotForge AI: empezar una conversación nueva',
         group: 'IA',
         run: () => this.aiChat.reset(),
+      },
+      {
+        id: 'git.commit',
+        icon: 'git-commit',
+        title: 'Git: confirmar los cambios preparados',
+        group: 'Git',
+        run: () => {
+          this.showGit();
+          this.gitView.commit();
+        },
+      },
+      {
+        id: 'git.push',
+        icon: 'upload',
+        title: 'Git: publicar (push)',
+        group: 'Git',
+        run: () => {
+          this.showGit();
+          this.gitView.push();
+        },
+      },
+      {
+        id: 'git.pull',
+        icon: 'download',
+        title: 'Git: traer del remoto (pull)',
+        group: 'Git',
+        run: () => {
+          this.showGit();
+          this.gitView.pull();
+        },
+      },
+      {
+        id: 'git.sync',
+        icon: 'refresh',
+        title: 'Git: sincronizar (pull + push)',
+        group: 'Git',
+        run: () => {
+          this.showGit();
+          this.gitView.sync();
+        },
       },
       {
         id: 'help.about',

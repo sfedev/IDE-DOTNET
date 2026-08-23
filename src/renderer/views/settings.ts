@@ -11,6 +11,8 @@
 import type { AiProbeResult, AiProviderId, AiSettings, AiStatus } from '../../shared/ai.js';
 import { AI_PROVIDERS, providerInfo } from '../../shared/ai.js';
 import type { AppSettings } from '../../shared/contracts.js';
+import type { DotnetVerbosity } from '../../shared/dotnet-verbosity.js';
+import { DOTNET_VERBOSITY_INFO, verbosityInfo } from '../../shared/dotnet-verbosity.js';
 import { byId, clear, el } from '../dom.js';
 import { icon, type IconName } from '../icons.js';
 
@@ -92,6 +94,8 @@ export class SettingsView {
           (value) => this.host.apply({ autoSave: value }),
         ),
       ]),
+
+      this.dotnetGroup(settings.dotnetVerbosity),
 
       this.group('Lenguaje', [
         this.toggleRow('IntelliSense de C#', settings.lspEnabled, (value) =>
@@ -217,6 +221,40 @@ export class SettingsView {
     select.addEventListener('change', () => onChange(select.value));
 
     return el('div', { className: 'settings-row settings-row-stacked' }, el('span', { text: label }), select);
+  }
+
+  // --- Herramientas de .NET ------------------------------------------------------------------------
+
+  /**
+   * Nivel de salida de la CLI de .NET.
+   *
+   * Un solo ajuste para `build`, `run`, `watch`, `test` y la depuración. Está aquí y no escondido
+   * en un archivo porque es lo primero que hay que subir cuando algo "no arranca y no dice por
+   * qué", y bajar cuando la salida estorba.
+   */
+  private dotnetGroup(current: DotnetVerbosity): HTMLElement {
+    const rows: HTMLElement[] = [
+      this.selectRow(
+        'Nivel de salida de .NET CLI',
+        DOTNET_VERBOSITY_INFO.map((entry) => [entry.id, entry.label] as [string, string]),
+        current,
+        (value) => this.host.apply({ dotnetVerbosity: value as DotnetVerbosity }),
+      ),
+      el('p', { className: 'settings-note', text: verbosityInfo(current).hint }),
+    ];
+
+    if (current === 'detailed' || current === 'diagnostic') {
+      rows.push(
+        el('p', {
+          className: 'settings-note warn',
+          text:
+            'Con este nivel se recopilan también las excepciones de la aplicación, las variables ' +
+            'de entorno de ASP.NET Core y las trazas de arranque. La salida crece mucho.',
+        }),
+      );
+    }
+
+    return this.group('Herramientas de .NET', rows);
   }
 
   // --- Asistente de IA ---------------------------------------------------------------------------

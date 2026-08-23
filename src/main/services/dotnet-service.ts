@@ -15,6 +15,12 @@ import type {
   DotnetTaskRequest,
   DotnetTaskStarted,
 } from '../../shared/contracts.js';
+import type { DotnetVerbosity } from '../../shared/dotnet-verbosity.js';
+import {
+  DEFAULT_DOTNET_VERBOSITY,
+  verbosityEnvironment,
+  verbosityPlan,
+} from '../../shared/dotnet-verbosity.js';
 import { detectApplicationUrl, parseMsBuildDiagnostics } from './msbuild-diagnostics.js';
 import * as registry from './process-registry.js';
 
@@ -39,16 +45,27 @@ const TASK_ARGS: Record<DotnetTaskKind, string[]> = {
 /** Tareas que no terminan solas: la UI debe ofrecer un botón de parada. */
 export const LONG_RUNNING: ReadonlySet<DotnetTaskKind> = new Set<DotnetTaskKind>(['run', 'watch']);
 
-function buildArgs(request: DotnetTaskRequest): string[] {
-  const base = [...TASK_ARGS[request.kind]];
-  const args = [...base, request.target, ...(request.extraArgs ?? [])];
+/**
+ * Línea de argumentos de una tarea, con la verbosidad ya inyectada.
+ *
+ * La posición no es un detalle: `dotnet watch` quiere su bandera **antes** del subcomando (todo
+ * lo que va después se lo pasa a la aplicación hija), mientras que `--verbosity` de MSBuild va
+ * detrás del objetivo. Los argumentos extra se dejan siempre los últimos: si alguno abre la
+ * sección de argumentos de la aplicación (`--`), lo nuestro ya ha quedado del lado de la CLI.
+ */
+function buildArgs(request: DotnetTaskRequest, verbosity: DotnetVerbosity): string[] {
+  const [verb, ...rest] = TASK_ARGS[request.kind];
+  const plan = verbosityPlan(request.kind, verbosity);
 
   // `dotnet run` y `dotnet watch` reciben el proyecto tras `--project`; el resto lo reciben suelto.
-  if (request.kind === 'run' || request.kind === 'watch') {
-    return args;
-  }
-
-  return args;
+  return [
+    verb ?? request.kind,
+    ...plan.leading,
+    ...rest,
+    request.target,
+    ...plan.trailing,
+    ...(request.extraArgs ?? []),
+  ];
 }
 
 /**
@@ -59,9 +76,13 @@ function workingDirectory(target: string): string {
   return extname(target) === '' ? target : dirname(target);
 }
 
-export function runTask(request: DotnetTaskRequest, callbacks: DotnetTaskCallbacks): DotnetTaskStarted {
+export function runTask(
+  request: DotnetTaskRequest,
+  callbacks: DotnetTaskCallbacks,
+  verbosity: DotnetVerbosity = DEFAULT_DOTNET_VERBOSITY,
+): DotnetTaskStarted {
   const taskId = randomUUID();
-  const args = buildArgs(request);
+  const args = buildArgs(request, verbosity);
   const cwd = workingDirectory(request.target);
 
   const started: DotnetTaskStarted = {
@@ -83,6 +104,9 @@ export function runTask(request: DotnetTaskRequest, callbacks: DotnetTaskCallbac
       DOTNET_SYSTEM_CONSOLE_ALLOW_ANSI_COLOR_REDIRECTION: '0',
       // El parser de diagnósticos entiende inglés y español, pero en inglés es más fiable.
       DOTNET_CLI_UI_LANGUAGE: 'en',
+      // Verbosidad alta: registro de la aplicación, errores detallados de ASP.NET Core y, en
+      // `diagnostic`, la traza de resolución de ensamblados del host.
+      ...verbosityEnvironment(verbosity),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,

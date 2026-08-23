@@ -4,7 +4,7 @@ Bitácora viva de desarrollo. Se actualiza **en cada iteración** del bucle de t
 
 - **Proyecto:** DotForge IDE — distribución de IDE para C# / .NET 9+ / Blazor
 - **Inicio:** 2026-08-23
-- **Estado global:** 🟢 Completado — v1.4.0 empaquetada y verificada
+- **Estado global:** 
 
 Leyenda: `[ ]` pendiente · `[~]` en curso · `[x]` completado y **verificado con un comando**
 
@@ -179,6 +179,27 @@ por tanto **compila** pero no **ejecuta** los proyectos generados. Se añade el 
 - [x] F10.11 Sección "Asistente de IA" en los ajustes, con "Probar conexión" y control del contexto enviado
 - [x] F10.12 Modo de diagnóstico `--ui=ai` y menú nativo "IA"
 - [x] F10.13 Pruebas: 113 nuevas (proveedores, contexto RAG, diferencias y streaming de punta a punta)
+
+### Fase 11 — Control de fuentes, procesos visibles y logs de .NET
+- [x] F11.1 Modelo puro del control de fuentes (`src/shared/git.ts`): parseo de `git status --porcelain --branch`
+- [x] F11.2 Servicio de git en el proceso principal: preparar, quitar, descartar, commit, push, pull, sync, ramas
+- [x] F11.3 Contratos IPC `git:repository`, `git:stage`, `git:unstage`, `git:discard`, `git:commit`,
+      `git:push`, `git:pull`, `git:sync`, `git:checkout`, `git:create-branch`, `git:file-diff`
+- [x] F11.4 Icono dedicado en la barra de actividad, con insignia del número de archivos con cambios
+- [x] F11.5 Panel con secciones colapsables "Cambios preparados" y "Cambios", letras M/A/D/U y acciones al pasar el ratón
+- [x] F11.6 Editor de diferencias lado a lado de Monaco, con pestaña propia y modelos `dotforge-diff:`
+- [x] F11.7 Caja de mensaje multilínea con `Ctrl+Enter` / `Cmd+Enter` y enmienda del último commit
+- [x] F11.8 Botones Commit / Push / Pull / Sync con indicador de adelanto y retraso
+- [x] F11.9 Selector de rama en la cabecera, con creación de rama (`git checkout -b`)
+- [x] F11.10 Pastillas de estado por proceso en la barra superior, con puerto y color de estado
+- [x] F11.11 Clic en una pastilla enfoca el canal de salida de ese proceso
+- [x] F11.12 Cabecera de canal: nombre, insignia de tipo, estado, enlace HTTPS y reinicio/parada individuales
+- [x] F11.13 Ajuste "Nivel de salida de .NET CLI" (Minimal / Normal / Detailed / Diagnostic)
+- [x] F11.14 Inyección de la verbosidad en `build`, `run`, `watch`, `test`, `clean`, `restore` y `format`
+- [x] F11.15 Entorno extendido en niveles altos: registro de ASP.NET Core, errores detallados y traza del host
+- [x] F11.16 El interruptor del asistente de IA atenúa su icono, bloquea la navegación y explica dónde encenderlo
+- [x] F11.17 Modos de diagnóstico `--ui=git`, `--ui=git-diff`, `--ui=startup-play`, `--ui=ai-toggle`, `--wait=`, `--ui-wait=`
+- [x] F11.18 Pruebas: 98 nuevas (parseo de git, diff de Monaco, verbosidad, conmutador de IA y servicio de git real)
 
 ---
 
@@ -1098,3 +1119,158 @@ romperla — que es lo único que un asistente genérico no puede hacer.
 
 **Versión:** el módulo de IA es funcionalidad nueva, con contratos IPC nuevos y sin romper nada de
 lo anterior, así que por semver le corresponde el segundo número: 1.3.1 → **1.4.0** (ADR-009).
+
+---
+
+### ADR-020 — El control de fuentes invoca `git`, no una librería de JavaScript
+**Fecha:** 2026-08-23
+**Contexto:** El panel necesita estado, diffs y operaciones de escritura sobre el repositorio.
+**Opciones:**
+- (a) `isomorphic-git`: implementación pura en JS, sin binario externo.
+- (b) `nodegit`: enlaces nativos a libgit2; hay que compilarlos por plataforma.
+- (c) Invocar el `git` del sistema con `execFile` y un array de argumentos.
+**Decisión:** (c) el `git` del sistema.
+**Consecuencias:** worktrees, submódulos, `core.autocrlf`, hooks, credential helpers, HEAD
+desprendido y repositorios sin commits funcionan **igual que en la terminal del usuario**, porque
+es literalmente el mismo programa. No se añade ninguna dependencia ni ningún binario al paquete, y
+el servicio no importa `electron`, así que se puede probar contra un repositorio real con Node
+pelado. A cambio, sin git instalado el panel dice que no hay repositorio en vez de funcionar a
+medias — que es la respuesta honesta.
+
+### ADR-021 — El editor de diferencias usa modelos propios y es de sólo lectura
+**Fecha:** 2026-08-23
+**Contexto:** Al pulsar un archivo del panel hay que enseñar una comparación lado a lado.
+**Opciones:**
+- (a) Reutilizar el modelo `file:` del archivo como lado derecho: se edita en el diff y se guarda.
+- (b) Crear dos modelos nuevos con un esquema propio (`dotforge-diff:`) y bloquear la edición.
+**Decisión:** (b), con una pestaña propia por comparación (`git:<sección>:<ruta>`).
+**Consecuencias:** editar dentro del diff no ensucia la pestaña del archivo ni manda cambios al
+servidor de lenguaje de un documento que nadie ha abierto, y el mismo archivo puede estar abierto
+a la vez como "lo preparado" y como "lo que falta por preparar", que son dos comparaciones
+distintas. El precio: para editar hay que abrir el archivo, a un doble clic de distancia.
+
+### ADR-022 — La verbosidad la decide el proceso principal y se traduce por verbo
+**Fecha:** 2026-08-23
+**Contexto:** Un solo ajuste debe gobernar `build`, `run`, `watch`, `test`, `clean`, `restore`,
+`format` y la sesión de depuración.
+**Decisión:** el nivel se guarda en preferencias, lo lee **el proceso principal** al lanzar cada
+tarea —el renderer no puede elegirlo, igual que con el prompt del asistente (ADR-016)— y una
+función pura (`verbosityPlan`) decide qué argumento le corresponde a cada verbo y en qué posición.
+**Consecuencias:** `dotnet watch` recibe `--verbose` **antes** del subcomando y nunca
+`--verbosity`, porque todo lo que va después se lo pasa a la aplicación hija; el resto recibe
+`--verbosity <nivel>` detrás del objetivo. El nivel se escribe siempre, incluso `minimal`, para que
+el comando que aparece en la salida diga la verdad. Y "recopilar todas las excepciones" no es una
+bandera de MSBuild: son variables de entorno (`Logging__LogLevel__*`, `ASPNETCORE_DETAILEDERRORS`,
+`COREHOST_TRACE`), que viven en la misma función para que nivel y comportamiento no se separen.
+
+### ADR-023 — Una herramienta desactivada se atenúa, no desaparece
+**Fecha:** 2026-08-23
+**Contexto:** Al apagar el asistente en Ajustes, ¿qué pasa con su icono de la barra de actividad?
+**Opciones:** (a) quitarlo de la barra, (b) dejarlo igual y fallar al pulsarlo, (c) atenuarlo,
+bloquear la navegación y explicar en el tooltip dónde se enciende.
+**Decisión:** (c).
+**Consecuencias:** quien apagó el asistente hace tres semanas puede volver a encontrarlo; quien lo
+pulsa no acaba en un panel roto ni en un error. La regla vive en una función pura
+(`aiEntryState`) que usan la barra, la paleta y el asistente en línea, de modo que el interruptor
+significa lo mismo en los tres sitios. Se aplica igual a cualquier herramienta futura que se pueda
+desactivar.
+
+### ADR-024 — `pull --ff-only` y confirmación nombrando la consecuencia
+**Fecha:** 2026-08-23
+**Contexto:** Dos operaciones del panel pueden dejar el repositorio en un estado que el usuario no
+esperaba: traer cambios y descartar cambios.
+**Decisión:** `pull` se ejecuta siempre con `--ff-only`, y descartar pide confirmación diciendo
+explícitamente qué va a pasar con **estos** archivos.
+**Consecuencias:** una fusión o un rebase automáticos disparados por un botón son la forma más
+rápida de dejar a alguien con un conflicto que no sabe de dónde ha salido; si no se puede avanzar,
+el panel lo dice y deja la decisión en la terminal. Y como "descartar" significa restaurar un
+archivo con seguimiento pero **borrar** uno sin rastrear, la confirmación distingue los dos casos
+y cuenta cuántos hay de cada uno, en vez de un "¿estás seguro?" genérico.
+
+---
+
+### Iteración 14 — 2026-08-23 — Fase 11: Git visual, procesos visibles y logs de .NET
+**Objetivo:** cerrar las tres cosas que obligaban a salir del IDE —ver qué has cambiado, ver qué
+tienes corriendo y ver por qué algo no arranca— y hacer que el interruptor del asistente signifique
+algo en la interfaz.
+
+**Módulo 1 — Panel de control de código fuente.**
+- `src/shared/git.ts`: modelo puro. Parseo de `git status --porcelain --branch` con renombrados,
+  conflictos, rutas entrecomilladas, HEAD desprendido y "No commits yet"; resumen de
+  sincronización; y la construcción de la petición de diferencias (qué lado sale de HEAD, cuál del
+  índice y cuál del disco).
+- `src/main/services/git-service.ts`: el servicio entero. Estado detallado con caché corta,
+  preparar, quitar de preparados, descartar, commit (con enmienda), push con `--set-upstream`
+  automático la primera vez, pull, sync, cambio y creación de rama, y contenido de cada lado del
+  diff. Todo con `execFile` y array de argumentos, y con `GIT_TERMINAL_PROMPT=0` para que un
+  remoto que pide credenciales falle en vez de colgar el IDE.
+- `src/renderer/views/git.ts`: la vista. Secciones colapsables, letras `M`/`A`/`D`/`U`, acciones al
+  pasar el ratón (`+`, `-`, `↩`), caja de mensaje con `Ctrl+Enter`, botones Commit/Push/Pull/Sync
+  con contadores `↑n ↓m` y selector de rama con creación incluida.
+- Editor de diferencias lado a lado en el hueco del editor, con pestaña propia y cierre.
+
+**Módulo 2 — Procesos visibles.**
+- La barra superior pinta una pastilla por proceso arrancado, con su color de estado y su puerto;
+  un clic enfoca su canal y un clic en el puerto abre la aplicación en el navegador.
+- Cada canal de salida gana una cabecera con el nombre del proyecto, su insignia de tipo (Web API,
+  Blazor, CLI…), el estado, el enlace HTTPS y botones para reiniciar o detener **sólo ese** proceso.
+
+**Módulo 3 — Verbosidad de la CLI de .NET.**
+- Ajuste nuevo con los cuatro niveles y su traducción a argumentos y variables de entorno
+  (ADR-022), aplicada también al entorno del proceso que lanza el depurador.
+
+**Módulo 4 — Estado del asistente de IA.**
+- `src/renderer/ai-availability.ts` y ADR-023: icono atenuado, sin navegación y con el mensaje
+  "El asistente de IA está deshabilitado. Puedes activarlo desde la configuración".
+
+**Errores encontrados y solucionados:**
+1. *Síntoma:* `commit` con el índice vacío devolvía "El commit ha fallado" en vez de "no hay nada
+   preparado".
+   *Causa raíz:* la detección buscaba `nothing to commit` en la salida de git, y en un Windows en
+   español git responde en español. Una regex sobre mensajes traducidos es una bomba de relojería.
+   *Arreglo:* se decide mirando el índice **antes** de llamar a git. Lo destapó la prueba contra un
+   repositorio real (`tests/unit/git-service.test.mjs`), no un usuario.
+2. *Síntoma:* la acción de diagnóstico `--ui=` no hacía nada al arrancar con una solución abierta.
+   *Causa raíz:* pulsaba a los 3,2 s fijos, y con un workspace abierto la interfaz todavía está
+   cargando Monaco y leyendo la solución: el control aún no existía. Sin error, sin aviso y sin
+   efecto — el peor tipo de fallo.
+   *Arreglo:* `--ui-wait=<ms>` para la pulsación y `--wait=<ms>` para la medida o la captura.
+3. *Síntoma (evitado):* la fila de archivo llamaba a `openFile` con la ruta **relativa** al
+   repositorio.
+   *Causa raíz:* la raíz del repositorio no tiene por qué ser la carpeta abierta (un monorepo, o
+   abrir una subcarpeta).
+   *Arreglo:* la raíz viaja dentro del estado (`GitRepositoryStatus.root`) y la vista compone la
+   ruta absoluta con ella.
+4. *Síntoma:* añadir el icono de control de fuentes rompió `--ui=settings`, `--ui=ai` y compañía.
+   *Causa raíz:* esas acciones pulsan por índice posicional dentro de `.activity-item`.
+   *Arreglo:* índices actualizados y el orden de la barra escrito en un comentario justo encima,
+   para que la próxima herramienta que se añada no vuelva a romperlos en silencio.
+5. *Aviso del entorno:* en Windows, `core.autocrlf` devuelve el archivo restaurado con CRLF aunque
+   el blob esté en LF. Comparar byte a byte en la prueba comprobaba la configuración de git del
+   equipo, no el servicio: se normaliza antes de comparar.
+
+**Verificado sobre la aplicación real** (con `--ui=`, `--probe=` y una solución generada de verdad):
+- Panel de git sobre este mismo repositorio: `{"title":"Control de código fuente","branch":"master",
+  "sections":["Cambios preparados","Cambios"],"counts":["0","27"]}`, con la letra correcta por
+  archivo.
+- Comparación abierta desde el panel: `diffVisible: true`, pestaña
+  `debug-controller.ts (Índice ↔ Local)` y dos modelos `dotforge-diff:` de 313 y 333 líneas — el
+  lado izquierdo sale del índice y el derecho del disco.
+- Perfil multiproyecto de una solución hexagonal generada al vuelo (net10.0, Web + Blazor):
+  pastillas `Adapters.Web:5585` y `Adapters.Blazor:5587` en verde y cabecera de canal
+  `Adapters.Blazor · Blazor · En ejecución · https://localhost:5587`.
+- Verbosidad en `detailed`: el comando que aparece en la salida es
+  `❯ dotnet watch --verbose --project …`, no `--verbosity detailed` — que es justo lo que exige la
+  CLI de watch.
+- Asistente apagado desde Ajustes: `class="activity-item disabled"`, `aria-disabled="true"`,
+  `opacity: 0.38`, el tooltip exacto y el clic sin efecto (`blocked: true`); al volver a
+  encenderlo, el icono recupera su comportamiento normal.
+- `npm test` en verde de punta a punta: **694 pruebas** (540 unit, 41 security, 57 package, 56
+  scaffold), de las cuales 98 son nuevas de esta fase. `--smoke-test` → `SMOKE_OK`.
+- Empaquetado real: `npm run dist:win` → `DotForge IDE-1.5.0-Setup-x64.exe` (117,3 MB) y
+  `DotForge IDE-1.5.0-win-x64.zip` (161,6 MB); la poda liberó los 279,0 MB de la 1.4.0 antes de
+  empaquetar y `verify:dist --require win` termina sin problemas (sin firmar, como corresponde sin
+  certificado).
+
+**Versión:** funcionalidad nueva, con contratos IPC nuevos y sin romper nada de lo anterior:
+1.4.0 → **1.5.0** (ADR-009).

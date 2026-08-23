@@ -7,7 +7,8 @@
  */
 import type * as MonacoApi from 'monaco-editor';
 
-import type { AppSettings, EditorDocument } from '../../shared/contracts.js';
+import type { AppSettings, EditorDocument, GitFileDiff } from '../../shared/contracts.js';
+import { diffKey } from '../../shared/git.js';
 import { baseName, byId, clear, el } from '../dom.js';
 import { didChange, didClose, didOpen, didSave } from '../lsp-bridge.js';
 import { iconForFile } from '../file-icons.js';
@@ -26,6 +27,22 @@ export interface OpenTab {
   mtimeMs: number;
 }
 
+/**
+ * Pestaña de comparación abierta desde el control de código fuente.
+ *
+ * Se guarda aparte de las pestañas de archivo porque no es un archivo: no se guarda, no ensucia,
+ * no habla con el servidor de lenguaje y sus dos modelos son de sólo lectura.
+ */
+export interface DiffTab {
+  key: string;
+  title: string;
+  name: string;
+  /** Ruta absoluta del archivo real, para poder abrirlo desde la comparación. */
+  path: string;
+  original: MonacoApi.editor.ITextModel;
+  modified: MonacoApi.editor.ITextModel;
+}
+
 export interface EditorHost {
   /** Clic en el margen izquierdo: poner o quitar un breakpoint. */
   onGutterClick(path: string, line: number): void;
@@ -39,6 +56,11 @@ export class EditorView {
   private editor: MonacoApi.editor.IStandaloneCodeEditor | null = null;
   private readonly tabs = new Map<string, OpenTab>();
   private activePath: string | null = null;
+
+  /** Editor de diferencias, creado la primera vez que se abre una comparación. */
+  private diffEditor: MonacoApi.editor.IStandaloneDiffEditor | null = null;
+  private readonly diffTabs = new Map<string, DiffTab>();
+  private activeDiff: string | null = null;
   private autoSaveTimer: number | undefined;
   private settings: AppSettings | null = null;
   private readonly disposables: MonacoApi.IDisposable[] = [];
@@ -126,6 +148,11 @@ export class EditorView {
       minimap: { enabled: settings.minimap },
       theme: settings.theme === 'dotforge-light' ? LIGHT_THEME : DARK_THEME,
     });
+
+    this.diffEditor?.updateOptions({
+      fontFamily: settings.fontFamily,
+      fontSize: settings.fontSize,
+    });
   }
 
   listTabs(): OpenTab[] {
@@ -203,6 +230,7 @@ export class EditorView {
     }
 
     this.activePath = path;
+    this.activeDiff = null;
     this.editor.setModel(tab.model);
     if (tab.viewState) this.editor.restoreViewState(tab.viewState);
 
@@ -416,20 +444,137 @@ export class EditorView {
     this.editor?.focus();
   }
 
-  /** Muestra el editor sólo cuando hay algo abierto; si no, la pantalla de bienvenida. */
+  /**
+   * Reparte el hueco central entre los tres inquilinos: el editor, el editor de diferencias y la
+   * pantalla de bienvenida. Sólo uno se ve a la vez, y la bienvenida sólo cuando no hay nada
+   * abierto de ninguno de los dos tipos.
+   */
   private updateVisibility(): void {
-    const hasTabs = this.tabs.size > 0;
-    byId('editor-host').classList.toggle('hidden', !hasTabs);
-    byId('welcome').classList.toggle('hidden', hasTabs);
+    const showingDiff = this.activeDiff !== null;
+    const hasCode = this.activePath !== null;
+    const hasAnything = this.tabs.size > 0 || this.diffTabs.size > 0;
+
+    byId('editor-host').classList.toggle('hidden', showingDiff || !hasCode);
+    byId('diff-host').classList.toggle('hidden', !showingDiff);
+    byId('welcome').classList.toggle('hidden', hasAnything);
   }
 
-  /** Pinta la barra de pestañas. */
+  // -------------------------------------------------------------------------------------------
+  // Comparación de archivos (control de código fuente)
+  // -------------------------------------------------------------------------------------------
+
+  /**
+   * Abre —o refresca— una comparación lado a lado.
+   *
+   * Los modelos usan un esquema propio (`dotforge-diff:`) y no `file:`: si el lado derecho fuera
+   * el modelo real del archivo, cualquier cambio en la comparación ensuciaría la pestaña del
+   * editor y el servidor de lenguaje recibiría ediciones de un documento que nadie ha abierto.
+   * Los dos lados son de sólo lectura; para editar está la pestaña del archivo, a un doble clic.
+   */
+  openDiff(diff: GitFileDiff): void {
+    const monaco = getMonaco();
+    const key = diffKey(diff.request);
+    const existing = this.diffTabs.get(key);
+
+    if (existing) {
+      // Preparar o descartar cambia el contenido: se actualiza en sitio para no perder el scroll.
+      if (existing.original.getValue() !== diff.original) existing.original.setValue(diff.original);
+      if (existing.modified.getValue() !== diff.modified) existing.modified.setValue(diff.modified);
+      existing.title = diff.request.title;
+    } else {
+      const uriFor = (side: 'original' | 'modified'): MonacoApi.Uri =>
+        monaco.Uri.parse(`dotforge-diff:///${encodeURIComponent(key)}/${side}`);
+
+      const create = (content: string, side: 'original' | 'modified'): MonacoApi.editor.ITextModel => {
+        const uri = uriFor(side);
+        const previous = monaco.editor.getModel(uri);
+        previous?.dispose();
+        return monaco.editor.createModel(content, diff.languageId, uri);
+      };
+
+      this.diffTabs.set(key, {
+        key,
+        title: diff.request.title,
+        name: diff.request.path.split('/').pop() ?? diff.request.path,
+        path: diff.absolutePath,
+        original: create(diff.original, 'original'),
+        modified: create(diff.modified, 'modified'),
+      });
+    }
+
+    this.activateDiff(key);
+    this.renderTabs();
+  }
+
+  private ensureDiffEditor(): MonacoApi.editor.IStandaloneDiffEditor {
+    if (this.diffEditor) return this.diffEditor;
+
+    const monaco = getMonaco();
+    const settings = this.settings;
+
+    this.diffEditor = monaco.editor.createDiffEditor(byId('diff-host'), {
+      automaticLayout: true,
+      // Lado a lado: es la comparación que espera quien viene de cualquier otro cliente de git.
+      renderSideBySide: true,
+      readOnly: true,
+      originalEditable: false,
+      renderOverviewRuler: false,
+      ignoreTrimWhitespace: false,
+      fontFamily: settings?.fontFamily,
+      fontSize: settings?.fontSize,
+      minimap: { enabled: false },
+      scrollBeyondLastLine: false,
+      theme: settings?.theme === 'dotforge-light' ? LIGHT_THEME : DARK_THEME,
+    });
+
+    return this.diffEditor;
+  }
+
+  activateDiff(key: string): void {
+    const tab = this.diffTabs.get(key);
+    if (!tab) return;
+
+    const editor = this.ensureDiffEditor();
+    editor.setModel({ original: tab.original, modified: tab.modified });
+
+    this.activeDiff = key;
+    this.updateVisibility();
+    this.host.onActiveChanged(null);
+  }
+
+  closeDiff(key: string): void {
+    const tab = this.diffTabs.get(key);
+    if (!tab) return;
+
+    tab.original.dispose();
+    tab.modified.dispose();
+    this.diffTabs.delete(key);
+
+    if (this.activeDiff === key) {
+      this.activeDiff = null;
+      this.diffEditor?.setModel(null);
+
+      // Al cerrar la comparación se vuelve a lo que hubiera abierto, no a la bienvenida.
+      const next = this.listTabs().at(-1);
+      if (next) this.activate(next.path);
+      else this.updateVisibility();
+    }
+
+    this.renderTabs();
+  }
+
+  /** Clave de la comparación visible, si hay alguna. Lo usan las pruebas de interfaz. */
+  activeDiffKey(): string | null {
+    return this.activeDiff;
+  }
+
+  /** Pinta la barra de pestañas: primero los archivos, luego las comparaciones. */
   renderTabs(): void {
     const container = byId('tabs');
     clear(container);
 
     for (const tab of this.tabs.values()) {
-      const isActive = tab.path === this.activePath;
+      const isActive = tab.path === this.activePath && this.activeDiff === null;
 
       const spec = iconForFile(tab.name);
 
@@ -480,10 +625,60 @@ export class EditorView {
         ),
       );
     }
+
+    for (const diff of this.diffTabs.values()) {
+      const isActive = diff.key === this.activeDiff;
+
+      container.appendChild(
+        el(
+          'button',
+          {
+            className: `tab tab-diff${isActive ? ' active' : ''}`,
+            title: `${diff.title} — doble clic para abrir el archivo`,
+            role: 'tab',
+            attrs: { 'aria-selected': String(isActive) },
+            on: {
+              click: () => {
+                this.activateDiff(diff.key);
+                this.renderTabs();
+              },
+              auxclick: (event) => {
+                if ((event as MouseEvent).button === 1) {
+                  event.preventDefault();
+                  this.closeDiff(diff.key);
+                }
+              },
+            },
+          },
+          icon('exchange', { size: 14, className: 'tone-project' }),
+          el('span', { className: 'tab-name', text: diff.title }),
+          el(
+            'span',
+            {
+              className: 'tab-close',
+              title: 'Cerrar la comparación',
+              role: 'button',
+              on: {
+                click: (event) => {
+                  event.stopPropagation();
+                  this.closeDiff(diff.key);
+                },
+              },
+            },
+            icon('x', { size: 12, className: 'icon-close' }),
+          ),
+        ),
+      );
+    }
   }
 
   dispose(): void {
     for (const disposable of this.disposables) disposable.dispose();
+    for (const diff of this.diffTabs.values()) {
+      diff.original.dispose();
+      diff.modified.dispose();
+    }
+    this.diffEditor?.dispose();
     this.editor?.dispose();
   }
 }

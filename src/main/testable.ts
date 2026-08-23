@@ -17,6 +17,13 @@ export {
 } from './services/workspace-guard.js';
 
 export { detectApplicationUrl, parseMsBuildDiagnostics, summarize } from './services/msbuild-diagnostics.js';
+/**
+ * El servicio de git entero: no importa `electron`, sólo `node:child_process`, así que las
+ * pruebas pueden ejercitarlo contra un repositorio de verdad creado en un directorio temporal.
+ * Es la única forma honesta de comprobar que preparar, confirmar y descartar hacen lo que dicen.
+ */
+export * as gitService from './services/git-service.js';
+export { toRepositoryPaths } from './services/git-service.js';
 export { findSolutionFile, loadSolution, readProject, IGNORED_DIRECTORIES } from './services/solution-service.js';
 export { languageIdFor } from './services/file-service.js';
 export { describeRecents, firstAvailable, isOpenableWorkspace } from './services/workspace-recents.js';
@@ -103,3 +110,48 @@ export {
   suggestProfileName,
 } from '../shared/startup.js';
 export type { LaunchStep, RunMode, StartupConfig, StartupProfile } from '../shared/startup.js';
+
+// --- Control de código fuente ------------------------------------------------------------------
+// El parseo de `git status`, la construcción del diff y la validación de nombres y mensajes son
+// funciones puras: se ejercitan con salidas reales de git capturadas en las pruebas, sin repo.
+export {
+  buildDiffRequest,
+  describeCount,
+  describeLetter,
+  diffKey,
+  EMPTY_GIT_STATUS,
+  isValidBranchName,
+  MAX_COMMIT_MESSAGE_CHARS,
+  normalizeCommitMessage,
+  parseBranchLine,
+  parseGitStatus,
+  revisionFor,
+  syncSummary,
+  unquotePath,
+} from '../shared/git.js';
+export type {
+  GitBranchState,
+  GitChangeArea,
+  GitChangeLetter,
+  GitDiffRequest,
+  GitDiffSide,
+  GitFileChange,
+  GitRepositoryStatus,
+  GitSyncSummary,
+} from '../shared/git.js';
+
+// --- Verbosidad de la CLI de .NET ----------------------------------------------------------------
+export {
+  coerceVerbosity,
+  debugEnvironment,
+  DEFAULT_DOTNET_VERBOSITY,
+  describeVerbosity,
+  DOTNET_VERBOSITY_INFO,
+  DOTNET_VERBOSITY_LEVELS,
+  verbosityEnvironment,
+  verbosityInfo,
+  verbosityPlan,
+} from '../shared/dotnet-verbosity.js';
+export type { DotnetVerbosity, DotnetVerbosityPlan } from '../shared/dotnet-verbosity.js';
+
+export { DEFAULT_SETTINGS } from '../shared/contracts.js';

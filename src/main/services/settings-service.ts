@@ -10,6 +10,7 @@ import { dirname, join } from 'node:path';
 
 import type { AppSettings } from '../../shared/contracts.js';
 import { DEFAULT_SETTINGS } from '../../shared/contracts.js';
+import { coerceVerbosity } from '../../shared/dotnet-verbosity.js';
 import { coerceAiSettings } from './ai/preferences.js';
 
 let settingsPath: string;
@@ -48,6 +49,10 @@ function coerce(raw: unknown): AppSettings {
   if (typeof source['autoSaveDelayMs'] === 'number' && source['autoSaveDelayMs'] >= 200) {
     settings.autoSaveDelayMs = Math.round(source['autoSaveDelayMs']);
   }
+  // Un nivel desconocido (de otra versión, o escrito a mano) vuelve al de por defecto en vez de
+  // acabar como argumento de `dotnet build`.
+  settings.dotnetVerbosity = coerceVerbosity(source['dotnetVerbosity']);
+
   // El asistente valida sus propias preferencias: el endpoint acaba siendo el destino de una
   // petición con la clave de API dentro, así que no basta con "es una cadena".
   settings.ai = coerceAiSettings(source['ai']);

@@ -14,6 +14,11 @@ Su módulo estrella es el **Scaffolding Wizard**: un generador de arquitecturas 
 que produce soluciones .NET **compilables y ejecutables** siguiendo Clean Architecture,
 Arquitectura Hexagonal (Ports & Adapters) o Domain-Driven Design + CQRS.
 
+Desde la v1.5.0 incluye un **panel visual de control de código fuente** (secciones de preparados y
+cambios, editor de diferencias lado a lado, commit/push/pull/sync y selector de rama), pastillas de
+estado por proceso en la barra superior y un ajuste de **verbosidad de la CLI de .NET** que gobierna
+todo lo que el IDE lanza.
+
 Desde la v1.4.0 incluye el **DotForge AI Assistant**: un asistente que conoce la arquitectura de la
 solución abierta y responde respetando sus reglas (chat con contexto, `Ctrl+I` sobre la selección
 con vista previa de diferencias, y acciones en el menú contextual). Funciona con Anthropic, OpenAI
@@ -39,7 +44,9 @@ IDE-DOTNET/
 │   ├── shared/             # Tipos y contratos compartidos main <-> renderer <-> cli
 │   │   ├── ai.ts               # Catálogo de proveedores/modelos y preferencias del asistente
 │   │   ├── ai-context.ts       # Contexto RAG y prompt de sistema con las reglas de arquitectura
-│   │   └── ai-diff.ts          # Extracción de código y diferencias del asistente en línea
+│   │   ├── ai-diff.ts          # Extracción de código y diferencias del asistente en línea
+│   │   ├── git.ts              # * Modelo del control de fuentes: parseo de status y diffs (puro)
+│   │   └── dotnet-verbosity.ts # * Nivel de salida de la CLI -> argumentos y variables (puro)
 │   ├── scaffold/           # * MODULO ESTRELLA: generador de arquitecturas (Node puro)
 │   │   ├── engine.ts           # Micro motor de plantillas {{token}}
 │   │   ├── generator.ts        # Motor de render + escritura en disco
@@ -53,7 +60,8 @@ IDE-DOTNET/
 │   │   ├── toolchain.ts        # Bundle sin Electron: adquisición de LSP/depurador (fetch + tests)
 │   │   ├── testable.ts         # Bundle sin Electron: rutas, .sln/.csproj, MSBuild (tests)
 │   │   ├── ipc/register.ts     # ÚNICA superficie expuesta al renderer
-│   │   ├── services/           # Solución, NuGet, tareas dotnet, terminal, rutas, ZIP, settings
+│   │   ├── services/           # Solución, NuGet, tareas dotnet, terminal, rutas, ZIP, settings,
+│   │   │                       # git-service.ts (estado y operaciones de control de fuentes)
 │   │   │   └── ai/             # * Asistente de IA: proveedores, streaming y claves cifradas
 │   │   │       ├── request-builder.ts  # Petición HTTP por proveedor (puro)
 │   │   │       ├── stream-parser.ts    # SSE/NDJSON -> deltas (puro)
@@ -64,7 +72,8 @@ IDE-DOTNET/
 │   │   ├── lsp/                # Adquisición y cliente del servidor de lenguaje
 │   │   └── debug/              # NetCoreDbg + bridge DAP + controlador de sesión
 │   └── renderer/           # UI (Monaco, explorador, paneles, wizard, depuración)
-│       ├── icons.ts            # Sistema de iconos: 61 piezas vectoriales propias
+│       ├── icons.ts            # Sistema de iconos: 65 piezas vectoriales propias
+│       ├── ai-availability.ts  # Estado del asistente en la barra de actividad (puro)
 │       ├── icon-gallery.ts     # Galería de revisión visual (modo --icons)
 │       ├── file-icons.ts       # Icono/insignia por archivo, carpeta y proyecto + anidamiento
 │       ├── ui-lib.ts           # Bundle sin DOM de esas reglas, para poder probarlas
@@ -72,7 +81,7 @@ IDE-DOTNET/
 │       ├── terminal-suggest.ts # Motor de sugerencias de la terminal (git y CLI de .NET), sin DOM
 │       ├── run-output.ts       # Detección de la URL en la que escucha un proceso
 │       ├── views/              # explorer, editor, nuget, panel, palette, statusbar, settings,
-│       │                       # welcome, wizard, debug, startup-bar, ai-chat, ai-inline
+│       │                       # welcome, wizard, debug, startup-bar, ai-chat, ai-inline, git
 │       └── styles/             # theme.css (tokens), layout.css, components.css
 ├── resources/              # Iconos multirresolución, branding
 ├── scripts/                # Build, generación de iconos, fetch de toolchain, verificación
@@ -158,7 +167,14 @@ npx electron . --smoke-test
 - `--icons` — sustituye la interfaz por la galería de iconos, a 16 y 24 px.
 - `--ui=<vista>` — abre una vista antes de la captura pulsando los mismos controles que pulsaría
   un usuario (`wizard`, `settings`, `nuget`, `debug`, `ai`, `terminal`, `palette`, `light`,
-  `nesting`, `startup`, `startup-dialog`, `terminal-suggest`).
+  `nesting`, `startup`, `startup-dialog`, `terminal-suggest`, `git`, `git-diff`, `startup-play`,
+  `startup-run-mode`, `ai-toggle`).
+- `--ui-wait=<ms>` — cuánto se espera antes de **pulsar** la acción de `--ui=`. Los 3,2 s por
+  defecto no bastan si se arranca con una solución abierta: la interfaz todavía está cargando
+  Monaco y el control que hay que pulsar aún no existe.
+- `--wait=<ms>` — cuánto se espera antes de **medir** (`--probe=`) o de **capturar**
+  (`--screenshot=`). Sin esto no se puede comprobar nada que tarde, como que `dotnet run` arranque
+  y anuncie su puerto.
 - `--probe=<expresión>` — evalúa una expresión en el renderer y la imprime. Es la forma de zanjar
   una duda sobre CSS: leer el valor calculado en vez de interpretar una captura.
 - `node scripts/read-pixels.mjs <png> <x,y>…` — decodifica una captura y dice el color exacto de
@@ -216,6 +232,33 @@ npx electron . --smoke-test
 - **El renderer nunca inyecta marcado**: ni `innerHTML` para HTML ni para SVG. Los iconos se
   construyen con `createElementNS`.
 - **Densidad:** filas de árbol de 26 px, sangría de 15 px, rejilla base de 8 px.
+
+### Control de código fuente (`src/main/services/git-service.ts`, `src/shared/git.ts`)
+
+- **Se invoca el `git` del sistema** (ADR-020), nunca una librería de JS: `execFile` con array de
+  argumentos, jamás una línea de shell. Así, worktrees, submódulos, hooks y credential helpers se
+  comportan igual que en la terminal del usuario.
+- **El parseo es puro y vive en `src/shared/git.ts`.** Todo lo que entiende `git status --porcelain`
+  se prueba con salidas capturadas; el servicio sólo ejecuta y delega.
+- **Nada de regex sobre los mensajes de git**: están traducidos al idioma del sistema. Las
+  decisiones ("no hay nada preparado") se toman mirando el estado, no la salida.
+- **`GIT_TERMINAL_PROMPT=0` en todas las llamadas.** Sin eso, un `push` contra un remoto que pide
+  credenciales deja el IDE colgado esperando un terminal que no existe.
+- Las rutas que llegan del renderer se normalizan contra la raíz del repositorio
+  (`toRepositoryPaths`) **y** contra el workspace (`assertInsideWorkspace`).
+- El editor de diferencias usa modelos `dotforge-diff:` de sólo lectura (ADR-021): nunca el modelo
+  `file:` del archivo abierto.
+
+### Salida de la CLI de .NET (`src/shared/dotnet-verbosity.ts`)
+
+- Un solo ajuste (`dotnetVerbosity`) gobierna `build`, `run`, `watch`, `test`, `clean`, `restore`,
+  `format` y el entorno del proceso depurado. Lo lee el **proceso principal**, no el renderer.
+- La bandera **no es la misma para todos los verbos**: `dotnet watch` quiere `--verbose` antes del
+  subcomando; el resto, `--verbosity <nivel>` detrás del objetivo. Lo decide `verbosityPlan`, que
+  es pura y está probada verbo a verbo.
+- Los niveles altos añaden variables de entorno (`Logging__LogLevel__*`, `ASPNETCORE_DETAILEDERRORS`,
+  `COREHOST_TRACE`), que es lo que de verdad recopila excepciones y trazas de arranque. Ninguno toca
+  `ASPNETCORE_ENVIRONMENT`: eso lo decide `launchSettings.json`.
 
 ### Asistente de IA (`src/main/services/ai/`, `src/shared/ai*.ts`)
 
@@ -339,3 +382,17 @@ npm run fetch:toolchain -- --platform win32 --arch x64
 - **Eventos hacia un renderer que aún no existe:** el renderer tarda en estar listo (carga Monaco),
   así que un evento emitido en `did-finish-load` se pierde. Para esos casos se usa una **consulta**
   desde el renderer (`workspace:pending-file`), no un evento.
+- **Los mensajes de git están traducidos.** `nothing to commit` sale en español en un Windows en
+  español, así que cualquier decisión basada en una regex sobre la salida de git funciona en la
+  máquina de quien la escribió y falla en la del usuario. Se mira el estado del índice, no el texto.
+- **`core.autocrlf` en Windows** devuelve el archivo restaurado con CRLF aunque el blob esté en LF:
+  comparar byte a byte en una prueba comprueba la configuración de git del equipo, no el código.
+- **Las acciones `--ui=` pulsan por índice posicional** dentro de `.activity-item`. Añadir una
+  herramienta a la barra de actividad las rompe todas en silencio: hay que actualizar los índices
+  de `UI_ACTIONS` en `src/main/main.ts`, donde el orden está escrito en un comentario.
+- **`--ui=` pulsa a los 3,2 s**, que no bastan si se arranca con una solución abierta (Monaco y el
+  parseo de la solución tardan más). El síntoma es que la acción "no hace nada", sin ningún error:
+  se resuelve con `--ui-wait=<ms>`.
+- **`dotnet watch` no tiene `--verbosity`.** Tiene `--verbose`, y va antes del subcomando; todo lo
+  que va detrás se lo pasa a la aplicación hija, así que la bandera equivocada llega como argumento
+  de la aplicación en vez de fallar.

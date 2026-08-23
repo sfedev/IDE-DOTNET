@@ -115,7 +115,11 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-shrink: 0;
+  /* Con un perfil multiproyecto en marcha, aquí caben además las pastillas de estado: la zona
+     puede encoger hasta la mitad de la barra antes de que el título central pierda sitio. */
+  min-width: 0;
+  max-width: 55%;
+  flex-shrink: 1;
   -webkit-app-region: no-drag;
 }
 
@@ -358,4 +362,16 @@ body {
 
 ::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* Editor de diferencias del control de código fuente. Comparte hueco con el editor normal:
+   sólo uno de los dos se ve a la vez, y el que no se ve se saca del flujo para que Monaco no
+   siga midiendo un contenedor invisible. */
+.diff-host {
+  position: absolute;
+  inset: 0;
+}
+
+.diff-host.hidden {
+  display: none;
 }

@@ -21,10 +21,14 @@ import type {
   DebugState,
   DotnetTaskKind,
   DotnetTaskRequest,
+  GitCommandResult,
+  GitFileDiff,
   LspState,
   RecentWorkspace,
   SolutionInfo,
 } from '../../shared/contracts.js';
+import type { GitDiffRequest } from '../../shared/git.js';
+import { buildDiffRequest } from '../../shared/git.js';
 import { IPC, IPC_EVENTS } from '../../shared/contracts.js';
 import { AI_PROVIDER_IDS } from '../../shared/ai.js';
 import { detectArchitecture, projectContexts } from '../../shared/ai-context.js';
@@ -46,7 +50,7 @@ import * as nugetService from '../services/nuget-service.js';
 import * as settingsService from '../services/settings-service.js';
 import * as startupService from '../services/startup-service.js';
 import { loadSolution } from '../services/solution-service.js';
-import { allowRoot, assertInsideWorkspace, setWorkspaceRoot } from '../services/workspace-guard.js';
+import { allowRoot, assertInsideWorkspace, isInside, setWorkspaceRoot } from '../services/workspace-guard.js';
 import { describeRecents, firstAvailable, isOpenableWorkspace } from '../services/workspace-recents.js';
 
 const execFileAsync = promisify(execFile);
@@ -318,6 +322,97 @@ export function registerIpcHandlers(): void {
     currentSolution ? gitService.listBranches(currentSolution.directory) : [],
   );
 
+  ipcMain.handle(IPC.gitRepository, () =>
+    currentSolution ? gitService.readRepository(currentSolution.directory) : null,
+  );
+
+  // Las operaciones de escritura comparten forma: exigen workspace, reciben rutas y devuelven el
+  // estado ya refrescado. Se declaran juntas para que la superficie de git se lea de un vistazo.
+  const gitPaths = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+
+  const requireWorkspace = (): string => {
+    if (!currentSolution) throw new Error('abre una carpeta antes de usar el control de código fuente');
+    return currentSolution.directory;
+  };
+
+  ipcMain.handle(IPC.gitStage, (_event, paths: unknown): Promise<GitCommandResult> =>
+    gitService.stage(requireWorkspace(), gitPaths(paths)),
+  );
+
+  ipcMain.handle(IPC.gitUnstage, (_event, paths: unknown): Promise<GitCommandResult> =>
+    gitService.unstage(requireWorkspace(), gitPaths(paths)),
+  );
+
+  ipcMain.handle(IPC.gitDiscard, (_event, paths: unknown): Promise<GitCommandResult> =>
+    gitService.discard(requireWorkspace(), gitPaths(paths)),
+  );
+
+  ipcMain.handle(IPC.gitCommit, (_event, message: unknown, options: unknown): Promise<GitCommandResult> =>
+    gitService.commit(requireWorkspace(), message, {
+      amend: typeof options === 'object' && options !== null && (options as { amend?: unknown }).amend === true,
+    }),
+  );
+
+  ipcMain.handle(IPC.gitPush, (): Promise<GitCommandResult> => gitService.push(requireWorkspace()));
+  ipcMain.handle(IPC.gitPull, (): Promise<GitCommandResult> => gitService.pull(requireWorkspace()));
+  ipcMain.handle(IPC.gitSync, (): Promise<GitCommandResult> => gitService.sync(requireWorkspace()));
+
+  ipcMain.handle(IPC.gitCheckout, (_event, branch: unknown): Promise<GitCommandResult> =>
+    gitService.checkout(requireWorkspace(), branch),
+  );
+
+  ipcMain.handle(IPC.gitCreateBranch, (_event, name: unknown): Promise<GitCommandResult> =>
+    gitService.createBranch(requireWorkspace(), name),
+  );
+
+  /**
+   * Contenido de los dos lados de una comparación.
+   *
+   * La petición **no se toma tal cual**: el renderer manda el archivo del que se quiere ver el
+   * diff y aquí se vuelve a derivar con la misma función pura que usa el panel. Así, un renderer
+   * comprometido no puede pedir `HEAD:../../.ssh/id_rsa`: la ruta se valida contra la raíz del
+   * repositorio y contra la del workspace antes de tocar nada.
+   */
+  ipcMain.handle(IPC.gitFileDiff, async (_event, raw: unknown): Promise<GitFileDiff> => {
+    const directory = requireWorkspace();
+    const root = await gitService.repositoryRoot(directory);
+    if (root === null) throw new Error('esta carpeta no es un repositorio de git');
+
+    if (typeof raw !== 'object' || raw === null) throw new Error('petición de diferencias inválida');
+    const incoming = raw as Partial<GitDiffRequest> & { change?: unknown };
+
+    const status = await gitService.readRepository(directory);
+    const area = incoming.area === 'staged' ? 'staged' : 'unstaged';
+    const list = area === 'staged' ? (status?.staged ?? []) : (status?.unstaged ?? []);
+    const change = list.find((entry) => entry.path === incoming.path);
+
+    if (!change) throw new Error(`el archivo ya no tiene cambios en esta sección: ${String(incoming.path)}`);
+
+    const request = buildDiffRequest(change);
+
+    // El ámbito de una comparación es el **repositorio**, no el workspace: abrir `apps/api` de un
+    // monorepo no debería impedir ver el diff de un archivo de `apps/web`, y las operaciones de
+    // git ya actúan sobre todo el repositorio. La raíz no la elige el renderer: la calcula git a
+    // partir de la carpeta abierta, así que sigue siendo un ámbito de confianza.
+    const absolutePath = join(root, request.path);
+    if (!isInside(root, absolutePath)) {
+      throw new Error(`acceso denegado: "${absolutePath}" está fuera del repositorio`);
+    }
+
+    const [original, modified] = await Promise.all([
+      gitService.diffSideContent(directory, request, 'original'),
+      gitService.diffSideContent(directory, request, 'modified'),
+    ]);
+
+    return {
+      request,
+      original,
+      modified,
+      languageId: fileService.languageIdFor(request.path),
+      absolutePath,
+    };
+  });
+
   // --- Perfiles de inicio ---------------------------------------------------------------------
   ipcMain.handle(IPC.startupGet, () => {
     if (!currentSolution) return { ...DEFAULT_STARTUP_CONFIG };
@@ -377,7 +472,13 @@ export function registerIpcHandlers(): void {
 
     const label = typeof task.label === 'string' && task.label.trim() !== '' ? task.label.trim() : undefined;
 
-    return dotnetService.runTask({ kind: task.kind, target, extraArgs, label }, taskCallbacks);
+    // El nivel de detalle lo decide el proceso principal a partir de las preferencias, no el
+    // renderer: es la misma regla que con el prompt del asistente (ADR-016).
+    return dotnetService.runTask(
+      { kind: task.kind, target, extraArgs, label },
+      taskCallbacks,
+      settingsService.current().dotnetVerbosity,
+    );
   });
 
   ipcMain.handle(IPC.dotnetCancelTask, (_event, taskId: unknown) => {
@@ -450,7 +551,13 @@ export function registerIpcHandlers(): void {
 
     const target = await resolveDebugTarget(projectPath, currentSolution.directory);
 
-    return debugController.start(target, breakpoints, toolchainDirectory(), launch.stopAtEntry === true);
+    return debugController.start(
+      target,
+      breakpoints,
+      toolchainDirectory(),
+      launch.stopAtEntry === true,
+      settingsService.current().dotnetVerbosity,
+    );
   });
 
   ipcMain.handle(IPC.debugStop, () => debugController.stop());

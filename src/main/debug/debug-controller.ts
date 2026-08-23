@@ -17,6 +17,8 @@ import type {
   DebugState,
   DebugVariable,
 } from '../../shared/contracts.js';
+import type { DotnetVerbosity } from '../../shared/dotnet-verbosity.js';
+import { DEFAULT_DOTNET_VERBOSITY, debugEnvironment, describeVerbosity } from '../../shared/dotnet-verbosity.js';
 import { readLaunchEnvironment } from '../services/launch-settings.js';
 import { readProject, readInheritedProperties } from '../services/solution-service.js';
 import { acquireDebugger, DebugSession, type DebuggerBinary } from './netcoredbg.js';
@@ -157,6 +159,7 @@ export class DebugController extends EventEmitter {
     breakpoints: Array<{ file: string; lines: number[] }>,
     toolchainDir: string,
     stopAtEntry: boolean,
+    verbosity: DotnetVerbosity = DEFAULT_DOTNET_VERBOSITY,
   ): Promise<DebugState> {
     await this.stop();
 
@@ -186,10 +189,27 @@ export class DebugController extends EventEmitter {
         });
       }
 
+      // El nivel de salida de la CLI también manda aquí: NetCoreDbg no compila nada, pero el
+      // proceso depurado sí hereda el registro de ASP.NET Core y, en `diagnostic`, la traza de
+      // carga de ensamblados. Es la diferencia entre ver la excepción y ver "el proceso ha
+      // terminado con código 134".
+      const diagnostics = debugEnvironment(verbosity);
+
+      if (Object.keys(diagnostics).length > 0) {
+        this.emit('output', {
+          category: 'console',
+          text:
+            `Nivel de salida de .NET: ${describeVerbosity(verbosity)} — ` +
+            `${Object.keys(diagnostics).sort().join(', ')}\n`,
+        });
+      }
+
       await this.session.start(this.binary, {
         program: target.program,
         cwd: target.cwd,
-        env: target.env,
+        // El perfil de launchSettings.json manda sobre el diagnóstico: si el perfil fija
+        // explícitamente un nivel de registro, es una decisión del proyecto y no se pisa.
+        env: { ...diagnostics, ...target.env },
         stopAtEntry,
       });
 
