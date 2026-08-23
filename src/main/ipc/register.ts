@@ -19,6 +19,7 @@ import type {
   DotnetTaskKind,
   DotnetTaskRequest,
   LspState,
+  RecentWorkspace,
   SolutionInfo,
 } from '../../shared/contracts.js';
 import { IPC, IPC_EVENTS } from '../../shared/contracts.js';
@@ -38,6 +39,7 @@ import * as settingsService from '../services/settings-service.js';
 import * as startupService from '../services/startup-service.js';
 import { loadSolution } from '../services/solution-service.js';
 import { allowRoot, assertInsideWorkspace, setWorkspaceRoot } from '../services/workspace-guard.js';
+import { describeRecents, firstAvailable, isOpenableWorkspace } from '../services/workspace-recents.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -89,6 +91,40 @@ async function dotnetVersions(command: 'sdks' | 'runtimes'): Promise<string[]> {
     // Sin SDK instalado el IDE sigue siendo utilizable como editor; se informa, no se rompe.
     return [];
   }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Workspace
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Abre una carpeta como workspace.
+ *
+ * Se valida **antes** de tocar nada. Antes, un directorio inexistente llegaba hasta `loadSolution`
+ * y reventaba con un ENOENT crudo... después de haber movido ya la raíz del guardián de rutas a
+ * una carpeta que no existe. Ahora, si la ruta no sirve, el estado del proceso principal se queda
+ * exactamente como estaba y el mensaje dice qué pasa y qué hacer.
+ */
+async function openWorkspaceDirectory(directory: string): Promise<SolutionInfo> {
+  if (!isOpenableWorkspace(directory)) {
+    throw new Error(
+      `la carpeta ya no existe o no es un directorio: ${directory}. ` +
+        'Puede que la hayas movido, renombrado o borrado; ábrela de nuevo desde Archivo > Abrir carpeta.',
+    );
+  }
+
+  // Abrir workspace es lo único que puede ampliar el ámbito de rutas permitido.
+  setWorkspaceRoot(directory);
+  gitService.invalidate();
+  currentSolution = await loadSolution(directory);
+
+  await settingsService.rememberWorkspace(directory);
+  broadcast(IPC_EVENTS.workspaceChanged, currentSolution);
+
+  // El LSP se arranca en segundo plano: abrir una carpeta no debe bloquearse por una descarga.
+  void startLanguageServer();
+
+  return currentSolution;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -215,20 +251,16 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC.workspaceOpen, async (_event, path: unknown): Promise<SolutionInfo> => {
-    const directory = requireString(path, 'path');
+    return openWorkspaceDirectory(requireString(path, 'path'));
+  });
 
-    // Abrir workspace es lo único que puede ampliar el ámbito de rutas permitido.
-    setWorkspaceRoot(directory);
-    gitService.invalidate();
-    currentSolution = await loadSolution(directory);
+  ipcMain.handle(IPC.workspaceRecents, (): RecentWorkspace[] =>
+    describeRecents(settingsService.current().recentWorkspaces),
+  );
 
-    await settingsService.rememberWorkspace(directory);
-    broadcast(IPC_EVENTS.workspaceChanged, currentSolution);
-
-    // El LSP se arranca en segundo plano: abrir una carpeta no debe bloquearse por una descarga.
-    void startLanguageServer();
-
-    return currentSolution;
+  ipcMain.handle(IPC.workspaceOpenRecent, async (): Promise<SolutionInfo | null> => {
+    const directory = firstAvailable(describeRecents(settingsService.current().recentWorkspaces));
+    return directory === null ? null : openWorkspaceDirectory(directory);
   });
 
   ipcMain.handle(IPC.workspaceCurrent, (): SolutionInfo | null => currentSolution);
@@ -477,6 +509,12 @@ export async function openWorkspaceFromCli(path: string): Promise<SolutionInfo |
   try {
     const { resolve } = await import('node:path');
     const directory = resolve(path);
+
+    // Mismo criterio que el canal IPC: si la ruta no es una carpeta abrible, se dice claro en vez
+    // de dejar que reviente dentro del cargador de soluciones.
+    if (!isOpenableWorkspace(directory)) {
+      throw new Error('la ruta no existe o no es un directorio');
+    }
 
     setWorkspaceRoot(directory);
     currentSolution = await loadSolution(directory);

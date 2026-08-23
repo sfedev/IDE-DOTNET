@@ -27,6 +27,7 @@ import type {
   LspState,
   MenuCommand,
   NuGetSearchResult,
+  RecentWorkspace,
   SolutionInfo,
 } from '../shared/contracts.js';
 import { IPC, IPC_EVENTS } from '../shared/contracts.js';
@@ -55,6 +56,8 @@ const api: DotForgeApi = {
     current: () => ipcRenderer.invoke(IPC.workspaceCurrent) as Promise<SolutionInfo | null>,
     close: () => ipcRenderer.invoke(IPC.workspaceClose) as Promise<void>,
     pendingFile: () => ipcRenderer.invoke(IPC.workspacePendingFile) as Promise<string | null>,
+    recents: () => ipcRenderer.invoke(IPC.workspaceRecents) as Promise<RecentWorkspace[]>,
+    openRecent: () => ipcRenderer.invoke(IPC.workspaceOpenRecent) as Promise<SolutionInfo | null>,
   },
 
   fs: {

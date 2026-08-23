@@ -83,6 +83,16 @@ export interface SolutionInfo {
   warnings: string[];
 }
 
+/**
+ * Entrada del historial de workspaces, con su disponibilidad ya resuelta por el proceso principal.
+ * El renderer no puede mirar el disco, así que necesita que se lo digan.
+ */
+export interface RecentWorkspace {
+  path: string;
+  /** false si la carpeta ya no existe o no es un directorio: se enseña apagada, no se borra. */
+  available: boolean;
+}
+
 export interface DotForgeManifest {
   generator: string;
   generatorVersion: string;
@@ -292,6 +302,8 @@ export const IPC = {
   workspaceCurrent: 'workspace:current',
   workspaceClose: 'workspace:close',
   workspacePendingFile: 'workspace:pending-file',
+  workspaceRecents: 'workspace:recents',
+  workspaceOpenRecent: 'workspace:open-recent',
 
   fsListDirectory: 'fs:list-directory',
   fsReadFile: 'fs:read-file',
@@ -415,6 +427,14 @@ export interface DotForgeApi {
      * (hay que cargar Monaco) y un evento emitido antes se perdería.
      */
     pendingFile(): Promise<string | null>;
+    /** Historial con la disponibilidad de cada entrada resuelta contra el disco. */
+    recents(): Promise<RecentWorkspace[]>;
+    /**
+     * Reabre el reciente más nuevo que **todavía exista**. Devuelve null si no hay ninguno.
+     * Es una operación del proceso principal a propósito: es quien conoce el disco y el historial,
+     * y así el arranque no intenta abrir una carpeta borrada para acabar en un error.
+     */
+    openRecent(): Promise<SolutionInfo | null>;
   };
   fs: {
     listDirectory(path: string): Promise<FileNode[]>;

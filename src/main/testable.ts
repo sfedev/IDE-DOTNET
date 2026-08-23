@@ -19,6 +19,7 @@ export {
 export { detectApplicationUrl, parseMsBuildDiagnostics, summarize } from './services/msbuild-diagnostics.js';
 export { findSolutionFile, loadSolution, readProject, IGNORED_DIRECTORIES } from './services/solution-service.js';
 export { languageIdFor } from './services/file-service.js';
+export { describeRecents, firstAvailable, isOpenableWorkspace } from './services/workspace-recents.js';
 export { ALLOWED_COMMANDS, CommandError, tokenize } from './services/command-runner.js';
 export {
   environmentFromProfile,

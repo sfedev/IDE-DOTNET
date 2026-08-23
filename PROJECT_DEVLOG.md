@@ -869,9 +869,8 @@ faltaban: decidir qué se arranca desde la barra superior, y una terminal que ay
   *Causa raíz:* Kestrel anuncia las dos URLs y el código se quedaba con la última.
   *Arreglo:* se conserva la primera, que es la del perfil de `launchSettings.json`, la misma que
   abre `dotnet run`.
-- *Observado, no corregido:* al arrancar con un workspace reciente ya borrado, el proceso principal
-  registra un `ENOENT` en la consola. El renderer ya lo ignora y la aplicación arranca bien; el
-  aviso es sólo ruido en el log. Queda anotado como candidato a limpieza.
+- *Observado en esta iteración, corregido en la siguiente:* al arrancar con un workspace reciente
+  ya borrado, el proceso principal registraba un `ENOENT` en la consola. Ver iteración 12.
 
 **Verificado sobre la aplicación real** (solución hexagonal `Ph` con Web API + Blazor, net10.0),
 midiendo con `--ui=` y `--probe=` en vez de mirar capturas:
@@ -887,3 +886,46 @@ midiendo con `--ui=` y `--probe=` en vez de mirar capturas:
 - Terminal: escribiendo `git `, el fantasma dice `git status` con la tecla `Tab` y el menú lista
   los subcomandos con su descripción.
 - `npm test` en verde de punta a punta y `--smoke-test` → `SMOKE_OK`.
+
+
+### Iteración 12 — 2026-08-23 — El historial de recientes deja de mentir
+**Síntoma:** en cada arranque, el proceso principal escribía en el log
+`Error occurred in handler for 'workspace:open': ENOENT: no such file or directory, stat '...'`.
+La aplicación arrancaba bien, pero además la pantalla de bienvenida seguía ofreciendo carpetas
+borradas como si se pudieran abrir.
+
+**Causa raíz:** eran tres fallos encadenados, no uno.
+1. El renderer reabría `recentWorkspaces[0]` a ciegas. No puede hacer otra cosa: no tiene acceso al
+   disco, así que no sabía si esa carpeta seguía existiendo.
+2. `workspace:open` no validaba nada. Llamaba a `setWorkspaceRoot(directory)` —moviendo la raíz del
+   guardián de rutas a una carpeta inexistente— y dejaba que el ENOENT saliera de `loadSolution`
+   sin traducir. Electron registra toda excepción que sale de un handler: de ahí el ruido.
+3. La bienvenida pintaba el historial tal cual, sin distinguir lo que existe de lo que no.
+
+**Hecho:**
+- `src/main/services/workspace-recents.ts`: `isOpenableWorkspace` (existe **y** es directorio),
+  `describeRecents` (anota disponibilidad sin borrar nada) y `firstAvailable`. Node puro y probado
+  con carpetas reales.
+- `openWorkspaceDirectory` valida **antes** de tocar el estado: si la ruta no sirve, ni se mueve la
+  raíz del guardián ni se recarga nada, y el mensaje dice qué ha pasado y qué hacer. La ruta de
+  línea de comandos (`dotforge-ide <carpeta>`) tenía el mismo agujero y usa ahora el mismo criterio.
+- Canales nuevos `workspace:recents` y `workspace:open-recent`. Reabrir "lo último" pasa a ser una
+  decisión del proceso principal, que es quien conoce el disco: elige el reciente más nuevo que
+  **todavía exista** y devuelve `null` si no queda ninguno. Sin intentos condenados, sin ruido.
+- La bienvenida marca los no disponibles como entradas apagadas y sin acción, con el texto
+  "no disponible".
+- 12 pruebas nuevas en `tests/unit/workspace-recents.test.mjs`, con carpetas y archivos de verdad.
+
+**Decisión que conviene recordar:** no se borra del historial lo que no está disponible. Es
+tentador —dejaría la lista siempre limpia— pero un proyecto en un USB desconectado o en una unidad
+de red caída desaparecería para siempre por haber arrancado el IDE sin el disco puesto. Se enseña
+apagado, que informa sin destruir.
+
+**Verificado** con el caso real que lo destapó: las tres entradas del historial de esta máquina
+apuntaban a carpetas borradas.
+- Antes: `ENOENT` en el log en cada arranque.
+- Ahora: ni `ENOENT` ni `Error occurred in handler` en la salida, y el probe devuelve
+  `[{"texto":"Phno disponible","readonly":true,"esBoton":false}, …]` para las tres.
+- Camino bueno intacto: tras abrir una solución real, arrancar sin argumentos la reabre sola
+  (`{"title":"Ok.Shop","disponibles":1}`).
+- `npm test` en verde (329 pruebas unitarias) y `--smoke-test` → `SMOKE_OK`.

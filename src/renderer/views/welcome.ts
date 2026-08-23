@@ -5,7 +5,7 @@
  * una solución con el asistente, abrir una carpeta o volver a un workspace reciente. Además
  * informa del entorno .NET detectado, que es la causa número uno de "no me compila".
  */
-import type { AppInfo, AppSettings } from '../../shared/contracts.js';
+import type { AppInfo, AppSettings, RecentWorkspace } from '../../shared/contracts.js';
 import { baseName, byId, clear, el } from '../dom.js';
 import { icon, type IconName } from '../icons.js';
 import { containerOf } from '../paths.js';
@@ -18,7 +18,17 @@ export interface WelcomeHost {
 }
 
 export class WelcomeView {
+  /**
+   * Historial con la disponibilidad ya resuelta por el proceso principal. Se guarda aquí porque
+   * `render` es síncrono y el renderer no puede mirar el disco por su cuenta.
+   */
+  private recents: RecentWorkspace[] = [];
+
   constructor(private readonly host: WelcomeHost) {}
+
+  setRecents(recents: RecentWorkspace[]): void {
+    this.recents = recents;
+  }
 
   render(info: AppInfo | null, settings: AppSettings | null): void {
     const container = byId('welcome');
@@ -59,17 +69,32 @@ export class WelcomeView {
     );
 
     // --- Recientes -----------------------------------------------------------------------------
-    const recents = settings?.recentWorkspaces ?? [];
+    // Si aún no ha llegado la disponibilidad, se asume que están: es el estado del primer pintado
+    // y se corrige en cuanto responde el proceso principal.
+    const recents: RecentWorkspace[] =
+      this.recents.length > 0
+        ? this.recents
+        : (settings?.recentWorkspaces ?? []).map((path) => ({ path, available: true }));
+
     sections.appendChild(
       this.section(
         'Recientes',
         recents.length === 0
           ? [el('div', { className: 'empty-state compact', text: 'Todavía no has abierto ningún workspace.' })]
-          : recents
-              .slice(0, 7)
-              .map((path) =>
-                this.action('solution', baseName(path), containerOf(path), () => this.host.openWorkspace(path), path),
-              ),
+          : recents.slice(0, 7).map((entry) =>
+              entry.available
+                ? this.action(
+                    'solution',
+                    baseName(entry.path),
+                    containerOf(entry.path),
+                    () => this.host.openWorkspace(entry.path),
+                    entry.path,
+                  )
+                : // Una carpeta borrada o en un disco desconectado no se oculta ni se borra del
+                  // historial: se enseña apagada y sin acción, para que quede claro por qué no
+                  // está y no se pierda el rastro de dónde estuvo.
+                  this.readOnly('circle-slash', baseName(entry.path), 'no disponible'),
+            ),
       ),
     );
 

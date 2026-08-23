@@ -185,13 +185,17 @@ class DotForgeApp {
       .catch(() => undefined);
 
     // Reabre el último workspace: volver al trabajo no debería costar dos clics.
+    // Lo decide el proceso principal, que es quien puede comprobar si la carpeta sigue existiendo;
+    // así, un reciente borrado no provoca un intento de apertura condenado al fracaso.
     const existing = await window.dotforge.workspace.current();
     if (existing) {
       this.applySolution(existing);
     } else {
-      const recent = this.settings.recentWorkspaces[0];
-      if (recent) await this.openWorkspace(recent).catch(() => undefined);
+      const reopened = await window.dotforge.workspace.openRecent().catch(() => null);
+      if (reopened) this.applySolution(reopened);
     }
+
+    await this.refreshRecents();
 
     // Archivo pasado por línea de comandos (`dotforge-ide Program.cs`).
     const pending = await window.dotforge.workspace.pendingFile();
@@ -217,10 +221,23 @@ class DotForgeApp {
       const solution = await window.dotforge.workspace.open(path);
       this.applySolution(solution);
       this.settings = await window.dotforge.app.getSettings();
-      this.welcome.render(this.info, this.settings);
+      await this.refreshRecents();
     } catch (error) {
       this.notify(`No se ha podido abrir ${path}: ${this.messageOf(error)}`, 'error');
+      // El fallo suele ser justo este: la carpeta ya no está. Se repinta el historial para que la
+      // entrada aparezca marcada como no disponible en vez de invitar a volver a intentarlo.
+      await this.refreshRecents();
     }
+  }
+
+  /** Relee el historial con su disponibilidad y repinta la bienvenida. */
+  private async refreshRecents(): Promise<void> {
+    try {
+      this.welcome.setRecents(await window.dotforge.workspace.recents());
+    } catch {
+      // Sin historial disponible se sigue pintando lo que haya en preferencias.
+    }
+    this.welcome.render(this.info, this.settings);
   }
 
   private applySolution(solution: SolutionInfo | null): void {
