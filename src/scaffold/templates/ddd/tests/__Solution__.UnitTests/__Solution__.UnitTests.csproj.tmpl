@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Pruebas del agregado y de los handlers CQRS con dobles en memoria. -->
+  <PropertyGroup>
+    <RootNamespace>{{Solution}}.UnitTests</RootNamespace>
+    <AssemblyName>{{Solution}}.UnitTests</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\{{Solution}}.Domain\{{Solution}}.Domain.csproj" />
+    <ProjectReference Include="..\..\src\{{Solution}}.Application\{{Solution}}.Application.csproj" />
+  </ItemGroup>
+
+</Project>

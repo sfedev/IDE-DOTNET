@@ -1,0 +1,60 @@
+namespace {{Solution}}.UnitTests.Domain;
+
+using Xunit;
+using {{Solution}}.Domain.Common;
+using {{Solution}}.Domain.Entities;
+
+/// <summary>Las invariantes viven en la entidad, así que se prueban sin ningún doble.</summary>
+public class {{Entity}}Tests
+{
+    [Fact]
+    public void Create_normaliza_nombre_y_sku()
+    {
+        var {{entity}} = {{Entity}}.Create("  Teclado mecánico  ", " kb-87-tkl ", 89.9m, 5);
+
+        Assert.Equal("Teclado mecánico", {{entity}}.Name);
+        Assert.Equal("KB-87-TKL", {{entity}}.Sku);
+        Assert.Equal(89.90m, {{entity}}.Price.Amount);
+        Assert.True({{entity}}.IsAvailable);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Create_rechaza_nombre_vacio(string name)
+    {
+        var ex = Assert.Throws<DomainException>(() => {{Entity}}.Create(name, "SKU-1", 10m, 1));
+        Assert.Contains("obligatorio", ex.Message);
+    }
+
+    [Fact]
+    public void Create_rechaza_precio_negativo()
+        => Assert.Throws<DomainException>(() => {{Entity}}.Create("Nombre", "SKU-1", -1m, 1));
+
+    [Fact]
+    public void Create_rechaza_sku_con_caracteres_no_permitidos()
+        => Assert.Throws<DomainException>(() => {{Entity}}.Create("Nombre", "SKU 1!", 10m, 1));
+
+    [Fact]
+    public void AdjustStock_no_permite_dejar_stock_negativo()
+    {
+        var {{entity}} = {{Entity}}.Create("Nombre", "SKU-1", 10m, 2);
+
+        var ex = Assert.Throws<DomainException>(() => {{entity}}.AdjustStock(-3));
+
+        Assert.Contains("negativo", ex.Message);
+        Assert.Equal(2, {{entity}}.Stock);
+    }
+
+    [Fact]
+    public void AdjustStock_actualiza_marca_temporal()
+    {
+        var {{entity}} = {{Entity}}.Create("Nombre", "SKU-1", 10m, 2);
+        Assert.Null({{entity}}.UpdatedAtUtc);
+
+        {{entity}}.AdjustStock(3);
+
+        Assert.Equal(5, {{entity}}.Stock);
+        Assert.NotNull({{entity}}.UpdatedAtUtc);
+    }
+}

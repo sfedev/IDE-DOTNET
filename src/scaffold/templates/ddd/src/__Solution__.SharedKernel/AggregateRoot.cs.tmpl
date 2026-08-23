@@ -1,0 +1,23 @@
+namespace {{Solution}}.SharedKernel;
+
+/// <summary>
+/// Raíz de agregado: la única puerta de entrada a su grupo de objetos y la frontera de
+/// consistencia transaccional. Fuera del agregado sólo se guardan referencias por Id.
+///
+/// Acumula eventos de dominio que se publican al confirmar la unidad de trabajo, nunca antes:
+/// si la transacción falla, esos hechos jamás ocurrieron.
+/// </summary>
+public abstract class AggregateRoot : Entity
+{
+    private readonly List<IDomainEvent> _domainEvents = [];
+
+    protected AggregateRoot(Guid id) : base(id)
+    {
+    }
+
+    public IReadOnlyCollection<IDomainEvent> DomainEvents => _domainEvents.AsReadOnly();
+
+    protected void Raise(IDomainEvent domainEvent) => _domainEvents.Add(domainEvent);
+
+    public void ClearDomainEvents() => _domainEvents.Clear();
+}

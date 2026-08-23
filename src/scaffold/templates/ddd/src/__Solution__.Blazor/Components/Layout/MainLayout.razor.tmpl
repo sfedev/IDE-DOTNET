@@ -1,0 +1,19 @@
+@inherits LayoutComponentBase
+
+<div class="page">
+    <NavMenu />
+    <main>
+        <article class="content">
+            @Body
+        </article>
+        <footer class="footer">
+            <span>{{Solution}} &middot; generado con DotForge IDE &middot; DDD + CQRS</span>
+        </footer>
+    </main>
+</div>
+
+<div id="blazor-error-ui">
+    Se ha producido un error no controlado.
+    <a href="" class="reload">Recargar</a>
+    <span class="dismiss">&times;</span>
+</div>

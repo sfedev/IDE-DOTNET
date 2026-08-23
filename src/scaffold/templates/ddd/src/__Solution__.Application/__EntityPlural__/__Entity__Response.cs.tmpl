@@ -1,0 +1,30 @@
+namespace {{Solution}}.Application.{{EntityPlural}};
+
+using {{Solution}}.Domain.{{EntityPlural}};
+
+/// <summary>
+/// Proyección de lectura del agregado. El agregado nunca sale de la capa de aplicación: hacia
+/// fuera viaja este contrato plano, que puede evolucionar sin arrastrar al dominio.
+/// </summary>
+public sealed record {{Entity}}Response(
+    Guid Id,
+    string Name,
+    string Sku,
+    decimal Price,
+    string Currency,
+    int Stock,
+    bool IsAvailable,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset? UpdatedAtUtc)
+{
+    public static {{Entity}}Response From({{Entity}} {{entity}}) => new(
+        {{entity}}.Id,
+        {{entity}}.Name,
+        {{entity}}.Sku.Value,
+        {{entity}}.Price.Amount,
+        {{entity}}.Price.Currency,
+        {{entity}}.Stock,
+        {{entity}}.IsAvailable,
+        {{entity}}.CreatedAtUtc,
+        {{entity}}.UpdatedAtUtc);
+}

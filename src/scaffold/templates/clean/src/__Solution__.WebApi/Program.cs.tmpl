@@ -1,0 +1,52 @@
+using Scalar.AspNetCore;
+using Serilog;
+using {{Solution}}.Application;
+using {{Solution}}.Infrastructure;
+using {{Solution}}.Infrastructure.Persistence;
+using {{Solution}}.WebApi.Endpoints;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// --- Observabilidad -------------------------------------------------------------------------
+builder.Host.UseSerilog((context, services, configuration) => configuration
+    .ReadFrom.Configuration(context.Configuration)
+    .ReadFrom.Services(services)
+    .Enrich.FromLogContext());
+
+// --- Composición de dependencias ------------------------------------------------------------
+builder.Services.AddApplication();
+builder.Services.AddInfrastructure(builder.Configuration);
+
+builder.Services.AddOpenApi();
+builder.Services.AddProblemDetails();
+
+var app = builder.Build();
+
+// --- Pipeline HTTP --------------------------------------------------------------------------
+app.UseSerilogRequestLogging();
+app.UseExceptionHandler();
+app.UseStatusCodePages();
+
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+    app.MapScalarApiReference(options => options.WithTitle("{{Solution}} API"));
+}
+
+app.Map{{EntityPlural}}Endpoints();
+
+app.MapGet("/", () => Results.Redirect("/scalar/v1"))
+   .ExcludeFromDescription();
+
+app.MapGet("/health", () => Results.Ok(new { status = "healthy", service = "{{Solution}}.WebApi" }))
+   .WithName("Health")
+   .WithTags("Diagnóstico");
+
+// --- Arranque -------------------------------------------------------------------------------
+await DatabaseInitializer.InitializeAsync(app.Services);
+
+Log.Information("{{Solution}}.WebApi listo. Documentación en /scalar/v1");
+await app.RunAsync();
+
+/// <summary>Expuesto para que los tests de integración puedan usar WebApplicationFactory.</summary>
+public partial class Program;

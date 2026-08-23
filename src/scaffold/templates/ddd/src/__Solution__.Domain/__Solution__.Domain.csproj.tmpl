@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Modelo de dominio: agregados, objetos de valor, eventos y la interfaz de sus repositorios.
+    Sólo depende del SharedKernel.
+  -->
+  <PropertyGroup>
+    <RootNamespace>{{Solution}}.Domain</RootNamespace>
+    <AssemblyName>{{Solution}}.Domain</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\{{Solution}}.SharedKernel\{{Solution}}.SharedKernel.csproj" />
+  </ItemGroup>
+
+</Project>

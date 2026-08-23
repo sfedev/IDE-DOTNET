@@ -1,0 +1,14 @@
+namespace {{Solution}}.SharedKernel;
+
+/// <summary>Violación de una invariante del agregado.</summary>
+public sealed class DomainException : Exception
+{
+    public DomainException(string message) : base(message)
+    {
+    }
+
+    public static void ThrowIf(bool condition, string message)
+    {
+        if (condition) throw new DomainException(message);
+    }
+}

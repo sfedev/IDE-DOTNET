@@ -1,0 +1,8 @@
+namespace {{Solution}}.Infrastructure.Time;
+
+using {{Solution}}.Application.Abstractions;
+
+public sealed class DateTimeProvider : IDateTimeProvider
+{
+    public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
+}

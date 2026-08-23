@@ -1,0 +1,35 @@
+namespace {{Solution}}.Infrastructure;
+
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using {{Solution}}.Application.Abstractions;
+using {{Solution}}.Domain.{{EntityPlural}};
+using {{Solution}}.Infrastructure.Events;
+using {{Solution}}.Infrastructure.Persistence;
+using {{Solution}}.Infrastructure.Persistence.Repositories;
+using {{Solution}}.Infrastructure.Time;
+
+public static class DependencyInjection
+{
+    public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddDbContext<AppDbContext>(options =>
+        {
+{{#if useSqlite}}
+            var connectionString = configuration.GetConnectionString("Default") ?? "Data Source={{DbName}}";
+            options.UseSqlite(connectionString);
+{{/if}}
+{{#if useInMemory}}
+            options.UseInMemoryDatabase("{{Solution}}");
+{{/if}}
+        });
+
+        services.AddScoped<I{{Entity}}Repository, {{Entity}}Repository>();
+        services.AddScoped<IUnitOfWork, UnitOfWork>();
+        services.AddScoped<DomainEventPublisher>();
+        services.AddSingleton<IDateTimeProvider, DateTimeProvider>();
+
+        return services;
+    }
+}

@@ -1,0 +1,63 @@
+namespace {{Solution}}.Adapters.Persistence;
+
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using {{Solution}}.Domain.Model;
+using {{Solution}}.Ports.Outbound;
+
+/// <summary>Enchufa el adaptador de persistencia al puerto de salida correspondiente.</summary>
+public static class PersistenceAdapterInstaller
+{
+    public static IServiceCollection AddPersistenceAdapter(this IServiceCollection services, IConfiguration configuration)
+    {
+        services.AddDbContext<HexagonDbContext>(options =>
+        {
+{{#if useSqlite}}
+            var connectionString = configuration.GetConnectionString("Default") ?? "Data Source={{DbName}}";
+            options.UseSqlite(connectionString);
+{{/if}}
+{{#if useInMemory}}
+            options.UseInMemoryDatabase("{{Solution}}");
+{{/if}}
+        });
+
+        services.AddScoped<I{{Entity}}RepositoryPort, Ef{{Entity}}RepositoryAdapter>();
+        services.AddSingleton<IClockPort, SystemClockAdapter>();
+
+        return services;
+    }
+
+    /// <summary>Crea el esquema y siembra datos de ejemplo. En producción, usa migraciones.</summary>
+    public static async Task InitializeStoreAsync(IServiceProvider services, CancellationToken cancellationToken = default)
+    {
+        using var scope = services.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<HexagonDbContext>();
+        var clock = scope.ServiceProvider.GetRequiredService<IClockPort>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger(nameof(PersistenceAdapterInstaller));
+
+        await context.Database.EnsureCreatedAsync(cancellationToken);
+
+        if (await context.{{EntityPlural}}.AnyAsync(cancellationToken)) return;
+
+        var now = clock.UtcNow;
+        var seed = new[]
+        {
+            {{Entity}}.Create("Teclado mecánico 87 teclas", "KB-87-TKL", 89.90m, 24, now),
+            {{Entity}}.Create("Monitor 27 pulgadas QHD", "MON-27-QHD", 259.00m, 8, now),
+            {{Entity}}.Create("Silla ergonómica de malla", "CHR-ERG-01", 349.50m, 3, now),
+        };
+
+        await context.{{EntityPlural}}.AddRangeAsync(seed, cancellationToken);
+        await context.SaveChangesAsync(cancellationToken);
+
+        logger.LogInformation("Almacén sembrado con {Count} {{entityPlural}}.", seed.Length);
+    }
+}
+
+/// <summary>Adaptador del puerto de reloj sobre el reloj real del sistema.</summary>
+internal sealed class SystemClockAdapter : IClockPort
+{
+    public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
+}

@@ -1,0 +1,35 @@
+namespace {{Solution}}.Application.Behaviors;
+
+using {{Solution}}.Application.Abstractions;
+using {{Solution}}.SharedKernel;
+
+/// <summary>
+/// Ejecuta los validadores registrados para el mensaje antes de llegar al handler.
+///
+/// Valida forma, no reglas de negocio: que un campo venga relleno es validación de aplicación;
+/// que el stock no pueda quedar negativo es una invariante del agregado y vive en el dominio.
+/// </summary>
+public sealed class ValidationBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
+{
+    private readonly IEnumerable<IValidator<TRequest>> _validators;
+
+    public ValidationBehavior(IEnumerable<IValidator<TRequest>> validators) => _validators = validators;
+
+    public Task<Result<TResponse>> HandleAsync(
+        TRequest request,
+        Func<Task<Result<TResponse>>> next,
+        CancellationToken cancellationToken = default)
+    {
+        var failures = _validators
+            .SelectMany(validator => validator.Validate(request))
+            .Where(message => !string.IsNullOrWhiteSpace(message))
+            .ToArray();
+
+        if (failures.Length == 0)
+        {
+            return next();
+        }
+
+        return Task.FromResult(Result.Failure<TResponse>(Error.Validation(string.Join(" ", failures))));
+    }
+}

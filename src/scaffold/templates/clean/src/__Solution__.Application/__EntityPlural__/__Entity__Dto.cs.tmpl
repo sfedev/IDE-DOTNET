@@ -1,0 +1,42 @@
+namespace {{Solution}}.Application.{{EntityPlural}};
+
+using {{Solution}}.Domain.Entities;
+
+/// <summary>Proyección de lectura de <see cref="{{Entity}}"/> hacia el exterior.</summary>
+public sealed record {{Entity}}Dto(
+    Guid Id,
+    string Name,
+    string Sku,
+    decimal Price,
+    string Currency,
+    int Stock,
+    bool IsAvailable,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset? UpdatedAtUtc)
+{
+    public static {{Entity}}Dto From({{Entity}} {{entity}}) => new(
+        {{entity}}.Id,
+        {{entity}}.Name,
+        {{entity}}.Sku,
+        {{entity}}.Price.Amount,
+        {{entity}}.Price.Currency,
+        {{entity}}.Stock,
+        {{entity}}.IsAvailable,
+        {{entity}}.CreatedAtUtc,
+        {{entity}}.UpdatedAtUtc);
+}
+
+/// <summary>Datos de alta de un {{Entity}}.</summary>
+public sealed record Create{{Entity}}Request(
+    string Name,
+    string Sku,
+    decimal Price,
+    int Stock,
+    string Currency = "EUR");
+
+/// <summary>Datos de modificación de un {{Entity}} existente.</summary>
+public sealed record Update{{Entity}}Request(
+    string Name,
+    decimal Price,
+    int StockDelta,
+    string Currency = "EUR");

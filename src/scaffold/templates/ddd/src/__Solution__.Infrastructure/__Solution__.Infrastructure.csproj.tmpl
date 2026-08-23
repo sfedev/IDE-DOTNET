@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>{{Solution}}.Infrastructure</RootNamespace>
+    <AssemblyName>{{Solution}}.Infrastructure</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <!-- Relational aporta ToTable/HasColumnName. Se referencia siempre para que el mapeo
+         sea idéntico con SQLite y con el proveedor InMemory de las pruebas. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
+{{#if useSqlite}}
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+{{/if}}
+{{#if useInMemory}}
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
+{{/if}}
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\{{Solution}}.Application\{{Solution}}.Application.csproj" />
+  </ItemGroup>
+
+</Project>

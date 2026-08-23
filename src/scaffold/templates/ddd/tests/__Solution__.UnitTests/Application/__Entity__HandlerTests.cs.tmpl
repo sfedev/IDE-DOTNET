@@ -1,0 +1,123 @@
+namespace {{Solution}}.UnitTests.Application;
+
+using Xunit;
+using {{Solution}}.Application.{{EntityPlural}}.Commands;
+using {{Solution}}.Application.{{EntityPlural}}.Queries;
+using {{Solution}}.UnitTests.Fakes;
+
+public class {{Entity}}HandlerTests
+{
+    private static (InMemory{{Entity}}Repository Repository, FrozenClock Clock) CreateContext()
+        => (new InMemory{{Entity}}Repository(), new FrozenClock());
+
+    [Fact]
+    public async Task Register_persiste_confirma_y_publica_el_evento()
+    {
+        var (repository, clock) = CreateContext();
+        var handler = new Register{{Entity}}Handler(repository, repository, clock);
+
+        var result = await handler.HandleAsync(new Register{{Entity}}Command("Teclado", "KB-1", 49.9m, 3));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("KB-1", result.Value.Sku);
+        Assert.Equal(1, repository.SaveChangesCalls);
+        Assert.Contains("{{Entity}}RegisteredDomainEvent", repository.PublishedEvents);
+    }
+
+    [Fact]
+    public async Task Register_rechaza_sku_duplicado_con_conflicto()
+    {
+        var (repository, clock) = CreateContext();
+        var handler = new Register{{Entity}}Handler(repository, repository, clock);
+        await handler.HandleAsync(new Register{{Entity}}Command("Teclado", "KB-1", 49.9m, 3));
+
+        var duplicated = await handler.HandleAsync(new Register{{Entity}}Command("Otro", "kb-1", 10m, 1));
+
+        Assert.True(duplicated.IsFailure);
+        Assert.Equal("conflict", duplicated.Error.Code);
+    }
+
+    [Fact]
+    public async Task Register_traduce_sku_invalido_a_error_de_validacion()
+    {
+        var (repository, clock) = CreateContext();
+        var handler = new Register{{Entity}}Handler(repository, repository, clock);
+
+        var result = await handler.HandleAsync(new Register{{Entity}}Command("Teclado", "SKU con espacios", 10m, 1));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("validation", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task Amend_aplica_el_delta_y_usa_el_reloj_inyectado()
+    {
+        var (repository, clock) = CreateContext();
+        var register = new Register{{Entity}}Handler(repository, repository, clock);
+        var amend = new Amend{{Entity}}Handler(repository, repository, clock);
+        var created = await register.HandleAsync(new Register{{Entity}}Command("Teclado", "KB-1", 49.9m, 3));
+
+        clock.UtcNow = clock.UtcNow.AddHours(2);
+        var result = await amend.HandleAsync(new Amend{{Entity}}Command(created.Value.Id, "Teclado Pro", 59.9m, 2));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("Teclado Pro", result.Value.Name);
+        Assert.Equal(5, result.Value.Stock);
+        Assert.Equal(clock.UtcNow, result.Value.UpdatedAtUtc);
+    }
+
+    [Fact]
+    public async Task Amend_devuelve_not_found_si_el_agregado_no_existe()
+    {
+        var (repository, clock) = CreateContext();
+        var handler = new Amend{{Entity}}Handler(repository, repository, clock);
+
+        var result = await handler.HandleAsync(new Amend{{Entity}}Command(Guid.NewGuid(), "X", 1m, 0));
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("not_found", result.Error.Code);
+    }
+
+    [Fact]
+    public async Task Withdraw_elimina_el_agregado()
+    {
+        var (repository, clock) = CreateContext();
+        var register = new Register{{Entity}}Handler(repository, repository, clock);
+        var withdraw = new Withdraw{{Entity}}Handler(repository, repository);
+        var list = new List{{EntityPlural}}Handler(repository);
+        var created = await register.HandleAsync(new Register{{Entity}}Command("Teclado", "KB-1", 49.9m, 3));
+
+        var result = await withdraw.HandleAsync(new Withdraw{{Entity}}Command(created.Value.Id));
+        var remaining = await list.HandleAsync(new List{{EntityPlural}}Query(null));
+
+        Assert.True(result.IsSuccess);
+        Assert.Empty(remaining.Value);
+    }
+
+    [Fact]
+    public async Task List_filtra_por_nombre_o_sku()
+    {
+        var (repository, clock) = CreateContext();
+        var register = new Register{{Entity}}Handler(repository, repository, clock);
+        var list = new List{{EntityPlural}}Handler(repository);
+        await register.HandleAsync(new Register{{Entity}}Command("Teclado", "KB-1", 49.9m, 3));
+        await register.HandleAsync(new Register{{Entity}}Command("Monitor", "MON-1", 199m, 2));
+
+        var byName = await list.HandleAsync(new List{{EntityPlural}}Query("monitor"));
+        var bySku = await list.HandleAsync(new List{{EntityPlural}}Query("KB"));
+
+        Assert.Single(byName.Value);
+        Assert.Single(bySku.Value);
+        Assert.Equal("Monitor", byName.Value[0].Name);
+    }
+
+    [Fact]
+    public void El_validador_detecta_los_campos_obligatorios()
+    {
+        var validator = new Register{{Entity}}Validator();
+
+        var failures = validator.Validate(new Register{{Entity}}Command("", "", 0m, -1)).ToList();
+
+        Assert.Equal(4, failures.Count);
+    }
+}

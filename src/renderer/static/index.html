@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      CSP estricta. Sin 'unsafe-eval' y sin orígenes remotos: todo (Monaco incluido) se sirve
+      desde el propio paquete. `blob:` es necesario para los web workers de Monaco.
+      Los iconos de paquetes NuGet se dibujan localmente en vez de descargarse, para no filtrar
+      qué paquetes está mirando el usuario.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none';
+               script-src 'self' blob:;
+               worker-src blob: 'self';
+               style-src 'self' 'unsafe-inline';
+               img-src 'self' data:;
+               font-src 'self' data:;
+               connect-src 'self' blob: data:;
+               form-action 'none';
+               base-uri 'none';
+               frame-src 'none';
+               object-src 'none'"
+    />
+    <title>DotForge IDE</title>
+    <link rel="stylesheet" href="styles/theme.css" />
+    <link rel="stylesheet" href="styles/layout.css" />
+    <link rel="stylesheet" href="styles/components.css" />
+  </head>
+  <body>
+    <div id="app" class="app" data-theme="dotforge-dark">
+      <!-- Barra de título propia: en macOS deja hueco para los semáforos del sistema. -->
+      <header class="titlebar" id="titlebar">
+        <div class="titlebar-brand">
+          <span class="brand-mark" aria-hidden="true">&lt;/&gt;</span>
+          <span class="brand-name">DotForge</span>
+        </div>
+        <div class="titlebar-center" id="titlebar-title">Sin workspace abierto</div>
+        <div class="titlebar-actions" id="titlebar-actions"></div>
+      </header>
+
+      <div class="body">
+        <nav class="activitybar" id="activitybar" aria-label="Barra de actividad"></nav>
+
+        <aside class="sidebar" id="sidebar">
+          <div class="sidebar-header">
+            <span id="sidebar-title">Explorador</span>
+            <div class="sidebar-actions" id="sidebar-actions"></div>
+          </div>
+          <div class="sidebar-content" id="sidebar-content"></div>
+        </aside>
+
+        <div class="resizer" id="resizer-sidebar" role="separator" aria-orientation="vertical"></div>
+
+        <main class="main">
+          <div class="tabs" id="tabs" role="tablist"></div>
+          <div class="editor-area">
+            <div class="editor-host" id="editor-host"></div>
+            <div class="welcome" id="welcome"></div>
+          </div>
+
+          <div class="resizer horizontal" id="resizer-panel" role="separator" aria-orientation="horizontal"></div>
+
+          <section class="panel" id="panel">
+            <div class="panel-tabs" id="panel-tabs" role="tablist"></div>
+            <div class="panel-content" id="panel-content"></div>
+          </section>
+        </main>
+      </div>
+
+      <footer class="statusbar" id="statusbar"></footer>
+
+      <div class="overlay" id="overlay" hidden></div>
+    </div>
+
+    <script src="vendor/monaco/vs/loader.js"></script>
+    <script src="renderer.js"></script>
+  </body>
+</html>

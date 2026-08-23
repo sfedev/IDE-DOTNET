@@ -1,0 +1,61 @@
+{
+  "name": "dotforge-ide",
+  "productName": "DotForge IDE",
+  "version": "1.0.0",
+  "description": "IDE de escritorio para C#, .NET 9+ y Blazor, con generador de arquitecturas de software (Clean, Hexagonal, DDD).",
+  "author": {
+    "name": "DotForge",
+    "email": "dev@dotforge.local"
+  },
+  "license": "MIT",
+  "private": true,
+  "main": "build/main.js",
+  "bin": {
+    "dotforge": "build/cli.js"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "dev": "node scripts/build.mjs && electron . --dev",
+    "start": "electron .",
+    "icons": "node scripts/generate-icons.mjs",
+    "fetch:toolchain": "node scripts/fetch-toolchain.mjs",
+    "clean": "node scripts/clean.mjs",
+    "test": "node scripts/run-tests.mjs",
+    "test:unit": "node scripts/run-tests.mjs --filter unit",
+    "test:scaffold": "node scripts/run-tests.mjs --filter scaffold",
+    "test:package": "node scripts/run-tests.mjs --filter package",
+    "pack": "node scripts/build.mjs && electron-builder --dir",
+    "dist:win": "node scripts/build.mjs && electron-builder --win --publish never",
+    "dist:mac": "node scripts/build.mjs && node scripts/dist-mac.mjs",
+    "dist:all": "node scripts/build.mjs && electron-builder --win --publish never && node scripts/dist-mac.mjs",
+    "verify:dist": "node scripts/verify-dist.mjs"
+  },
+  "keywords": [
+    "ide",
+    "dotnet",
+    "csharp",
+    "blazor",
+    "clean-architecture",
+    "hexagonal",
+    "ddd",
+    "scaffolding",
+    "electron"
+  ],
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "electron": "^43.4.1",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "fast-xml-parser": "^5.11.0",
+    "monaco-editor": "^0.56.0"
+  },
+  "overrides": {
+    "dompurify": "^3.4.13"
+  }
+}

@@ -1,0 +1,10 @@
+namespace {{Solution}}.Ports.Outbound;
+
+/// <summary>
+/// PUERTO DE SALIDA para el tiempo. El reloj del sistema es una dependencia externa como
+/// cualquier otra: si el núcleo lo llamara directamente, sus pruebas dejarían de ser deterministas.
+/// </summary>
+public interface IClockPort
+{
+    DateTimeOffset UtcNow { get; }
+}

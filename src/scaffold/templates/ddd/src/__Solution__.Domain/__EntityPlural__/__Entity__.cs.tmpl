@@ -1,0 +1,112 @@
+namespace {{Solution}}.Domain.{{EntityPlural}};
+
+using {{Solution}}.Domain.{{EntityPlural}}.Events;
+using {{Solution}}.SharedKernel;
+
+/// <summary>
+/// Raíz de agregado {{Entity}}.
+///
+/// Frontera de consistencia: todo cambio pasa por métodos con nombre de negocio que validan las
+/// invariantes y registran el evento correspondiente. No hay setters públicos: si los hubiera,
+/// cualquiera podría dejar el agregado en un estado imposible.
+/// </summary>
+public sealed class {{Entity}} : AggregateRoot
+{
+    // Constructor sin parámetros requerido por EF Core.
+    private {{Entity}}() : base(Guid.NewGuid())
+    {
+        Name = string.Empty;
+        Sku = null!;
+        Price = Money.Zero;
+    }
+
+    private {{Entity}}(Guid id, string name, Sku sku, Money price, int stock, DateTimeOffset createdAtUtc)
+        : base(id)
+    {
+        Name = name;
+        Sku = sku;
+        Price = price;
+        Stock = stock;
+        CreatedAtUtc = createdAtUtc;
+    }
+
+    public string Name { get; private set; }
+
+    public Sku Sku { get; private set; }
+
+    public Money Price { get; private set; }
+
+    public int Stock { get; private set; }
+
+    public DateTimeOffset CreatedAtUtc { get; private set; }
+
+    public DateTimeOffset? UpdatedAtUtc { get; private set; }
+
+    public bool IsAvailable => Stock > 0;
+
+    /// <summary>Método de factoría: la única forma válida de traer un {{Entity}} al mundo.</summary>
+    public static {{Entity}} Register(
+        string name,
+        string sku,
+        decimal price,
+        int stock,
+        DateTimeOffset nowUtc,
+        string currency = Money.DefaultCurrency)
+    {
+        DomainException.ThrowIf(stock < 0, "El stock inicial no puede ser negativo.");
+
+        var {{entity}} = new {{Entity}}(
+            Guid.NewGuid(),
+            NormalizeName(name),
+            Sku.Of(sku),
+            Money.Of(price, currency),
+            stock,
+            nowUtc);
+
+        {{entity}}.Raise(new {{Entity}}RegisteredDomainEvent(
+            {{entity}}.Id,
+            {{entity}}.Name,
+            {{entity}}.Sku.Value,
+            nowUtc));
+
+        return {{entity}};
+    }
+
+    public void Rename(string name, DateTimeOffset nowUtc)
+    {
+        Name = NormalizeName(name);
+        UpdatedAtUtc = nowUtc;
+    }
+
+    public void Reprice(decimal price, DateTimeOffset nowUtc, string currency = Money.DefaultCurrency)
+    {
+        Price = Money.Of(price, currency);
+        UpdatedAtUtc = nowUtc;
+    }
+
+    public void AdjustStock(int delta, DateTimeOffset nowUtc)
+    {
+        var previous = Stock;
+        var updated = previous + delta;
+
+        DomainException.ThrowIf(updated < 0, $"El ajuste dejaría el stock en {updated}, y no puede ser negativo.");
+
+        Stock = updated;
+        UpdatedAtUtc = nowUtc;
+
+        Raise(new {{Entity}}StockAdjustedDomainEvent(Id, previous, updated, nowUtc));
+
+        if (previous > 0 && updated == 0)
+        {
+            Raise(new {{Entity}}OutOfStockDomainEvent(Id, Sku.Value, nowUtc));
+        }
+    }
+
+    private static string NormalizeName(string name)
+    {
+        DomainException.ThrowIf(string.IsNullOrWhiteSpace(name), "El nombre es obligatorio.");
+        var trimmed = name.Trim();
+        DomainException.ThrowIf(trimmed.Length > 120, "El nombre supera 120 caracteres.");
+        return trimmed;
+    }
+}

@@ -1,0 +1,952 @@
+/* Componentes reutilizables del shell. */
+
+/* --- Botones ------------------------------------------------------------------------------ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--surface-3);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn.primary {
+  background: var(--accent-strong);
+  color: var(--accent-contrast);
+}
+
+.btn.primary:hover:not(:disabled) {
+  background: var(--accent);
+}
+
+.btn.ghost {
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.btn.ghost:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.btn.danger {
+  background: transparent;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.btn.danger:hover:not(:disabled) {
+  background: var(--danger-soft);
+}
+
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  font-family: var(--font-mono);
+}
+
+.icon-btn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+/* --- Barra de actividad -------------------------------------------------------------------- */
+
+.activity-item {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 17px;
+}
+
+.activity-item:hover {
+  color: var(--text);
+  background: var(--surface-1);
+}
+
+.activity-item.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.activity-item.active::before {
+  content: '';
+  position: absolute;
+  left: -6px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.activity-item .badge-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+
+/* --- Árbol (explorador) --------------------------------------------------------------------- */
+
+.tree {
+  padding: 4px 0 12px;
+  font-size: 12.5px;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 8px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.tree-row:hover {
+  background: var(--surface-2);
+}
+
+.tree-row.selected {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.tree-row .twisty {
+  width: 12px;
+  flex-shrink: 0;
+  color: var(--text-faint);
+  font-size: 9px;
+  text-align: center;
+}
+
+.tree-row .glyph {
+  width: 16px;
+  flex-shrink: 0;
+  text-align: center;
+  font-size: 11px;
+}
+
+.tree-row .label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-row .hint {
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--text-faint);
+  font-size: 10.5px;
+}
+
+.tree-group {
+  padding: 8px 10px 2px;
+  color: var(--text-faint);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+/* Colores por tipo de archivo: ayuda a orientarse en un árbol grande. */
+.glyph.cs { color: var(--accent); }
+.glyph.razor { color: var(--syntax-razor); }
+.glyph.csproj { color: var(--success); }
+.glyph.json { color: var(--warning); }
+.glyph.md { color: var(--info); }
+.glyph.dir { color: var(--text-muted); }
+
+/* --- Pestañas del editor ---------------------------------------------------------------------- */
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 8px 0 12px;
+  border: none;
+  border-right: 1px solid var(--border-subtle);
+  background: var(--surface-1);
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12.5px;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
+.tab:hover {
+  background: var(--surface-2);
+}
+
+.tab.active {
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.tab .tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tab .tab-close {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.tab .tab-close:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.tab.dirty .tab-close::before {
+  content: '●';
+  font-size: 9px;
+}
+
+.tab:not(.dirty) .tab-close::before {
+  content: '✕';
+  font-size: 10px;
+}
+
+/* --- Pestañas del panel inferior ---------------------------------------------------------------- */
+
+.panel-tab {
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-bottom: 2px solid transparent;
+}
+
+.panel-tab:hover {
+  color: var(--text);
+}
+
+.panel-tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.panel-tab .count {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--surface-3);
+  font-size: 10px;
+}
+
+.panel-tab .count.danger { background: var(--danger-soft); color: var(--danger); }
+.panel-tab .count.warning { background: var(--warning-soft); color: var(--warning); }
+
+/* --- Barra de estado ------------------------------------------------------------------------------ */
+
+.status-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 100%;
+  padding: 0 8px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.status-item:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.status-item.readonly {
+  cursor: default;
+}
+
+.status-item.readonly:hover {
+  background: transparent;
+}
+
+.status-item .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.status-item .dot.ok { background: var(--success); }
+.status-item .dot.warn { background: var(--warning); }
+.status-item .dot.err { background: var(--danger); }
+.status-item .dot.busy {
+  background: var(--warning);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+/* --- Salida y terminal ------------------------------------------------------------------------------ */
+
+.output {
+  margin: 0;
+  padding: 8px 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-muted);
+}
+
+.output .line-err { color: var(--danger); }
+.output .line-ok { color: var(--success); }
+.output .line-cmd { color: var(--accent); font-weight: 600; }
+
+/* --- Lista de problemas -------------------------------------------------------------------------------- */
+
+.problem {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  padding: 6px 12px;
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.problem:hover {
+  background: var(--surface-2);
+}
+
+.problem .sev.error { color: var(--danger); }
+.problem .sev.warning { color: var(--warning); }
+.problem .sev.info { color: var(--info); }
+
+.problem .where {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.problem .code {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+/* --- Panel NuGet ---------------------------------------------------------------------------------------- */
+
+.nuget-search {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+select.input {
+  cursor: pointer;
+}
+
+.package {
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  gap: 10px;
+  padding: 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.package-avatar {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.package-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.package-id {
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.package-version {
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.package-meta {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.package-description {
+  margin: 4px 0 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.package-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.installed-badge {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--success-soft);
+  color: var(--success);
+  font-size: 10.5px;
+}
+
+/* --- Paleta de comandos ------------------------------------------------------------------------------------ */
+
+.palette {
+  width: min(620px, 92vw);
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-popover);
+  overflow: hidden;
+}
+
+.palette input {
+  padding: 12px 14px;
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+
+.palette input:focus {
+  outline: none;
+}
+
+.palette-list {
+  overflow: auto;
+  padding: 4px;
+}
+
+.palette-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.palette-item:hover,
+.palette-item.active {
+  background: var(--accent-soft);
+}
+
+.palette-item .kbd {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.palette-item .group {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+/* --- Diálogo / wizard ----------------------------------------------------------------------------------------- */
+
+.dialog {
+  width: min(940px, 94vw);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-popover);
+  overflow: hidden;
+}
+
+.dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.dialog-header h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.dialog-header p {
+  margin: 2px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.dialog-body {
+  flex: 1;
+  overflow: auto;
+  padding: 18px;
+}
+
+.dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface-2);
+}
+
+.steps {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.step-dot {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--surface-3);
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.step-dot.active {
+  background: var(--accent-strong);
+  color: var(--accent-contrast);
+}
+
+.step-dot.done {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.step-line {
+  width: 22px;
+  height: 1px;
+  background: var(--border);
+}
+
+/* --- Tarjetas de arquitectura ------------------------------------------------------------------------------------- */
+
+.arch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 12px;
+}
+
+.arch-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.arch-card:hover {
+  border-color: var(--accent);
+}
+
+.arch-card.selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.arch-card h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.arch-card .tagline {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.arch-layers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: auto;
+}
+
+.chip {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.chip.accent {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* --- Formularios ------------------------------------------------------------------------------------------------------ */
+
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.field {
+  display: grid;
+  gap: 5px;
+}
+
+.field label {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.field .help {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.field .error {
+  color: var(--danger);
+  font-size: 11px;
+}
+
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.segmented button {
+  padding: 4px 12px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.segmented button.active {
+  background: var(--accent-strong);
+  color: var(--accent-contrast);
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 12.5px;
+}
+
+/* --- Pantalla de bienvenida --------------------------------------------------------------------------------------------- */
+
+.welcome-inner {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 48px 32px;
+}
+
+.welcome-hero {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 6px;
+}
+
+.welcome-logo {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.welcome h1 {
+  margin: 0;
+  font-size: 26px;
+  letter-spacing: -0.02em;
+}
+
+.welcome .subtitle {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13.5px;
+}
+
+.welcome-sections {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 20px;
+  margin-top: 32px;
+}
+
+.welcome-section {
+  /* Sin min-width:0 una ruta larga en "Recientes" desborda su columna del grid y se solapa
+     con la columna siguiente. */
+  min-width: 0;
+}
+
+.welcome-section h2 {
+  margin: 0 0 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.link-list {
+  display: grid;
+  gap: 2px;
+}
+
+.link-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 9px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--accent);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  width: 100%;
+}
+
+.link-item:hover {
+  background: var(--surface-2);
+}
+
+/* El texto principal se recorta antes que desbordar la columna. */
+.link-item > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.link-item .sub {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 55%;
+}
+
+.empty-state {
+  padding: 28px 16px;
+  color: var(--text-faint);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.notice {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+
+.notice.info { background: var(--info-soft); color: var(--info); }
+.notice.warn { background: var(--warning-soft); color: var(--warning); }
+.notice.error { background: var(--danger-soft); color: var(--danger); }
+.notice.ok { background: var(--success-soft); color: var(--success); }
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 700ms linear infinite;
+  display: inline-block;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.result-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* --- Depuración -------------------------------------------------------------------------------- */
+
+/* Breakpoint en el margen de glifos del editor. */
+.dotforge-breakpoint::after {
+  content: '';
+  display: block;
+  width: 11px;
+  height: 11px;
+  margin: 5px auto 0;
+  border-radius: 50%;
+  background: var(--danger);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+/* Línea en la que está detenida la ejecución. */
+.dotforge-execution-line {
+  background: rgba(255, 200, 87, 0.14);
+}
+
+.dotforge-execution-arrow::after {
+  content: '▶';
+  display: block;
+  margin-top: 1px;
+  text-align: center;
+  color: var(--warning);
+  font-size: 11px;
+}

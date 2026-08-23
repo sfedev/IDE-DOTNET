@@ -1,0 +1,39 @@
+using Serilog;
+using {{Solution}}.Application;
+using {{Solution}}.Blazor.Components;
+using {{Solution}}.Infrastructure;
+using {{Solution}}.Infrastructure.Persistence;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Host.UseSerilog((context, services, configuration) => configuration
+    .ReadFrom.Configuration(context.Configuration)
+    .ReadFrom.Services(services)
+    .Enrich.FromLogContext());
+
+builder.Services.AddApplication();
+builder.Services.AddInfrastructure(builder.Configuration);
+
+builder.Services.AddRazorComponents()
+    .AddInteractiveServerComponents();
+
+var app = builder.Build();
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler("/Error", createScopeForErrors: true);
+    app.UseHsts();
+}
+
+app.UseSerilogRequestLogging();
+app.UseHttpsRedirection();
+app.UseAntiforgery();
+app.MapStaticAssets();
+
+app.MapRazorComponents<App>()
+    .AddInteractiveServerRenderMode();
+
+await DatabaseInitializer.InitializeAsync(app.Services);
+
+Log.Information("{{Solution}}.Blazor listo.");
+await app.RunAsync();

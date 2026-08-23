@@ -1,0 +1,10 @@
+namespace {{Solution}}.Application.Abstractions;
+
+/// <summary>
+/// Unidad de trabajo: confirma como una sola transacción todos los cambios acumulados por los
+/// repositorios durante un caso de uso.
+/// </summary>
+public interface IUnitOfWork
+{
+    Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
+}

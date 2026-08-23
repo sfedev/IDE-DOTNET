@@ -1,0 +1,98 @@
+namespace {{Solution}}.Domain.Model;
+
+/// <summary>
+/// Entidad del núcleo. Toda regla de negocio de {{EntityPlural}} vive aquí, no en los adaptadores:
+/// así la misma lógica se comporta igual sea cual sea la base de datos o la interfaz de usuario.
+/// </summary>
+public sealed class {{Entity}}
+{
+    // Constructor sin parámetros para el adaptador de persistencia (EF Core).
+    private {{Entity}}()
+    {
+        Name = string.Empty;
+        Sku = string.Empty;
+        Price = Money.Zero;
+    }
+
+    private {{Entity}}(Guid id, string name, string sku, Money price, int stock, DateTimeOffset createdAtUtc)
+    {
+        Id = id;
+        Name = name;
+        Sku = sku;
+        Price = price;
+        Stock = stock;
+        CreatedAtUtc = createdAtUtc;
+    }
+
+    public Guid Id { get; private set; }
+
+    public string Name { get; private set; }
+
+    public string Sku { get; private set; }
+
+    public Money Price { get; private set; }
+
+    public int Stock { get; private set; }
+
+    public DateTimeOffset CreatedAtUtc { get; private set; }
+
+    public DateTimeOffset? UpdatedAtUtc { get; private set; }
+
+    public bool IsAvailable => Stock > 0;
+
+    public static {{Entity}} Create(
+        string name,
+        string sku,
+        decimal price,
+        int stock,
+        DateTimeOffset createdAtUtc,
+        string currency = Money.DefaultCurrency)
+    {
+        DomainException.ThrowIf(stock < 0, "El stock no puede ser negativo.");
+
+        return new {{Entity}}(
+            Guid.NewGuid(),
+            Normalize(name, nameof(name), maxLength: 120),
+            NormalizeSku(sku),
+            Money.Of(price, currency),
+            stock,
+            createdAtUtc);
+    }
+
+    public void Rename(string name, DateTimeOffset nowUtc)
+    {
+        Name = Normalize(name, nameof(name), maxLength: 120);
+        UpdatedAtUtc = nowUtc;
+    }
+
+    public void ChangePrice(decimal price, DateTimeOffset nowUtc, string currency = Money.DefaultCurrency)
+    {
+        Price = Money.Of(price, currency);
+        UpdatedAtUtc = nowUtc;
+    }
+
+    public void AdjustStock(int delta, DateTimeOffset nowUtc)
+    {
+        var updated = Stock + delta;
+        DomainException.ThrowIf(updated < 0, $"El ajuste dejaría el stock en {updated}, y no puede ser negativo.");
+        Stock = updated;
+        UpdatedAtUtc = nowUtc;
+    }
+
+    private static string Normalize(string value, string field, int maxLength)
+    {
+        DomainException.ThrowIf(string.IsNullOrWhiteSpace(value), $"El campo '{field}' es obligatorio.");
+        var trimmed = value.Trim();
+        DomainException.ThrowIf(trimmed.Length > maxLength, $"El campo '{field}' supera {maxLength} caracteres.");
+        return trimmed;
+    }
+
+    private static string NormalizeSku(string sku)
+    {
+        var normalized = Normalize(sku, nameof(sku), maxLength: 32).ToUpperInvariant();
+        DomainException.ThrowIf(
+            !normalized.All(c => char.IsLetterOrDigit(c) || c is '-' or '_'),
+            "El SKU sólo admite letras, dígitos, '-' y '_'.");
+        return normalized;
+    }
+}

@@ -1,0 +1,26 @@
+namespace {{Solution}}.WebApi.Extensions;
+
+using {{Solution}}.Application.Common;
+
+/// <summary>
+/// Traduce el <see cref="Result"/> de la capa de aplicación a respuestas HTTP.
+/// Concentrar el mapeo aquí evita repetir if/else en cada endpoint.
+/// </summary>
+public static class ResultExtensions
+{
+    public static IResult ToHttpResult<TValue>(this Result<TValue> result)
+        => result.IsSuccess ? Results.Ok(result.Value) : Problem(result.Error!);
+
+    public static IResult ToHttpResult(this Result result)
+        => result.IsSuccess ? Results.NoContent() : Problem(result.Error!);
+
+    public static IResult ToCreatedResult<TValue>(this Result<TValue> result, Func<TValue, string> location)
+        => result.IsSuccess ? Results.Created(location(result.Value), result.Value) : Problem(result.Error!);
+
+    private static IResult Problem(Error error) => error.Code switch
+    {
+        "not_found" => Results.Problem(title: "Recurso no encontrado", detail: error.Message, statusCode: StatusCodes.Status404NotFound),
+        "conflict" => Results.Problem(title: "Conflicto", detail: error.Message, statusCode: StatusCodes.Status409Conflict),
+        _ => Results.Problem(title: "Solicitud no válida", detail: error.Message, statusCode: StatusCodes.Status400BadRequest),
+    };
+}

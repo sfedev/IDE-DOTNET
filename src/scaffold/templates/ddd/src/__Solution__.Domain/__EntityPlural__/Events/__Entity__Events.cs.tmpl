@@ -1,0 +1,23 @@
+namespace {{Solution}}.Domain.{{EntityPlural}}.Events;
+
+using {{Solution}}.SharedKernel;
+
+/// <summary>Se ha dado de alta un {{Entity}} en el catálogo.</summary>
+public sealed record {{Entity}}RegisteredDomainEvent(
+    Guid {{Entity}}Id,
+    string Name,
+    string Sku,
+    DateTimeOffset OccurredOnUtc) : DomainEvent(OccurredOnUtc);
+
+/// <summary>El stock de un {{Entity}} ha cambiado.</summary>
+public sealed record {{Entity}}StockAdjustedDomainEvent(
+    Guid {{Entity}}Id,
+    int PreviousStock,
+    int CurrentStock,
+    DateTimeOffset OccurredOnUtc) : DomainEvent(OccurredOnUtc);
+
+/// <summary>Un {{Entity}} se ha quedado sin existencias.</summary>
+public sealed record {{Entity}}OutOfStockDomainEvent(
+    Guid {{Entity}}Id,
+    string Sku,
+    DateTimeOffset OccurredOnUtc) : DomainEvent(OccurredOnUtc);

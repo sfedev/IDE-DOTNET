@@ -1,0 +1,48 @@
+namespace {{Solution}}.Application.{{EntityPlural}}.EventHandlers;
+
+using Microsoft.Extensions.Logging;
+using {{Solution}}.Domain.{{EntityPlural}}.Events;
+using {{Solution}}.SharedKernel;
+
+/// <summary>
+/// Reacción al alta de un {{Entity}}. Se ejecuta DESPUÉS de confirmar la transacción: si el
+/// guardado falla, este código no llega a correr, que es exactamente lo que se quiere.
+/// </summary>
+public sealed class {{Entity}}RegisteredHandler : IDomainEventHandler<{{Entity}}RegisteredDomainEvent>
+{
+    private readonly ILogger<{{Entity}}RegisteredHandler> _logger;
+
+    public {{Entity}}RegisteredHandler(ILogger<{{Entity}}RegisteredHandler> logger) => _logger = logger;
+
+    public Task HandleAsync({{Entity}}RegisteredDomainEvent domainEvent, CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation(
+            "Evento de dominio: {{entity}} {Name} ({Sku}) dado de alta con id {Id}",
+            domainEvent.Name,
+            domainEvent.Sku,
+            domainEvent.{{Entity}}Id);
+
+        return Task.CompletedTask;
+    }
+}
+
+/// <summary>
+/// Reacción a la rotura de stock. Aquí es donde encajaría avisar a compras, publicar en una
+/// cola o disparar un reabastecimiento, sin que el agregado sepa nada de ello.
+/// </summary>
+public sealed class {{Entity}}OutOfStockHandler : IDomainEventHandler<{{Entity}}OutOfStockDomainEvent>
+{
+    private readonly ILogger<{{Entity}}OutOfStockHandler> _logger;
+
+    public {{Entity}}OutOfStockHandler(ILogger<{{Entity}}OutOfStockHandler> logger) => _logger = logger;
+
+    public Task HandleAsync({{Entity}}OutOfStockDomainEvent domainEvent, CancellationToken cancellationToken = default)
+    {
+        _logger.LogWarning(
+            "Evento de dominio: {{entity}} {Sku} se ha quedado sin stock (id {Id})",
+            domainEvent.Sku,
+            domainEvent.{{Entity}}Id);
+
+        return Task.CompletedTask;
+    }
+}

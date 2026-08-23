@@ -1,0 +1,42 @@
+namespace {{Solution}}.Infrastructure.Persistence;
+
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using {{Solution}}.Domain.Entities;
+
+/// <summary>
+/// Prepara la base de datos al arrancar y siembra datos de ejemplo.
+///
+/// Usa EnsureCreated para que la plantilla funcione sin migraciones. Al pasar a producción,
+/// sustituye por <c>context.Database.MigrateAsync()</c> y genera migraciones con:
+///   dotnet ef migrations add Inicial --project src/{{Solution}}.Infrastructure
+/// </summary>
+public static class DatabaseInitializer
+{
+    public static async Task InitializeAsync(IServiceProvider services, CancellationToken cancellationToken = default)
+    {
+        using var scope = services.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger(nameof(DatabaseInitializer));
+
+        await context.Database.EnsureCreatedAsync(cancellationToken);
+
+        if (await context.{{EntityPlural}}.AnyAsync(cancellationToken))
+        {
+            return;
+        }
+
+        var seed = new[]
+        {
+            {{Entity}}.Create("Teclado mecánico 87 teclas", "KB-87-TKL", 89.90m, 24),
+            {{Entity}}.Create("Monitor 27 pulgadas QHD", "MON-27-QHD", 259.00m, 8),
+            {{Entity}}.Create("Silla ergonómica de malla", "CHR-ERG-01", 349.50m, 3),
+        };
+
+        await context.{{EntityPlural}}.AddRangeAsync(seed, cancellationToken);
+        await context.SaveChangesAsync(cancellationToken);
+
+        logger.LogInformation("Base de datos sembrada con {Count} {{entityPlural}}.", seed.Length);
+    }
+}

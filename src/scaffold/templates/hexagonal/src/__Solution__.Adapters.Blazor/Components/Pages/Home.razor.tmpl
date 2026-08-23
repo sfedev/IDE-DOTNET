@@ -1,0 +1,33 @@
+@page "/"
+
+<PageTitle>{{Solution}}</PageTitle>
+
+<h1>{{Solution}}</h1>
+
+<p class="lead">
+    Solución generada con <strong>DotForge IDE</strong> siguiendo <strong>Arquitectura Hexagonal</strong>
+    (Ports &amp; Adapters).
+</p>
+
+<div class="cards">
+    <div class="card">
+        <h2>Domain</h2>
+        <p>El núcleo. Modelo e invariantes puras, sin dependencias externas de ningún tipo.</p>
+    </div>
+    <div class="card">
+        <h2>Ports</h2>
+        <p>La frontera: puertos de entrada (qué se le puede pedir) y de salida (qué necesita).</p>
+    </div>
+    <div class="card">
+        <h2>Adapters conducidos</h2>
+        <p>EF Core y notificaciones. Implementan los puertos de salida y son intercambiables.</p>
+    </div>
+    <div class="card">
+        <h2>Adapters conductores</h2>
+        <p>Esta UI Blazor y la Web API. Invocan puertos de entrada; nada más saben del núcleo.</p>
+    </div>
+</div>
+
+<p>
+    Empieza por <NavLink href="{{entityRoute}}">gestionar {{entityPlural}}</NavLink>.
+</p>

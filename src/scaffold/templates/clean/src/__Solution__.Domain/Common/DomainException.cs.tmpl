@@ -1,0 +1,18 @@
+namespace {{Solution}}.Domain.Common;
+
+/// <summary>
+/// Se lanza cuando una operación violaría una invariante del dominio.
+/// La capa de presentación la traduce a un 400/422; nunca debe escapar como 500.
+/// </summary>
+public sealed class DomainException : Exception
+{
+    public DomainException(string message) : base(message)
+    {
+    }
+
+    /// <summary>Lanza <see cref="DomainException"/> si la condición se cumple.</summary>
+    public static void ThrowIf(bool condition, string message)
+    {
+        if (condition) throw new DomainException(message);
+    }
+}

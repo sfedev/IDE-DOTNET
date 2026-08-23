@@ -1,0 +1,21 @@
+namespace {{Solution}}.Ports.Inbound;
+
+/// <summary>
+/// PUERTO DE ENTRADA (driving port).
+///
+/// Es todo lo que el mundo exterior puede pedirle al hexágono sobre {{EntityPlural}}.
+/// Lo invocan los adaptadores conductores: la Web API, la UI Blazor, un job programado o un
+/// consumidor de mensajes. Ninguno de ellos conoce la implementación.
+/// </summary>
+public interface IManage{{EntityPlural}}
+{
+    Task<IReadOnlyList<{{Entity}}View>> BrowseAsync(string? search, CancellationToken cancellationToken = default);
+
+    Task<Result<{{Entity}}View>> FindAsync(Guid id, CancellationToken cancellationToken = default);
+
+    Task<Result<{{Entity}}View>> RegisterAsync(Register{{Entity}}Command command, CancellationToken cancellationToken = default);
+
+    Task<Result<{{Entity}}View>> AmendAsync(Guid id, Amend{{Entity}}Command command, CancellationToken cancellationToken = default);
+
+    Task<Result> WithdrawAsync(Guid id, CancellationToken cancellationToken = default);
+}

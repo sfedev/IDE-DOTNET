@@ -1,0 +1,38 @@
+namespace {{Solution}}.Infrastructure.Events;
+
+using Microsoft.Extensions.DependencyInjection;
+using {{Solution}}.SharedKernel;
+
+/// <summary>
+/// Publica los eventos de dominio invocando los <see cref="IDomainEventHandler{TEvent}"/>
+/// registrados para cada tipo concreto.
+///
+/// El handler se resuelve por reflexión sobre el tipo real del evento, no sobre IDomainEvent:
+/// de otro modo el contenedor nunca encontraría el manejador correcto.
+/// </summary>
+public sealed class DomainEventPublisher
+{
+    private readonly IServiceProvider _services;
+
+    public DomainEventPublisher(IServiceProvider services) => _services = services;
+
+    public async Task PublishAsync(IReadOnlyCollection<IDomainEvent> domainEvents, CancellationToken cancellationToken = default)
+    {
+        foreach (var domainEvent in domainEvents)
+        {
+            var handlerType = typeof(IDomainEventHandler<>).MakeGenericType(domainEvent.GetType());
+            var handlers = _services.GetServices(handlerType);
+
+            foreach (var handler in handlers)
+            {
+                if (handler is null) continue;
+
+                var method = handlerType.GetMethod(nameof(IDomainEventHandler<IDomainEvent>.HandleAsync))
+                    ?? throw new InvalidOperationException($"No se encuentra HandleAsync en {handlerType}.");
+
+                var task = (Task?)method.Invoke(handler, [domainEvent, cancellationToken]);
+                if (task is not null) await task;
+            }
+        }
+    }
+}

@@ -1,0 +1,9 @@
+namespace {{Solution}}.Infrastructure.Time;
+
+using {{Solution}}.Application.Abstractions;
+
+/// <summary>Reloj real del sistema. En pruebas se sustituye por un doble determinista.</summary>
+public sealed class SystemClock : IClock
+{
+    public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
+}

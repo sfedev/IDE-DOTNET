@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Pruebas de Domain y Application. No tocan base de datos: usan dobles en memoria,
+    que es justamente lo que la regla de dependencia hace posible.
+
+    Ejecución:  dotnet test
+  -->
+  <PropertyGroup>
+    <RootNamespace>{{Solution}}.UnitTests</RootNamespace>
+    <AssemblyName>{{Solution}}.UnitTests</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\{{Solution}}.Domain\{{Solution}}.Domain.csproj" />
+    <ProjectReference Include="..\..\src\{{Solution}}.Application\{{Solution}}.Application.csproj" />
+  </ItemGroup>
+
+</Project>

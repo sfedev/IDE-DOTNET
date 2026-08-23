@@ -1,0 +1,194 @@
+@page "/{{entityRoute}}"
+@rendermode InteractiveServer
+@inject IDispatcher Dispatcher
+
+<PageTitle>{{EntityPlural}} &middot; {{Solution}}</PageTitle>
+
+<h1>{{EntityPlural}}</h1>
+
+<section class="panel">
+    <h2>Alta de {{entity}}</h2>
+
+    <EditForm Model="_form" OnValidSubmit="RegisterAsync" FormName="register-{{entityRoute}}">
+        <DataAnnotationsValidator />
+
+        <div class="form-grid">
+            <label>
+                Nombre
+                <InputText @bind-Value="_form.Name" placeholder="Teclado mecánico" />
+                <ValidationMessage For="() => _form.Name" />
+            </label>
+
+            <label>
+                SKU
+                <InputText @bind-Value="_form.Sku" placeholder="KB-87-TKL" />
+                <ValidationMessage For="() => _form.Sku" />
+            </label>
+
+            <label>
+                Precio
+                <InputNumber @bind-Value="_form.Price" step="0.01" />
+                <ValidationMessage For="() => _form.Price" />
+            </label>
+
+            <label>
+                Stock
+                <InputNumber @bind-Value="_form.Stock" />
+                <ValidationMessage For="() => _form.Stock" />
+            </label>
+        </div>
+
+        <button type="submit" class="btn-primary" disabled="@_busy">Registrar {{entity}}</button>
+    </EditForm>
+
+    @if (_message is not null)
+    {
+        <p class="@(_isError ? "msg-error" : "msg-ok")">@_message</p>
+    }
+</section>
+
+<section class="panel">
+    <div class="panel-head">
+        <h2>Listado</h2>
+        <input class="search" placeholder="Buscar por nombre o SKU"
+               value="@_search"
+               @oninput="OnSearchChangedAsync" />
+    </div>
+
+    @if (_items is null)
+    {
+        <p>Cargando…</p>
+    }
+    else if (_items.Count == 0)
+    {
+        <p class="empty">No hay {{entityPlural}} que mostrar.</p>
+    }
+    else
+    {
+        <table class="grid">
+            <thead>
+                <tr>
+                    <th>Nombre</th>
+                    <th>SKU</th>
+                    <th class="num">Precio</th>
+                    <th class="num">Stock</th>
+                    <th>Estado</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var item in _items)
+                {
+                    <tr @key="item.Id">
+                        <td>@item.Name</td>
+                        <td><code>@item.Sku</code></td>
+                        <td class="num">@item.Price.ToString("0.00") @item.Currency</td>
+                        <td class="num">@item.Stock</td>
+                        <td>
+                            <span class="badge @(item.IsAvailable ? "ok" : "ko")">
+                                @(item.IsAvailable ? "Disponible" : "Sin stock")
+                            </span>
+                        </td>
+                        <td>
+                            <button class="btn-danger" disabled="@_busy"
+                                    @onclick="() => WithdrawAsync(item.Id)">Dar de baja</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</section>
+
+@code {
+    private IReadOnlyList<{{Entity}}Response>? _items;
+    private readonly {{Entity}}Form _form = new();
+    private string? _search;
+    private string? _message;
+    private bool _isError;
+    private bool _busy;
+
+    protected override Task OnInitializedAsync() => ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        // La vista despacha una CONSULTA: no conoce handlers ni repositorios.
+        var result = await Dispatcher.QueryAsync(new List{{EntityPlural}}Query(_search));
+        _items = result.IsSuccess ? result.Value : [];
+        StateHasChanged();
+    }
+
+    private async Task OnSearchChangedAsync(ChangeEventArgs args)
+    {
+        _search = args.Value?.ToString();
+        await ReloadAsync();
+    }
+
+    private async Task RegisterAsync()
+    {
+        _busy = true;
+        try
+        {
+            // La vista despacha un COMANDO y sólo interpreta el Result.
+            var command = new Register{{Entity}}Command(_form.Name, _form.Sku, _form.Price, _form.Stock);
+            var result = await Dispatcher.SendAsync(command);
+
+            _isError = result.IsFailure;
+            _message = result.IsSuccess
+                ? $"{{Entity}} '{result.Value.Name}' registrado."
+                : result.Error.Message;
+
+            if (result.IsSuccess)
+            {
+                _form.Reset();
+                await ReloadAsync();
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task WithdrawAsync(Guid id)
+    {
+        _busy = true;
+        try
+        {
+            var result = await Dispatcher.SendAsync(new Withdraw{{Entity}}Command(id));
+            _isError = result.IsFailure;
+            _message = result.IsSuccess ? "{{Entity}} dado de baja." : result.Error.Message;
+            await ReloadAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>Modelo del formulario. Vive en la vista: no contamina el dominio.</summary>
+    private sealed class {{Entity}}Form
+    {
+        [Required(ErrorMessage = "El nombre es obligatorio.")]
+        [StringLength(120, ErrorMessage = "Máximo 120 caracteres.")]
+        public string Name { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "El SKU es obligatorio.")]
+        [StringLength(32, ErrorMessage = "Máximo 32 caracteres.")]
+        public string Sku { get; set; } = string.Empty;
+
+        [Range(0.01, 1_000_000, ErrorMessage = "El precio debe ser mayor que cero.")]
+        public decimal Price { get; set; } = 1m;
+
+        [Range(0, int.MaxValue, ErrorMessage = "El stock no puede ser negativo.")]
+        public int Stock { get; set; }
+
+        public void Reset()
+        {
+            Name = string.Empty;
+            Sku = string.Empty;
+            Price = 1m;
+            Stock = 0;
+        }
+    }
+}

@@ -1,0 +1,15 @@
+namespace {{Solution}}.Ports;
+
+using Microsoft.Extensions.DependencyInjection;
+using {{Solution}}.Ports.Application;
+using {{Solution}}.Ports.Inbound;
+
+/// <summary>Registra los servicios de aplicación que implementan los puertos de entrada.</summary>
+public static class DependencyInjection
+{
+    public static IServiceCollection AddHexagon(this IServiceCollection services)
+    {
+        services.AddScoped<IManage{{EntityPlural}}, {{EntityPlural}}Service>();
+        return services;
+    }
+}

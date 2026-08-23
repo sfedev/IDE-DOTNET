@@ -1,0 +1,20 @@
+namespace {{Solution}}.Application.{{EntityPlural}};
+
+using {{Solution}}.Application.Common;
+
+/// <summary>
+/// Casos de uso de {{EntityPlural}}. La capa de presentación depende de esta interfaz,
+/// nunca de la implementación.
+/// </summary>
+public interface I{{Entity}}Service
+{
+    Task<IReadOnlyList<{{Entity}}Dto>> ListAsync(string? search, CancellationToken cancellationToken = default);
+
+    Task<Result<{{Entity}}Dto>> GetAsync(Guid id, CancellationToken cancellationToken = default);
+
+    Task<Result<{{Entity}}Dto>> CreateAsync(Create{{Entity}}Request request, CancellationToken cancellationToken = default);
+
+    Task<Result<{{Entity}}Dto>> UpdateAsync(Guid id, Update{{Entity}}Request request, CancellationToken cancellationToken = default);
+
+    Task<Result> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
+}

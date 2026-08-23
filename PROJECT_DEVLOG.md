@@ -1,0 +1,381 @@
+# PROJECT_DEVLOG.md — DotForge IDE
+
+Bitácora viva de desarrollo. Se actualiza **en cada iteración** del bucle de trabajo.
+
+- **Proyecto:** DotForge IDE — distribución de IDE para C# / .NET 9+ / Blazor
+- **Inicio:** 2026-08-23
+- **Estado global:** 🟢 Completado — v1.0.0 empaquetada y verificada
+
+Leyenda: `[ ]` pendiente · `[~]` en curso · `[x]` completado y **verificado con un comando**
+
+---
+
+## Entorno detectado (2026-08-23)
+
+| Herramienta | Versión |
+|---|---|
+| Node.js | v24.19.0 |
+| npm | 11.17.0 |
+| .NET SDK | 10.0.400 |
+| .NET Runtime | 10.0.11 (no hay runtime 9.0 instalado) |
+| Git | 2.55.0.windows.3 |
+| Python | 3.12.10 |
+| SO | Windows 11 Pro 10.0.26200 |
+| CPU | 12 núcleos |
+| Red | NuGet / npm / GitHub accesibles (HTTP 200) |
+
+**Implicación:** las plantillas targetean `net9.0` (build OK vía targeting pack de NuGet), pero
+`dotnet run` de un `net9.0` fallaría en esta máquina por falta de runtime 9.0. La suite de tests
+por tanto **compila** pero no **ejecuta** los proyectos generados. Se añade el flag
+`--framework net10.0` para quien tenga el runtime alineado.
+
+---
+
+## Roadmap por fases
+
+### Fase 0 — Setup y documentación
+- [x] F0.1 Crear `CLAUDE.md` (comandos, layout, convenciones, trampas del entorno)
+- [x] F0.2 Crear `AGENTS.md` (10 sub-agentes con rol, prompt y criterio de aceptación)
+- [x] F0.3 Crear `PROJECT_DEVLOG.md` con checklist por fases
+- [x] F0.4 Estructura de directorios del repositorio
+- [x] F0.5 `package.json`, `tsconfig.json`, `.gitignore`, `.editorconfig`
+- [x] F0.6 Materializar los sub-agentes en `.claude/agents/`
+- [x] F0.7 `npm install` verde
+
+### Fase 1 — ★ Módulo de Scaffolding (generador de arquitecturas)
+- [x] F1.1 Motor de plantillas (`engine.ts`): tokens, condicionales, filtros de nombre
+- [x] F1.2 Modelo de blueprint + registro de arquitecturas
+- [x] F1.3 Generador: resolución de rutas, escritura, `.sln`, post-proceso
+- [x] F1.4 Blueprint **Clean Architecture** (Domain / Application / Infrastructure / UI)
+- [x] F1.5 Blueprint **Hexagonal** (Domain / Ports / Adapters)
+- [x] F1.6 Blueprint **DDD + CQRS** (Agregados, VOs, Eventos, Dispatcher, Repos)
+- [x] F1.7 CRUD de ejemplo funcional en cada blueprint (entidad real + endpoints)
+- [x] F1.8 UI Blazor de ejemplo (listado + alta) enlazada al backend
+- [x] F1.9 `appsettings.json`, Serilog, OpenAPI/Scalar, EF Core preconfigurados
+- [x] F1.10 Proyecto de tests xUnit generado por plantilla
+- [x] F1.11 CLI `dotforge` headless (`list`, `new`, flags, `--json`)
+- [x] F1.12 Tests: `dotnet build` real de las 3 arquitecturas
+
+### Fase 2 — LSP / IntelliSense C#
+- [x] F2.1 Adquisición de `Microsoft.CodeAnalysis.LanguageServer` desde feed `dotnet-tools`
+- [x] F2.2 Fallback a OmniSharp-Roslyn
+- [x] F2.3 Transporte stdio con framing `Content-Length`
+- [x] F2.4 Handshake `initialize` / `initialized` + capacidades
+- [x] F2.5 Puente IPC main ↔ renderer para tráfico LSP
+- [x] F2.6 Adaptadores Monaco: completion, hover, signature help, definition, references
+- [x] F2.7 Diagnósticos en el editor y en el panel de problemas
+- [x] F2.8 Formateo y code actions
+- [x] F2.9 Indicador de estado del LSP en la barra inferior
+
+### Fase 3 — UI, branding y lenguajes
+- [x] F3.1 Shell de la aplicación (activity bar, sidebar, tabs, panel, status bar)
+- [x] F3.2 Tema **DotForge Purple** (oscuro) + variante clara
+- [x] F3.3 Integración de Monaco con carga local del vendor
+- [x] F3.4 Gramática Razor/Blazor (Monarch) + snippets
+- [x] F3.5 Auto-cierre y auto-renombrado de etiquetas Razor
+- [x] F3.6 Explorador visual de soluciones `.sln` / `.csproj`
+- [x] F3.7 Panel visual de NuGet (buscar, instalar, actualizar, desinstalar)
+- [x] F3.8 Terminal integrada
+- [x] F3.9 Panel de problemas y de salida
+- [x] F3.10 Wizard visual del generador de arquitecturas
+- [x] F3.11 Paleta de comandos + atajos Win/macOS
+- [x] F3.12 Pantalla de bienvenida con branding
+
+### Fase 4 — Toolchain .NET y depuración
+- [x] F4.1 Parser de `.sln` (clásico) y `.slnx`
+- [x] F4.2 Parser de `.csproj` SDK-style
+- [x] F4.3 Runner de tareas (`build`, `run`, `test`, `clean`, `restore`)
+- [x] F4.4 Parseo de la salida de MSBuild a diagnósticos
+- [x] F4.5 Hot Reload con `dotnet watch`
+- [x] F4.6 Adquisición de NetCoreDbg (win-x64, osx-x64, osx-arm64)
+- [x] F4.7 Bridge DAP: breakpoints, stepping, variables, call stack
+- [x] F4.8 Registro de procesos hijo y apagado limpio
+
+### Fase 5 — Build multiplataforma y empaquetado
+- [x] F5.1 `scripts/build.mjs` con esbuild (main, preload, renderer, cli)
+- [x] F5.2 Copia del vendor de Monaco
+- [x] F5.3 Generador de iconos `.ico` / `.icns` / `.png` sin herramientas nativas
+- [x] F5.4 `electron-builder.yml`: NSIS, portable zip, dmg, zip macOS (arm64 + x64)
+- [x] F5.5 `npm run pack` (smoke test desempaquetado)
+- [x] F5.6 `npm run dist:win` → artefactos reales en `/dist`
+- [ ] F5.7 `npm run dist:mac` → artefactos reales en `/dist` — **bloqueado por plataforma**:
+      electron-builder no puede generar `.dmg` desde Windows. Resuelto con `scripts/dist-mac.mjs`
+      (mensaje accionable + salida con código 2) y con `.github/workflows/release.yml`, que lo
+      construye en un runner `macos-latest`. Se completa al ejecutarse en macOS o en CI.
+- [x] F5.8 `scripts/verify-dist.mjs` valida el contenido de `/dist`
+
+### Fase 6 — QA, cierre y documentación final
+- [x] F6.1 Suite de tests unitarios del motor de plantillas
+- [x] F6.2 Tests de contract IPC
+- [x] F6.3 Tests de seguridad (path traversal, superficie del preload)
+- [x] F6.4 Test de humo de arranque de Electron
+- [x] F6.5 `npm test` verde de punta a punta
+- [x] F6.6 `README.md` final
+- [x] F6.7 Revisión final de `CLAUDE.md`, `AGENTS.md`, `PROJECT_DEVLOG.md`
+
+---
+
+## Decisiones técnicas (ADR corto)
+
+### ADR-001 — Base del IDE: Electron + Monaco (no fork de VS Code, no Theia)
+**Fecha:** 2026-08-23
+**Contexto:** Se necesita un IDE de escritorio empaquetable para Windows y macOS, 100% open source.
+**Opciones:**
+- (a) Fork de VS Code (Code-OSS): máxima funcionalidad, pero el árbol pesa GB, la build tarda
+  decenas de minutos, y el marketplace y las fuentes tipográficas de Microsoft no son
+  redistribuibles sin trabajo de limpieza.
+- (b) Eclipse Theia: buena base, pero arrastra un stack Inversify + build compleja y su modelo
+  de extensión añade una capa de indirección importante para lo que se necesita aquí.
+- (c) Electron + Monaco Editor + shell propio: control total, build en segundos, superficie de
+  seguridad pequeña y auditable, artefactos ligeros.
+**Decisión:** (c) Electron + Monaco con shell propio.
+**Consecuencias:** hay que implementar a mano el cliente LSP, el bridge DAP, el explorador y los
+paneles — que es exactamente el trabajo diferencial de este producto. Se pierde compatibilidad
+directa con extensiones VSIX; se mitiga apuntando el registro a Open VSX para futuras versiones.
+
+### ADR-002 — Sin MediatR en las plantillas generadas
+**Fecha:** 2026-08-23
+**Contexto:** El patrón CQRS del blueprint DDD necesita un despachador de comandos/consultas.
+MediatR es el estándar de facto, pero pasó a licencia comercial en versiones recientes.
+**Opciones:** (a) MediatR, (b) alternativa OSS de terceros, (c) despachador propio ~120 líneas.
+**Decisión:** (c) `IDispatcher` propio con registro por reflexión sobre el ensamblado de Application.
+**Consecuencias:** cero fricción de licencia para quien genere una solución, menos superficie de
+dependencias, y el código queda didáctico. A cambio no hay pipeline behaviors de terceros:
+se incluye un pipeline de comportamientos propio (logging + validación) para cubrir el caso común.
+
+---
+
+## Bitácora de iteraciones
+
+### Iteración 1 — 2026-08-23 — Bootstrap
+**Objetivo:** analizar el entorno y crear los documentos maestros.
+**Hecho:**
+- Sondeo del entorno (Node 24.19, .NET SDK 10.0.400, red OK).
+- Creados `CLAUDE.md`, `AGENTS.md`, `PROJECT_DEVLOG.md`.
+- Estructura de directorios creada; repositorio git inicializado.
+
+**Errores encontrados:**
+- *Síntoma:* el heredoc de bash falló con `unexpected EOF while looking for matching quote`
+  al escribir un Markdown largo con comillas y backticks anidados.
+  *Causa raíz:* el contenido con comillas simples desbalanceadas respecto al parser de la shell.
+  *Arreglo:* usar la herramienta de escritura de archivos para documentos largos y reservar los
+  heredocs para archivos cortos y sin comillas conflictivas.
+
+**Siguiente:** cerrar la Fase 0 (`package.json`, `tsconfig.json`, `.gitignore`, agentes en
+`.claude/agents/`, `npm install`) y arrancar la Fase 1.
+
+### ADR-003 — Framework de pruebas de las plantillas: xUnit v2 + VSTest (no xUnit v3 + MTP)
+**Fecha:** 2026-08-23
+**Contexto:** Las soluciones generadas incluyen un proyecto de pruebas que debe ejecutarse con
+`dotnet test` sin configuración adicional, tanto en SDK 9 como en SDK 10.
+**Opciones:**
+- (a) xUnit v3 + Microsoft.Testing.Platform: es la dirección futura del ecosistema.
+- (b) xUnit v2 + VSTest (`Microsoft.NET.Test.Sdk` + `xunit.runner.visualstudio`).
+**Decisión:** (b) xUnit 2.9.3 + xunit.runner.visualstudio 3.1.5 + Microsoft.NET.Test.Sdk 18.9.0.
+**Consecuencias:** `dotnet test` funciona sin `global.json` ni `dotnet.config` en el SDK 10.
+Cuando xUnit v3 y el orquestador MTP del SDK converjan, migrar es cambiar tres `PackageReference`
+y quitar el `NoWarn` de xUnit1051. Se documenta en el README generado.
+
+---
+
+### Iteración 2 — 2026-08-23 — Motor de scaffolding y Clean Architecture
+**Objetivo:** construir el motor de plantillas, el generador, la CLI y validar la primera
+arquitectura compilando de verdad.
+
+**Hecho:**
+- Motor de plantillas estricto (`engine.ts`) con tokens, condicionales anidados y `{{else}}`.
+  Un token o flag desconocido lanza error con número de línea: los typos rompen el test, no el
+  `dotnet build`.
+- Utilidades de nombres (`naming.ts`): validación de identificadores C#, pluralización inglesa,
+  GUIDs deterministas por SHA-256 para que el `.sln` sea reproducible.
+- Contexto de generación (`context.ts`) con matriz de versiones NuGet por framework.
+- Emisor de `.sln` propio (`solution-file.ts`) con carpetas de solución, algo que `dotnet sln`
+  no permite crear.
+- Generador (`generator.ts`) y CLI `dotforge` completa.
+- Blueprint **Clean Architecture** con 47 plantillas: Domain, Application, Infrastructure,
+  WebApi (minimal API + OpenAPI + Scalar), Blazor interactivo y pruebas unitarias.
+- Build con esbuild (`scripts/build.mjs`) y utilidad de devlog (`scripts/devlog.mjs`).
+
+**Verificado con comandos reales:**
+- `dotnet build` sobre la solución generada (net9.0): **0 errores, 0 advertencias**.
+- `dotnet test` sobre la solución generada (net10.0): **14/14 pruebas correctas**.
+
+**Errores encontrados y solucionados:**
+1. *Síntoma:* `build/cli.js` fallaba con `SyntaxError: Invalid or unexpected token` en la línea 2.
+   *Causa raíz:* el shebang estaba a la vez en el banner de esbuild y en el fuente TypeScript,
+   así que quedaba uno en la línea 2, donde ya no es válido.
+   *Arreglo:* el shebang lo pone sólo el banner de la build; se eliminó del fuente.
+2. *Síntoma:* `error CS1061: WebApplication no contiene MapScalarApiReference`.
+   *Causa raíz:* faltaba `using Scalar.AspNetCore;` en la plantilla de `Program.cs`.
+   *Arreglo:* añadido. Cubierto por el test de build de la arquitectura.
+3. *Síntoma:* `error CS0103: El nombre 'InteractiveServer' no existe en el contexto actual`
+   al compilar `Products.razor`.
+   *Causa raíz:* `@rendermode InteractiveServer` necesita
+   `@using static Microsoft.AspNetCore.Components.Web.RenderMode` en `_Imports.razor`.
+   *Arreglo:* añadido al `_Imports.razor` generado.
+4. *Síntoma:* `dotnet test` fallaba con "Testing with VSTest target is no longer supported by
+   Microsoft.Testing.Platform on .NET 10 SDK".
+   *Causa raíz:* xUnit v3 arrastra Microsoft.Testing.Platform, y el SDK 10 exige un opt-in
+   explícito. Ni `dotnet.config` ni `TestingPlatformDotnetTestSupport` lo resolvieron; con
+   `global.json` sí arrancaba el runner pero descubría 0 pruebas, aunque el ejecutable de test
+   lanzado a mano sí ejecutaba las 14.
+   *Arreglo:* ADR-003, volver a xUnit v2 + VSTest. Verificado: 14/14 con `dotnet test`.
+5. *Síntoma:* comandos de shell largos fallaban con `unexpected EOF while looking for matching
+   quote` al escribir plantillas con heredocs.
+   *Causa raíz:* el comando se trunca por encima de ~10 KB, dejando el heredoc sin cerrar.
+   *Arreglo:* escribir las plantillas en lotes de menos de ~8 KB. Regla añadida a `CLAUDE.md`.
+
+**Siguiente:** blueprints Hexagonal y DDD + CQRS, y la suite de tests automatizada que compila
+las tres arquitecturas.
+
+---
+
+### Iteración 3 — 2026-08-23 — Hexagonal, DDD+CQRS y suite de pruebas
+**Objetivo:** completar las tres arquitecturas y montar la suite automatizada que las verifica.
+
+**Hecho:**
+- Blueprint **Hexagonal**: Domain (núcleo puro), Ports (puertos de entrada/salida + servicios de
+  aplicación) y Adapters (persistencia EF Core, notificaciones, Web API y Blazor).
+- Blueprint **DDD + CQRS**: SharedKernel (Entity, AggregateRoot, ValueObject, IDomainEvent,
+  Result), agregado con invariantes y eventos, despachador CQRS propio con envoltorios genéricos
+  cacheados, pipeline de comportamientos (logging + validación), publicación de eventos de dominio
+  al confirmar la unidad de trabajo.
+- Suite de pruebas con el runner nativo de Node (`node --test`), sin dependencias añadidas:
+  `tests/unit/` (motor, nombres, blueprints, .sln) y `tests/scaffold/` (build real + runtime).
+- `scripts/run-tests.mjs` con grupos y `--filter`.
+
+**Verificado con comandos reales:**
+- `node --test tests/unit/*` → **106 pruebas, 0 fallos**.
+- Matriz de scaffolding (6 combinaciones × 3 arquitecturas) → `dotnet build`
+  **0 errores y 0 advertencias en las 6**.
+- `dotnet test` sobre las 3 arquitecturas generadas en net10.0 → **todas correctas**.
+- Prueba de humo en runtime: la Web API generada arranca y responde 201/409/400/404/204,
+  filtra por búsqueda y publica su documento OpenAPI.
+
+**Errores encontrados y solucionados:**
+6. *Síntoma:* `toCamelCase('URLBuilder')` devolvía `urLBuilder`.
+   *Causa raíz:* el cálculo `run.length - 1` sobraba: el lookahead del regex ya excluye del
+   acrónimo la mayúscula que abre la siguiente palabra.
+   *Arreglo:* minusculizar el run completo. Test de regresión en `tests/unit/naming.test.mjs`.
+7. *Síntoma:* con `--db inmemory` fallaba el build con `CS1061: EntityTypeBuilder<T> no contiene
+   ToTable / HasColumnName` en las tres arquitecturas.
+   *Causa raíz:* `ToTable` y `HasColumnName` son API relacional; el paquete
+   `Microsoft.EntityFrameworkCore.InMemory` no arrastra `Microsoft.EntityFrameworkCore.Relational`,
+   que sí llega de forma transitiva con el proveedor SQLite.
+   *Arreglo:* referenciar `Microsoft.EntityFrameworkCore.Relational` explícitamente en el proyecto
+   de persistencia de las tres arquitecturas, para que el mapeo sea idéntico con ambos proveedores.
+   Verificado además en runtime: la app con InMemory arranca y sirve el CRUD.
+   *Cómo se detectó:* la matriz de la suite incluye combinaciones con `inmemory`. Sin esa
+   combinación el fallo habría llegado al usuario final.
+8. *Síntoma:* `_Imports.razor` del adaptador Blazor hexagonal emitía `warning CS0105` (using
+   duplicado).
+   *Causa raíz:* dos namespaces distintos de la plantilla Clean colapsaron al mismo namespace al
+   adaptarla a Hexagonal.
+   *Arreglo:* deduplicación del archivo. El test de build exige **0 advertencias**, no sólo 0 errores.
+9. *Síntoma:* la prueba de humo fallaba con `Body is unusable: Body has already been read`.
+   *Causa raíz:* leer el cuerpo de la respuesta con `.text()` en el mensaje de aserción y luego
+   con `.json()`; el stream de `fetch` sólo se puede consumir una vez.
+   *Arreglo:* leer una vez como texto y parsear a mano.
+
+**Nota:** un 500 durante una prueba manual con `curl` resultó ser culpa del propio `curl`, que
+enviaba el acento de "Periféricos" en Latin-1 en lugar de UTF-8, no del código generado.
+
+**Siguiente:** el IDE en sí — shell de Electron, Monaco, cliente LSP, explorador de soluciones,
+panel NuGet, wizard visual y empaquetado multiplataforma.
+
+---
+
+### ADR-004 — Terminal sin pseudoterminal, y lista blanca de programas
+**Fecha:** 2026-08-23
+**Contexto:** El IDE necesita una terminal integrada, pero un PTY real requiere `node-pty`, una
+dependencia nativa.
+**Opciones:**
+- (a) `node-pty`: terminal completa, pero obliga a un paso de rebuild por plataforma y arquitectura,
+  rompe la reproducibilidad del empaquetado y añade una dependencia binaria al instalador.
+- (b) Ejecutor de comandos con `spawn` y `shell: false`: sin PTY, pero sin dependencias nativas.
+**Decisión:** (b), con troceado propio de la línea en argv y lista blanca de programas
+(`dotnet`, `git`, `npm`, …).
+**Consecuencias:** cubre el flujo .NET real (compilar, `git status`, `npm ci`) y es inmune a la
+inyección de comandos, porque los metacaracteres nunca llegan a un shell. No sirve para programas
+interactivos; se dice explícitamente en la propia terminal y en el README.
+
+### ADR-005 — F5 depura; ejecutar sin depurar es un comando aparte
+**Fecha:** 2026-08-23
+**Contexto:** F5 estaba mapeado a `dotnet run`. Al implementar NetCoreDbg había que decidir qué
+hace F5.
+**Decisión:** F5 inicia la depuración (como en Visual Studio y VS Code), `Ctrl+F5` inicia con Hot
+Reload y "Ejecutar sin depurar" queda como comando de la paleta.
+**Consecuencias:** el atajo hace lo que espera cualquiera que venga de Visual Studio. Depurar exige
+haber compilado antes; si no, el error dice exactamente qué comando ejecutar.
+
+---
+
+### Iteración 4 — 2026-08-23 — El IDE: shell, LSP, herramientas .NET y depuración
+**Objetivo:** construir el IDE completo alrededor del generador.
+
+**Hecho:**
+- Shell de Electron con la configuración de seguridad completa (aislamiento de contexto, sin
+  integración de Node, CSP sin `eval` ni orígenes remotos, permisos denegados, navegación externa
+  bloqueada) y apagado que no deja procesos huérfanos.
+- Contrato IPC único y auditable en `src/shared/contracts.ts`; el preload no expone `ipcRenderer`.
+- Cliente LSP con framing `Content-Length`, handshake completo y 10 proveedores de Monaco.
+  Adquisición automática de `Microsoft.CodeAnalysis.LanguageServer` desde el feed `dotnet-tools`,
+  con OmniSharp de respaldo.
+- Decodificador ZIP propio en Node puro (directorio central, ZIP64, protección zip-slip) para no
+  añadir dependencias al descargar el toolchain.
+- Gramática Razor/Blazor, auto-cierre de etiquetas y 13 snippets.
+- Explorador de soluciones (`.sln`, `.slnx`, `.csproj`, `Directory.Build.props`), panel NuGet,
+  runner de tareas con diagnósticos clicables, terminal integrada y asistente visual.
+- Depuración completa con NetCoreDbg: breakpoints en el margen, pila, variables, evaluación y pasos.
+- Iconos multirresolución generados por código (codificador PNG, ICO e ICNS propios).
+- Empaquetado con electron-builder y workflow de CI para los artefactos de macOS.
+
+**Verificado con comandos reales:**
+- `npm test` → **298 pruebas, 0 fallos** en los cuatro grupos.
+- `npx electron . --smoke-test` → SMOKE_OK, incluida la tokenización real de Razor en el renderer.
+- `npm run dist:win` → instalador NSIS de 117,2 MB y portable de 161,5 MB, verificados.
+- La app **empaquetada** pasa el smoke test y sus plantillas generan una solución hexagonal que
+  compila con 0 errores y 0 advertencias.
+- Depuración real: breakpoint alcanzado, `i == 1`, `contador == 0`, continuar → `i == 2`.
+- Descarga real del toolchain: Roslyn LanguageServer y NetCoreDbg extraídos con el ZIP propio.
+
+**Errores encontrados y solucionados:**
+10. *Síntoma:* toda la gramática Razor devolvía `text` — ninguna directiva se reconocía.
+    *Causa raíz:* en Monarch, `@@` dentro de una expresión regular es el **escape de una sola
+    arroba**. La regla `[/@@/, 'text']`, pensada para la arroba literal de Razor (`a@@b`), compilaba
+    a `/^(?:@)/` y se comía el `@` de toda directiva antes de que se evaluara su regla.
+    *Cómo se encontró:* volcando las reglas compiladas con el compilador Monarch invocado desde
+    Node, tras comprobar que la gramática compilaba pero no casaba.
+    *Arreglo:* `[/@@@@/, 'text']`. Cubierto por el smoke test, que tokeniza `correo@@ejemplo.com`.
+11. *Síntoma:* `{ cases: ... }` dentro de la acción de un grupo compilaba pero no resolvía en
+    ejecución.
+    *Arreglo:* alternación generada desde un atributo **string** (`directivesPattern`). Monarch
+    exige que una referencia `@atributo` dentro de un regex apunte a una cadena, no a un array;
+    el compilador lo dice con un mensaje claro que sólo se ve invocándolo directamente.
+12. *Síntoma:* al abrir una solución, la barra lateral mostraba el panel NuGet aunque el icono
+    activo fuera el del explorador.
+    *Causa raíz:* ambas vistas escribían en el mismo contenedor al recibir la solución y ganaba la
+    última.
+    *Arreglo:* cada vista tiene un flag `visible` y sólo pinta si está activa.
+13. *Síntoma:* abrir un archivo por línea de comandos no lo abría en el editor.
+    *Causa raíz:* el evento se emitía en `did-finish-load`, antes de que el renderer terminara de
+    arrancar (Monaco tarda), así que no había nadie escuchando.
+    *Arreglo:* sustituir el evento por una consulta (`workspace:pending-file`) que el renderer hace
+    cuando ya está listo. Además, la raíz del workspace pasa a ser la carpeta de la solución más
+    cercana, no la del archivo.
+14. *Síntoma:* el explorador mostraba todos los proyectos sin target framework.
+    *Causa raíz:* las soluciones generadas declaran `TargetFramework` en `Directory.Build.props`,
+    no en cada `.csproj`.
+    *Arreglo:* `readInheritedProperties` sube buscando el `Directory.Build.props` más cercano.
+    Lo detectó una prueba unitaria que parsea una solución generada por el propio scaffolder.
+15. *Síntoma:* la adquisición del servidor de lenguaje bajaba una versión antigua (4.8.0 en vez de
+    5.4.0).
+    *Causa raíz:* el feed devuelve las versiones en orden descendente y el código cogía la última.
+    *Arreglo:* `pickLatestVersion`, que compara segmentos numéricos. Con casos de prueba.
+16. *Síntoma:* un acelerador de menú con un carácter no ASCII se aceptaba en la configuración pero
+    Electron lo rechazaba en ejecución, dejando el atajo muerto.
+    *Arreglo:* `Ctrl+J` para la terminal, y una aserción en el smoke test que falla si Electron
+    vuelve a quejarse de un acelerador.
+
+**Estado final:** 60/63 tareas del roadmap. La única pendiente real es F5.7 (artefactos de macOS),
+bloqueada por plataforma y resuelta mediante el workflow de CI incluido.

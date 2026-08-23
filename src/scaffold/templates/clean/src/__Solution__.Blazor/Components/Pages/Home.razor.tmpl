@@ -1,0 +1,32 @@
+@page "/"
+
+<PageTitle>{{Solution}}</PageTitle>
+
+<h1>{{Solution}}</h1>
+
+<p class="lead">
+    Solución generada con <strong>DotForge IDE</strong> siguiendo <strong>Clean Architecture</strong>.
+</p>
+
+<div class="cards">
+    <div class="card">
+        <h2>Domain</h2>
+        <p>Entidades, objetos de valor e invariantes. Sin dependencias hacia fuera.</p>
+    </div>
+    <div class="card">
+        <h2>Application</h2>
+        <p>Casos de uso y puertos. Orquesta el dominio y define qué necesita de fuera.</p>
+    </div>
+    <div class="card">
+        <h2>Infrastructure</h2>
+        <p>EF Core, reloj del sistema y demás detalles reemplazables.</p>
+    </div>
+    <div class="card">
+        <h2>Presentación</h2>
+        <p>Esta app Blazor y la Web API. Sólo aquí se compone el grafo de dependencias.</p>
+    </div>
+</div>
+
+<p>
+    Empieza por <NavLink href="{{entityRoute}}">gestionar {{entityPlural}}</NavLink>.
+</p>

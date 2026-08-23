@@ -1,0 +1,50 @@
+using Scalar.AspNetCore;
+using Serilog;
+using {{Solution}}.Adapters.Notifications;
+using {{Solution}}.Adapters.Persistence;
+using {{Solution}}.Adapters.Web.Endpoints;
+using {{Solution}}.Ports;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Host.UseSerilog((context, services, configuration) => configuration
+    .ReadFrom.Configuration(context.Configuration)
+    .ReadFrom.Services(services)
+    .Enrich.FromLogContext());
+
+// --- Montaje del hexágono ---------------------------------------------------------------
+// El núcleo primero, los adaptadores después. Este es el único punto de la solución donde
+// se decide qué adaptador concreto se enchufa a cada puerto.
+builder.Services.AddHexagon();
+builder.Services.AddPersistenceAdapter(builder.Configuration);
+builder.Services.AddNotificationsAdapter();
+
+builder.Services.AddOpenApi();
+builder.Services.AddProblemDetails();
+
+var app = builder.Build();
+
+app.UseSerilogRequestLogging();
+app.UseExceptionHandler();
+app.UseStatusCodePages();
+
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+    app.MapScalarApiReference(options => options.WithTitle("{{Solution}} API"));
+}
+
+app.Map{{EntityPlural}}Endpoints();
+
+app.MapGet("/", () => Results.Redirect("/scalar/v1")).ExcludeFromDescription();
+
+app.MapGet("/health", () => Results.Ok(new { status = "healthy", adapter = "web" }))
+   .WithName("Health")
+   .WithTags("Diagnóstico");
+
+await PersistenceAdapterInstaller.InitializeStoreAsync(app.Services);
+
+Log.Information("{{Solution}} adaptador web listo. Documentación en /scalar/v1");
+await app.RunAsync();
+
+public partial class Program;

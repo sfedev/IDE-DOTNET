@@ -1,0 +1,67 @@
+namespace {{Solution}}.Application.{{EntityPlural}}.Commands;
+
+using {{Solution}}.Application.Abstractions;
+using {{Solution}}.Domain.{{EntityPlural}};
+using {{Solution}}.SharedKernel;
+
+public sealed record Amend{{Entity}}Command(
+    Guid Id,
+    string Name,
+    decimal Price,
+    int StockDelta,
+    string Currency = "EUR") : ICommand<{{Entity}}Response>;
+
+public sealed class Amend{{Entity}}Validator : IValidator<Amend{{Entity}}Command>
+{
+    public IEnumerable<string> Validate(Amend{{Entity}}Command request)
+    {
+        if (request.Id == Guid.Empty) yield return "El identificador es obligatorio.";
+        if (string.IsNullOrWhiteSpace(request.Name)) yield return "El nombre es obligatorio.";
+        if (request.Price <= 0m) yield return "El precio debe ser mayor que cero.";
+    }
+}
+
+public sealed class Amend{{Entity}}Handler : ICommandHandler<Amend{{Entity}}Command, {{Entity}}Response>
+{
+    private readonly I{{Entity}}Repository _repository;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly IDateTimeProvider _clock;
+
+    public Amend{{Entity}}Handler(I{{Entity}}Repository repository, IUnitOfWork unitOfWork, IDateTimeProvider clock)
+    {
+        _repository = repository;
+        _unitOfWork = unitOfWork;
+        _clock = clock;
+    }
+
+    public async Task<Result<{{Entity}}Response>> HandleAsync(
+        Amend{{Entity}}Command command,
+        CancellationToken cancellationToken = default)
+    {
+        var {{entity}} = await _repository.GetByIdAsync(command.Id, cancellationToken);
+        if ({{entity}} is null)
+        {
+            return Result.Failure<{{Entity}}Response>(Error.NotFound($"el {{entity}} {command.Id}"));
+        }
+
+        try
+        {
+            var now = _clock.UtcNow;
+            {{entity}}.Rename(command.Name, now);
+            {{entity}}.Reprice(command.Price, now, command.Currency);
+
+            if (command.StockDelta != 0)
+            {
+                {{entity}}.AdjustStock(command.StockDelta, now);
+            }
+
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            return Result.Success({{Entity}}Response.From({{entity}}));
+        }
+        catch (DomainException ex)
+        {
+            return Result.Failure<{{Entity}}Response>(Error.Validation(ex.Message));
+        }
+    }
+}

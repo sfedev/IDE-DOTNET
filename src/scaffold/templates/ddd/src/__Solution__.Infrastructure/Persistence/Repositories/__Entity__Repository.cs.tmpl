@@ -1,0 +1,39 @@
+namespace {{Solution}}.Infrastructure.Persistence.Repositories;
+
+using Microsoft.EntityFrameworkCore;
+using {{Solution}}.Domain.{{EntityPlural}};
+
+/// <summary>Repositorio del agregado {{Entity}} sobre EF Core.</summary>
+public sealed class {{Entity}}Repository : I{{Entity}}Repository
+{
+    private readonly AppDbContext _context;
+
+    public {{Entity}}Repository(AppDbContext context) => _context = context;
+
+    public async Task<IReadOnlyList<{{Entity}}>> ListAsync(string? search, CancellationToken cancellationToken = default)
+    {
+        var query = _context.{{EntityPlural}}.AsNoTracking();
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim();
+            query = query.Where(x =>
+                EF.Functions.Like(x.Name, $"%{term}%") ||
+                EF.Functions.Like(x.Sku.Value, $"%{term}%"));
+        }
+
+        return await query.OrderBy(x => x.Name).ToListAsync(cancellationToken);
+    }
+
+    public Task<{{Entity}}?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+        => _context.{{EntityPlural}}.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+    public Task<bool> ExistsWithSkuAsync(Sku sku, Guid? excludingId = null, CancellationToken cancellationToken = default)
+        => _context.{{EntityPlural}}
+            .AsNoTracking()
+            .AnyAsync(x => x.Sku.Value == sku.Value && (excludingId == null || x.Id != excludingId), cancellationToken);
+
+    public void Add({{Entity}} {{entity}}) => _context.{{EntityPlural}}.Add({{entity}});
+
+    public void Remove({{Entity}} {{entity}}) => _context.{{EntityPlural}}.Remove({{entity}});
+}

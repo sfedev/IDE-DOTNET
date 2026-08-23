@@ -1,0 +1,38 @@
+<Project>
+
+  <!--
+    Central Package Management: las versiones se declaran una sola vez aquí y los .csproj
+    referencian los paquetes sin atributo Version.
+  -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <ItemGroup Label="Persistencia">
+    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="{{EfCoreVersion}}" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="{{EfCoreVersion}}" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="{{EfCoreVersion}}" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.InMemory" Version="{{EfCoreVersion}}" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="{{EfCoreVersion}}" />
+  </ItemGroup>
+
+  <ItemGroup Label="Abstracciones de la plataforma">
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="{{ExtensionsVersion}}" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="{{ExtensionsVersion}}" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="{{ExtensionsVersion}}" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="{{ExtensionsVersion}}" />
+  </ItemGroup>
+
+  <ItemGroup Label="Web y observabilidad">
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="{{AspNetOpenApiVersion}}" />
+    <PackageVersion Include="Scalar.AspNetCore" Version="{{ScalarVersion}}" />
+    <PackageVersion Include="Serilog.AspNetCore" Version="{{SerilogAspNetVersion}}" />
+  </ItemGroup>
+
+  <ItemGroup Label="Pruebas">
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="{{TestSdkVersion}}" />
+    <PackageVersion Include="xunit" Version="{{XunitVersion}}" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="{{XunitRunnerVersion}}" />
+  </ItemGroup>
+
+</Project>

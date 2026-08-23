@@ -1,0 +1,310 @@
+/* Estructura del shell: barra de título, actividad, sidebar, editor, panel y barra de estado. */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+.app {
+  display: grid;
+  grid-template-rows: var(--titlebar-height) 1fr var(--statusbar-height);
+  height: 100vh;
+}
+
+/* --- Barra de título ------------------------------------------------------------------- */
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px;
+  background: var(--bg-deep);
+  border-bottom: 1px solid var(--border-subtle);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+/* macOS: hueco para los botones de semáforo del sistema. */
+.platform-darwin .titlebar {
+  padding-left: 84px;
+}
+
+.titlebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+.brand-name {
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.titlebar-center {
+  flex: 1;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.titlebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+
+/* --- Cuerpo ---------------------------------------------------------------------------- */
+
+.body {
+  display: grid;
+  grid-template-columns: var(--activitybar-width) var(--sidebar-width, 280px) 4px 1fr;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.body.sidebar-collapsed {
+  grid-template-columns: var(--activitybar-width) 0 0 1fr;
+}
+
+.activitybar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0;
+  background: var(--bg-deep);
+  border-right: 1px solid var(--border-subtle);
+}
+
+.activitybar .spacer {
+  flex: 1;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--surface-1);
+  border-right: 1px solid var(--border-subtle);
+  overflow: hidden;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.sidebar-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.sidebar-content {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+
+.resizer {
+  cursor: col-resize;
+  background: transparent;
+  transition: background 120ms ease;
+}
+
+.resizer:hover,
+.resizer.dragging {
+  background: var(--accent);
+}
+
+.resizer.horizontal {
+  cursor: row-resize;
+  height: 4px;
+}
+
+.main {
+  display: grid;
+  grid-template-rows: auto 1fr 4px var(--panel-height, 220px);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.main.panel-collapsed {
+  grid-template-rows: auto 1fr 0 0;
+}
+
+/* --- Pestañas del editor ---------------------------------------------------------------- */
+
+.tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  background: var(--bg-deep);
+  border-bottom: 1px solid var(--border-subtle);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  min-height: 34px;
+}
+
+.editor-area {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.editor-host {
+  position: absolute;
+  inset: 0;
+}
+
+.editor-host.hidden {
+  visibility: hidden;
+}
+
+.welcome {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  background: var(--bg);
+}
+
+.welcome.hidden {
+  display: none;
+}
+
+/* --- Panel inferior ---------------------------------------------------------------------- */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface-1);
+  border-top: 1px solid var(--border-subtle);
+  overflow: hidden;
+}
+
+.panel-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.panel-content {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+
+/* --- Barra de estado ---------------------------------------------------------------------- */
+
+.statusbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 8px;
+  background: var(--accent-strong);
+  color: var(--accent-contrast);
+  font-size: 11.5px;
+  user-select: none;
+}
+
+.statusbar .spacer {
+  flex: 1;
+}
+
+/* --- Superposición (wizard, paleta, diálogos) ---------------------------------------------- */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  background: var(--overlay-scrim);
+  backdrop-filter: blur(2px);
+}
+
+.overlay[hidden] {
+  display: none;
+}
+
+.overlay.top {
+  align-items: start;
+  justify-items: center;
+  padding-top: 12vh;
+}
+
+.overlay.center {
+  place-items: center;
+  padding: 5vh 24px;
+}
+
+/* --- Barras de desplazamiento -------------------------------------------------------------- */
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+  background-clip: content-box;
+}

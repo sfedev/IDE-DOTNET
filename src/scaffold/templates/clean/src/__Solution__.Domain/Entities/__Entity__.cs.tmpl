@@ -1,0 +1,97 @@
+namespace {{Solution}}.Domain.Entities;
+
+using {{Solution}}.Domain.Common;
+using {{Solution}}.Domain.ValueObjects;
+
+/// <summary>
+/// Entidad de ejemplo del CRUD generado. Encapsula sus invariantes: el estado sólo cambia a
+/// través de métodos con nombre de negocio, nunca asignando propiedades desde fuera.
+/// </summary>
+public sealed class {{Entity}} : BaseEntity
+{
+    // Constructor sin parámetros para EF Core.
+    private {{Entity}}() : base(Guid.NewGuid())
+    {
+        Name = string.Empty;
+        Sku = string.Empty;
+        Price = Money.Zero;
+    }
+
+    private {{Entity}}(Guid id, string name, string sku, Money price, int stock, DateTimeOffset createdAtUtc)
+        : base(id)
+    {
+        Name = name;
+        Sku = sku;
+        Price = price;
+        Stock = stock;
+        CreatedAtUtc = createdAtUtc;
+    }
+
+    public string Name { get; private set; }
+
+    public string Sku { get; private set; }
+
+    public Money Price { get; private set; }
+
+    public int Stock { get; private set; }
+
+    public DateTimeOffset CreatedAtUtc { get; private set; }
+
+    public DateTimeOffset? UpdatedAtUtc { get; private set; }
+
+    public bool IsAvailable => Stock > 0;
+
+    public static {{Entity}} Create(string name, string sku, decimal price, int stock, string currency = Money.DefaultCurrency)
+    {
+        var normalizedName = Normalize(name, nameof(name), maxLength: 120);
+        var normalizedSku = NormalizeSku(sku);
+        DomainException.ThrowIf(stock < 0, "El stock no puede ser negativo.");
+
+        return new {{Entity}}(
+            Guid.NewGuid(),
+            normalizedName,
+            normalizedSku,
+            Money.Of(price, currency),
+            stock,
+            DateTimeOffset.UtcNow);
+    }
+
+    public void Rename(string name)
+    {
+        Name = Normalize(name, nameof(name), maxLength: 120);
+        Touch();
+    }
+
+    public void ChangePrice(decimal price, string currency = Money.DefaultCurrency)
+    {
+        Price = Money.Of(price, currency);
+        Touch();
+    }
+
+    public void AdjustStock(int delta)
+    {
+        var updated = Stock + delta;
+        DomainException.ThrowIf(updated < 0, $"El ajuste dejaría el stock en {updated}, y no puede ser negativo.");
+        Stock = updated;
+        Touch();
+    }
+
+    private void Touch() => UpdatedAtUtc = DateTimeOffset.UtcNow;
+
+    private static string Normalize(string value, string field, int maxLength)
+    {
+        DomainException.ThrowIf(string.IsNullOrWhiteSpace(value), $"El campo '{field}' es obligatorio.");
+        var trimmed = value.Trim();
+        DomainException.ThrowIf(trimmed.Length > maxLength, $"El campo '{field}' supera {maxLength} caracteres.");
+        return trimmed;
+    }
+
+    private static string NormalizeSku(string sku)
+    {
+        var normalized = Normalize(sku, nameof(sku), maxLength: 32).ToUpperInvariant();
+        DomainException.ThrowIf(
+            !normalized.All(c => char.IsLetterOrDigit(c) || c is '-' or '_'),
+            "El SKU sólo admite letras, dígitos, '-' y '_'.");
+        return normalized;
+    }
+}

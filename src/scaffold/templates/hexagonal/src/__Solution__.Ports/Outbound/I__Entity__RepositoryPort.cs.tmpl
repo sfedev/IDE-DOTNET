@@ -1,0 +1,25 @@
+namespace {{Solution}}.Ports.Outbound;
+
+using {{Solution}}.Domain.Model;
+
+/// <summary>
+/// PUERTO DE SALIDA (driven port) de persistencia.
+///
+/// El hexágono declara qué necesita guardar y recuperar; cómo se hace es problema del adaptador.
+/// Hoy lo implementa EF Core sobre SQLite; mañana podría ser Dapper, Mongo o un fichero.
+/// </summary>
+public interface I{{Entity}}RepositoryPort
+{
+    Task<IReadOnlyList<{{Entity}}>> SearchAsync(string? search, CancellationToken cancellationToken = default);
+
+    Task<{{Entity}}?> FindAsync(Guid id, CancellationToken cancellationToken = default);
+
+    Task<bool> ExistsBySkuAsync(string sku, Guid? excludingId = null, CancellationToken cancellationToken = default);
+
+    Task SaveAsync({{Entity}} {{entity}}, CancellationToken cancellationToken = default);
+
+    Task DeleteAsync({{Entity}} {{entity}}, CancellationToken cancellationToken = default);
+
+    /// <summary>Confirma los cambios pendientes como una única transacción.</summary>
+    Task CommitAsync(CancellationToken cancellationToken = default);
+}

@@ -1,0 +1,25 @@
+namespace {{Solution}}.SharedKernel;
+
+/// <summary>
+/// Hecho relevante que ya ha ocurrido en el dominio. Se nombra en pasado
+/// ({{Entity}}Registered, no Register{{Entity}}) porque describe algo consumado.
+/// </summary>
+public interface IDomainEvent
+{
+    Guid EventId { get; }
+
+    DateTimeOffset OccurredOnUtc { get; }
+}
+
+/// <summary>Implementación base con los metadatos comunes ya resueltos.</summary>
+public abstract record DomainEvent(DateTimeOffset OccurredOnUtc) : IDomainEvent
+{
+    public Guid EventId { get; } = Guid.NewGuid();
+}
+
+/// <summary>Reacción a un evento de dominio, ejecutada tras confirmar la unidad de trabajo.</summary>
+public interface IDomainEventHandler<in TEvent>
+    where TEvent : IDomainEvent
+{
+    Task HandleAsync(TEvent domainEvent, CancellationToken cancellationToken = default);
+}

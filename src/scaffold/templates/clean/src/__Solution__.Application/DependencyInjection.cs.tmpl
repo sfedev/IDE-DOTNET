@@ -1,0 +1,14 @@
+namespace {{Solution}}.Application;
+
+using Microsoft.Extensions.DependencyInjection;
+using {{Solution}}.Application.{{EntityPlural}};
+
+/// <summary>Registro de los casos de uso en el contenedor de dependencias.</summary>
+public static class DependencyInjection
+{
+    public static IServiceCollection AddApplication(this IServiceCollection services)
+    {
+        services.AddScoped<I{{Entity}}Service, {{Entity}}Service>();
+        return services;
+    }
+}

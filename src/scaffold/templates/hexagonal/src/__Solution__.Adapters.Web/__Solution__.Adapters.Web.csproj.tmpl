@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    Adaptador CONDUCTOR (driving): traduce HTTP a llamadas al puerto de entrada.
+    Referencia a los adaptadores conducidos sólo para montar el grafo de dependencias.
+  -->
+  <PropertyGroup>
+    <RootNamespace>{{Solution}}.Adapters.Web</RootNamespace>
+    <AssemblyName>{{Solution}}.Adapters.Web</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Scalar.AspNetCore" />
+    <PackageReference Include="Serilog.AspNetCore" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\{{Solution}}.Ports\{{Solution}}.Ports.csproj" />
+    <ProjectReference Include="..\{{Solution}}.Adapters.Persistence\{{Solution}}.Adapters.Persistence.csproj" />
+    <ProjectReference Include="..\{{Solution}}.Adapters.Notifications\{{Solution}}.Adapters.Notifications.csproj" />
+  </ItemGroup>
+
+</Project>

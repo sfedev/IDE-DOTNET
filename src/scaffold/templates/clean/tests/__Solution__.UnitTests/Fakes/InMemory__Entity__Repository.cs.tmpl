@@ -1,0 +1,53 @@
+namespace {{Solution}}.UnitTests.Fakes;
+
+using {{Solution}}.Application.Abstractions;
+using {{Solution}}.Domain.Entities;
+
+/// <summary>
+/// Doble en memoria del repositorio. Prueba la capa de aplicación sin EF Core ni base de datos,
+/// que es exactamente lo que la regla de dependencia hace posible.
+/// </summary>
+public sealed class InMemory{{Entity}}Repository : I{{Entity}}Repository, IUnitOfWork
+{
+    private readonly List<{{Entity}}> _items = [];
+
+    public int SaveChangesCalls { get; private set; }
+
+    public Task<IReadOnlyList<{{Entity}}>> ListAsync(string? search, CancellationToken cancellationToken = default)
+    {
+        IEnumerable<{{Entity}}> query = _items;
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim();
+            query = query.Where(x =>
+                x.Name.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                x.Sku.Contains(term, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return Task.FromResult<IReadOnlyList<{{Entity}}>>(query.OrderBy(x => x.Name).ToList());
+    }
+
+    public Task<{{Entity}}?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+        => Task.FromResult(_items.FirstOrDefault(x => x.Id == id));
+
+    public Task<bool> SkuExistsAsync(string sku, Guid? excludingId = null, CancellationToken cancellationToken = default)
+    {
+        var normalized = sku.Trim().ToUpperInvariant();
+        return Task.FromResult(_items.Any(x => x.Sku == normalized && (excludingId is null || x.Id != excludingId)));
+    }
+
+    public Task AddAsync({{Entity}} {{entity}}, CancellationToken cancellationToken = default)
+    {
+        _items.Add({{entity}});
+        return Task.CompletedTask;
+    }
+
+    public void Remove({{Entity}} {{entity}}) => _items.Remove({{entity}});
+
+    public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        SaveChangesCalls++;
+        return Task.FromResult(_items.Count);
+    }
+}

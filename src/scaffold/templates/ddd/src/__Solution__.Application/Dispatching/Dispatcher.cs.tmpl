@@ -1,0 +1,127 @@
+namespace {{Solution}}.Application.Dispatching;
+
+using System.Collections.Concurrent;
+using Microsoft.Extensions.DependencyInjection;
+using {{Solution}}.Application.Abstractions;
+using {{Solution}}.SharedKernel;
+
+/// <summary>
+/// Despachador CQRS.
+///
+/// Recibe un mensaje tipado sólo por su respuesta (ICommand&lt;TResponse&gt;), localiza su handler
+/// concreto en el contenedor y lo ejecuta envuelto en el pipeline de comportamientos.
+///
+/// El puente entre "tipo conocido en ejecución" y "genérico conocido en compilación" se hace con
+/// un envoltorio genérico creado una sola vez por tipo de mensaje y cacheado: la reflexión ocurre
+/// en el primer despacho, no en cada llamada.
+/// </summary>
+public sealed class Dispatcher : IDispatcher
+{
+    private static readonly ConcurrentDictionary<Type, object> WrapperCache = new();
+
+    private readonly IServiceProvider _services;
+
+    public Dispatcher(IServiceProvider services) => _services = services;
+
+    public Task<Result<TResponse>> SendAsync<TResponse>(ICommand<TResponse> command, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        var wrapper = (CommandWrapper<TResponse>)WrapperCache.GetOrAdd(
+            command.GetType(),
+            static messageType => Activator.CreateInstance(
+                typeof(CommandWrapperImpl<,>).MakeGenericType(messageType, typeof(TResponse)))!);
+
+        return wrapper.HandleAsync(command, _services, cancellationToken);
+    }
+
+    public Task<Result<TResponse>> QueryAsync<TResponse>(IQuery<TResponse> query, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+
+        var wrapper = (QueryWrapper<TResponse>)WrapperCache.GetOrAdd(
+            query.GetType(),
+            static messageType => Activator.CreateInstance(
+                typeof(QueryWrapperImpl<,>).MakeGenericType(messageType, typeof(TResponse)))!);
+
+        return wrapper.HandleAsync(query, _services, cancellationToken);
+    }
+
+    private abstract class CommandWrapper<TResponse>
+    {
+        public abstract Task<Result<TResponse>> HandleAsync(
+            ICommand<TResponse> command,
+            IServiceProvider services,
+            CancellationToken cancellationToken);
+    }
+
+    private sealed class CommandWrapperImpl<TCommand, TResponse> : CommandWrapper<TResponse>
+        where TCommand : ICommand<TResponse>
+    {
+        public override Task<Result<TResponse>> HandleAsync(
+            ICommand<TResponse> command,
+            IServiceProvider services,
+            CancellationToken cancellationToken)
+        {
+            var typed = (TCommand)command;
+            var handler = services.GetRequiredService<ICommandHandler<TCommand, TResponse>>();
+
+            return PipelineRunner.RunAsync<TCommand, TResponse>(
+                typed,
+                services,
+                () => handler.HandleAsync(typed, cancellationToken),
+                cancellationToken);
+        }
+    }
+
+    private abstract class QueryWrapper<TResponse>
+    {
+        public abstract Task<Result<TResponse>> HandleAsync(
+            IQuery<TResponse> query,
+            IServiceProvider services,
+            CancellationToken cancellationToken);
+    }
+
+    private sealed class QueryWrapperImpl<TQuery, TResponse> : QueryWrapper<TResponse>
+        where TQuery : IQuery<TResponse>
+    {
+        public override Task<Result<TResponse>> HandleAsync(
+            IQuery<TResponse> query,
+            IServiceProvider services,
+            CancellationToken cancellationToken)
+        {
+            var typed = (TQuery)query;
+            var handler = services.GetRequiredService<IQueryHandler<TQuery, TResponse>>();
+
+            return PipelineRunner.RunAsync<TQuery, TResponse>(
+                typed,
+                services,
+                () => handler.HandleAsync(typed, cancellationToken),
+                cancellationToken);
+        }
+    }
+}
+
+/// <summary>Encadena los comportamientos registrados alrededor del handler.</summary>
+internal static class PipelineRunner
+{
+    public static Task<Result<TResponse>> RunAsync<TRequest, TResponse>(
+        TRequest request,
+        IServiceProvider services,
+        Func<Task<Result<TResponse>>> handler,
+        CancellationToken cancellationToken)
+    {
+        var behaviors = services.GetServices<IPipelineBehavior<TRequest, TResponse>>().ToArray();
+
+        var next = handler;
+        // Se recorre al revés para que el primer comportamiento registrado quede el más externo.
+        for (var i = behaviors.Length - 1; i >= 0; i--)
+        {
+            var behavior = behaviors[i];
+            var inner = next;
+            next = () => behavior.HandleAsync(request, inner, cancellationToken);
+        }
+
+        return next();
+    }
+}

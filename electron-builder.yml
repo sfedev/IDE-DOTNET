@@ -1,0 +1,128 @@
+# Empaquetado de DotForge IDE.
+#
+# Windows: instalador NSIS (.exe) + portable (.zip)
+# macOS:   imagen de disco (.dmg) + .app comprimido (.zip), en arm64 y x64
+#
+# Decisiones:
+#  - `asar: true` con `asarUnpack` para Monaco: el loader AMD y sus web workers funcionan mucho
+#    mejor sobre archivos reales que dentro del archivo empaquetado.
+#  - Las plantillas de scaffolding van a `resources/templates`, fuera del asar, porque el
+#    generador las lee con `fs` desde `process.resourcesPath`.
+#  - Sin dependencias nativas: no hay paso de rebuild y el mismo artefacto vale para cualquier
+#    máquina de la misma plataforma y arquitectura.
+
+appId: dev.dotforge.ide
+productName: DotForge IDE
+copyright: Copyright © 2026 DotForge
+
+directories:
+  output: dist
+  buildResources: resources
+
+files:
+  - build/**/*
+  - '!build/templates/**'
+  - '!**/*.map'
+  - package.json
+
+extraResources:
+  - from: build/templates
+    to: templates
+    filter:
+      - '**/*'
+
+asar: true
+asarUnpack:
+  - build/vendor/**
+
+# Sin publicador: los artefactos se generan en local y no se suben a ningún sitio.
+publish: null
+
+# ---------------------------------------------------------------------------------------------
+# Windows
+# ---------------------------------------------------------------------------------------------
+win:
+  icon: resources/icons/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: zip
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+  # Sin firma: no hay certificado. El instalador avisará con SmartScreen hasta que se firme.
+  signAndEditExecutable: true
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  allowElevation: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: DotForge IDE
+  installerIcon: resources/icons/icon.ico
+  uninstallerIcon: resources/icons/icon.ico
+  installerHeaderIcon: resources/icons/icon.ico
+  deleteAppDataOnUninstall: false
+  runAfterFinish: true
+  artifactName: ${productName}-${version}-Setup-${arch}.${ext}
+
+# ---------------------------------------------------------------------------------------------
+# macOS
+# ---------------------------------------------------------------------------------------------
+mac:
+  icon: resources/icons/icon.icns
+  category: public.app-category.developer-tools
+  darkModeSupport: true
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+    - target: zip
+      arch:
+        - arm64
+        - x64
+  artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+  # Hardened runtime desactivado porque no hay certificado con el que firmar: activarlo sin
+  # firma produce una app que macOS rechaza sin explicación útil.
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  identity: null
+  extendInfo:
+    NSHumanReadableCopyright: Copyright © 2026 DotForge
+    CFBundleDocumentTypes:
+      - CFBundleTypeName: Solución de .NET
+        CFBundleTypeRole: Editor
+        LSItemContentTypes:
+          - public.data
+        CFBundleTypeExtensions:
+          - sln
+          - slnx
+          - csproj
+
+dmg:
+  title: ${productName} ${version}
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  contents:
+    - x: 130
+      y: 220
+      type: file
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+
+# ---------------------------------------------------------------------------------------------
+# Linux (no es un objetivo del producto, pero sale gratis y facilita el desarrollo)
+# ---------------------------------------------------------------------------------------------
+linux:
+  icon: resources/icons
+  category: Development
+  target:
+    - target: AppImage
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-${arch}.${ext}

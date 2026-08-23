@@ -1,0 +1,33 @@
+@page "/"
+
+<PageTitle>{{Solution}}</PageTitle>
+
+<h1>{{Solution}}</h1>
+
+<p class="lead">
+    Solución generada con <strong>DotForge IDE</strong> siguiendo
+    <strong>Domain-Driven Design táctico + CQRS</strong>.
+</p>
+
+<div class="cards">
+    <div class="card">
+        <h2>SharedKernel</h2>
+        <p>Entity, AggregateRoot, ValueObject, IDomainEvent y Result: los bloques tácticos.</p>
+    </div>
+    <div class="card">
+        <h2>Domain</h2>
+        <p>El agregado {{Entity}} con sus invariantes, sus objetos de valor y sus eventos.</p>
+    </div>
+    <div class="card">
+        <h2>Application</h2>
+        <p>Comandos y consultas separados, despachador propio y pipeline de comportamientos.</p>
+    </div>
+    <div class="card">
+        <h2>Infrastructure</h2>
+        <p>EF Core, repositorio del agregado y publicación de eventos al confirmar.</p>
+    </div>
+</div>
+
+<p>
+    Empieza por <NavLink href="{{entityRoute}}">gestionar {{entityPlural}}</NavLink>.
+</p>

@@ -1,0 +1,58 @@
+namespace {{Solution}}.WebApi.Endpoints;
+
+using {{Solution}}.Application.{{EntityPlural}};
+using {{Solution}}.WebApi.Extensions;
+
+/// <summary>CRUD HTTP de {{EntityPlural}} con minimal APIs agrupadas.</summary>
+public static class {{Entity}}Endpoints
+{
+    public static IEndpointRouteBuilder Map{{EntityPlural}}Endpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("/api/{{entityRoute}}")
+            .WithTags("{{EntityPlural}}");
+
+        group.MapGet("/", async (
+                string? search,
+                I{{Entity}}Service service,
+                CancellationToken cancellationToken) =>
+            Results.Ok(await service.ListAsync(search, cancellationToken)))
+            .WithName("List{{EntityPlural}}")
+            .WithSummary("Lista {{entityPlural}}, opcionalmente filtrados por nombre o SKU.");
+
+        group.MapGet("/{id:guid}", async (
+                Guid id,
+                I{{Entity}}Service service,
+                CancellationToken cancellationToken) =>
+            (await service.GetAsync(id, cancellationToken)).ToHttpResult())
+            .WithName("Get{{Entity}}")
+            .WithSummary("Obtiene un {{entity}} por su identificador.");
+
+        group.MapPost("/", async (
+                Create{{Entity}}Request request,
+                I{{Entity}}Service service,
+                CancellationToken cancellationToken) =>
+            (await service.CreateAsync(request, cancellationToken))
+                .ToCreatedResult(dto => $"/api/{{entityRoute}}/{dto.Id}"))
+            .WithName("Create{{Entity}}")
+            .WithSummary("Da de alta un {{entity}}.");
+
+        group.MapPut("/{id:guid}", async (
+                Guid id,
+                Update{{Entity}}Request request,
+                I{{Entity}}Service service,
+                CancellationToken cancellationToken) =>
+            (await service.UpdateAsync(id, request, cancellationToken)).ToHttpResult())
+            .WithName("Update{{Entity}}")
+            .WithSummary("Actualiza nombre, precio y stock de un {{entity}}.");
+
+        group.MapDelete("/{id:guid}", async (
+                Guid id,
+                I{{Entity}}Service service,
+                CancellationToken cancellationToken) =>
+            (await service.DeleteAsync(id, cancellationToken)).ToHttpResult())
+            .WithName("Delete{{Entity}}")
+            .WithSummary("Elimina un {{entity}}.");
+
+        return app;
+    }
+}

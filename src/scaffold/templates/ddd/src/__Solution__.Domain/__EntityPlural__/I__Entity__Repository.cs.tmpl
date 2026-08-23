@@ -1,0 +1,20 @@
+namespace {{Solution}}.Domain.{{EntityPlural}};
+
+/// <summary>
+/// Repositorio del agregado {{Entity}}.
+///
+/// Hay exactamente un repositorio por raíz de agregado, nunca uno por entidad interna: cargar y
+/// guardar entidades sueltas por detrás de la raíz rompería la frontera de consistencia.
+/// </summary>
+public interface I{{Entity}}Repository
+{
+    Task<IReadOnlyList<{{Entity}}>> ListAsync(string? search, CancellationToken cancellationToken = default);
+
+    Task<{{Entity}}?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
+
+    Task<bool> ExistsWithSkuAsync(Sku sku, Guid? excludingId = null, CancellationToken cancellationToken = default);
+
+    void Add({{Entity}} {{entity}});
+
+    void Remove({{Entity}} {{entity}});
+}

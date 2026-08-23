@@ -1,0 +1,40 @@
+namespace {{Solution}}.Ports.Inbound;
+
+using {{Solution}}.Domain.Model;
+
+/// <summary>Vista de un {{Entity}} tal y como la ve el exterior del hexágono.</summary>
+public sealed record {{Entity}}View(
+    Guid Id,
+    string Name,
+    string Sku,
+    decimal Price,
+    string Currency,
+    int Stock,
+    bool IsAvailable,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset? UpdatedAtUtc)
+{
+    public static {{Entity}}View From({{Entity}} {{entity}}) => new(
+        {{entity}}.Id,
+        {{entity}}.Name,
+        {{entity}}.Sku,
+        {{entity}}.Price.Amount,
+        {{entity}}.Price.Currency,
+        {{entity}}.Stock,
+        {{entity}}.IsAvailable,
+        {{entity}}.CreatedAtUtc,
+        {{entity}}.UpdatedAtUtc);
+}
+
+public sealed record Register{{Entity}}Command(
+    string Name,
+    string Sku,
+    decimal Price,
+    int Stock,
+    string Currency = "EUR");
+
+public sealed record Amend{{Entity}}Command(
+    string Name,
+    decimal Price,
+    int StockDelta,
+    string Currency = "EUR");

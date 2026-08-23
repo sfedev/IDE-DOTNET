@@ -1,0 +1,83 @@
+namespace {{Solution}}.UnitTests.Adapters;
+
+using {{Solution}}.Domain.Model;
+using {{Solution}}.Ports.Outbound;
+
+/// <summary>Adaptador de persistencia en memoria: sustituye a EF Core en las pruebas.</summary>
+public sealed class InMemory{{Entity}}Adapter : I{{Entity}}RepositoryPort
+{
+    private readonly List<{{Entity}}> _items = [];
+
+    public int Commits { get; private set; }
+
+    public Task<IReadOnlyList<{{Entity}}>> SearchAsync(string? search, CancellationToken cancellationToken = default)
+    {
+        IEnumerable<{{Entity}}> query = _items;
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim();
+            query = query.Where(x =>
+                x.Name.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                x.Sku.Contains(term, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return Task.FromResult<IReadOnlyList<{{Entity}}>>(query.OrderBy(x => x.Name).ToList());
+    }
+
+    public Task<{{Entity}}?> FindAsync(Guid id, CancellationToken cancellationToken = default)
+        => Task.FromResult(_items.FirstOrDefault(x => x.Id == id));
+
+    public Task<bool> ExistsBySkuAsync(string sku, Guid? excludingId = null, CancellationToken cancellationToken = default)
+    {
+        var normalized = sku.Trim().ToUpperInvariant();
+        return Task.FromResult(_items.Any(x => x.Sku == normalized && (excludingId is null || x.Id != excludingId)));
+    }
+
+    public Task SaveAsync({{Entity}} {{entity}}, CancellationToken cancellationToken = default)
+    {
+        if (!_items.Contains({{entity}})) _items.Add({{entity}});
+        return Task.CompletedTask;
+    }
+
+    public Task DeleteAsync({{Entity}} {{entity}}, CancellationToken cancellationToken = default)
+    {
+        _items.Remove({{entity}});
+        return Task.CompletedTask;
+    }
+
+    public Task CommitAsync(CancellationToken cancellationToken = default)
+    {
+        Commits++;
+        return Task.CompletedTask;
+    }
+}
+
+/// <summary>Adaptador de notificaciones que sólo registra lo que se le pide, para poder asertarlo.</summary>
+public sealed class RecordingNotificationAdapter : INotificationPort
+{
+    public List<string> Registered { get; } = [];
+
+    public List<string> Withdrawn { get; } = [];
+
+    public Task Notify{{Entity}}RegisteredAsync(Guid id, string name, string sku, CancellationToken cancellationToken = default)
+    {
+        Registered.Add(sku);
+        return Task.CompletedTask;
+    }
+
+    public Task Notify{{Entity}}WithdrawnAsync(Guid id, string sku, CancellationToken cancellationToken = default)
+    {
+        Withdrawn.Add(sku);
+        return Task.CompletedTask;
+    }
+}
+
+/// <summary>Reloj congelado: hace deterministas las aserciones sobre marcas temporales.</summary>
+public sealed class FrozenClockAdapter : IClockPort
+{
+    public FrozenClockAdapter(DateTimeOffset? now = null)
+        => UtcNow = now ?? new DateTimeOffset(2026, 1, 15, 10, 30, 0, TimeSpan.Zero);
+
+    public DateTimeOffset UtcNow { get; set; }
+}

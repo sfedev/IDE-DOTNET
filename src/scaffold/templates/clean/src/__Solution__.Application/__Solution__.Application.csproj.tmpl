@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Capa de Aplicación: casos de uso. Orquesta el dominio y define los puertos que la
+    infraestructura debe implementar. Sólo referencia a Domain.
+  -->
+  <PropertyGroup>
+    <RootNamespace>{{Solution}}.Application</RootNamespace>
+    <AssemblyName>{{Solution}}.Application</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\{{Solution}}.Domain\{{Solution}}.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,54 @@
+namespace {{Solution}}.WebApi.Endpoints;
+
+using {{Solution}}.Application.Abstractions;
+using {{Solution}}.Application.{{EntityPlural}};
+using {{Solution}}.Application.{{EntityPlural}}.Commands;
+using {{Solution}}.Application.{{EntityPlural}}.Queries;
+using {{Solution}}.WebApi.Extensions;
+
+/// <summary>
+/// CRUD HTTP de {{EntityPlural}}.
+///
+/// Los endpoints sólo construyen mensajes y los despachan: no conocen ningún handler, ningún
+/// repositorio y ninguna regla. Añadir un caso de uso no obliga a tocar la capa web.
+/// </summary>
+public static class {{Entity}}Endpoints
+{
+    public static IEndpointRouteBuilder Map{{EntityPlural}}Endpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("/api/{{entityRoute}}").WithTags("{{EntityPlural}}");
+
+        group.MapGet("/", async (string? search, IDispatcher dispatcher, CancellationToken cancellationToken) =>
+                (await dispatcher.QueryAsync(new List{{EntityPlural}}Query(search), cancellationToken)).ToHttpResult())
+            .WithName("List{{EntityPlural}}")
+            .WithSummary("Lista {{entityPlural}}, opcionalmente filtrados por nombre o SKU.");
+
+        group.MapGet("/{id:guid}", async (Guid id, IDispatcher dispatcher, CancellationToken cancellationToken) =>
+                (await dispatcher.QueryAsync(new Get{{Entity}}ByIdQuery(id), cancellationToken)).ToHttpResult())
+            .WithName("Get{{Entity}}")
+            .WithSummary("Obtiene un {{entity}} por su identificador.");
+
+        group.MapPost("/", async (Register{{Entity}}Command command, IDispatcher dispatcher, CancellationToken cancellationToken) =>
+                (await dispatcher.SendAsync(command, cancellationToken))
+                    .ToCreatedResult(response => $"/api/{{entityRoute}}/{response.Id}"))
+            .WithName("Register{{Entity}}")
+            .WithSummary("Da de alta un {{entity}}.");
+
+        group.MapPut("/{id:guid}", async (Guid id, Amend{{Entity}}Body body, IDispatcher dispatcher, CancellationToken cancellationToken) =>
+                (await dispatcher.SendAsync(
+                    new Amend{{Entity}}Command(id, body.Name, body.Price, body.StockDelta, body.Currency),
+                    cancellationToken)).ToHttpResult())
+            .WithName("Amend{{Entity}}")
+            .WithSummary("Actualiza nombre, precio y stock de un {{entity}}.");
+
+        group.MapDelete("/{id:guid}", async (Guid id, IDispatcher dispatcher, CancellationToken cancellationToken) =>
+                (await dispatcher.SendAsync(new Withdraw{{Entity}}Command(id), cancellationToken)).ToNoContentResult())
+            .WithName("Withdraw{{Entity}}")
+            .WithSummary("Da de baja un {{entity}}.");
+
+        return app;
+    }
+}
+
+/// <summary>Cuerpo del PUT: el identificador viaja en la ruta, no en el JSON.</summary>
+public sealed record Amend{{Entity}}Body(string Name, decimal Price, int StockDelta, string Currency = "EUR");

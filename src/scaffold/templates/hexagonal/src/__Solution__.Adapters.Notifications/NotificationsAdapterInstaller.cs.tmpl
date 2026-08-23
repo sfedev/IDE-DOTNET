@@ -1,0 +1,13 @@
+namespace {{Solution}}.Adapters.Notifications;
+
+using Microsoft.Extensions.DependencyInjection;
+using {{Solution}}.Ports.Outbound;
+
+public static class NotificationsAdapterInstaller
+{
+    public static IServiceCollection AddNotificationsAdapter(this IServiceCollection services)
+    {
+        services.AddScoped<INotificationPort, LoggingNotificationAdapter>();
+        return services;
+    }
+}

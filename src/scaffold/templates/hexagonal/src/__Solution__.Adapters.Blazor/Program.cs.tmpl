@@ -1,0 +1,41 @@
+using Serilog;
+using {{Solution}}.Adapters.Blazor.Components;
+using {{Solution}}.Adapters.Notifications;
+using {{Solution}}.Adapters.Persistence;
+using {{Solution}}.Ports;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Host.UseSerilog((context, services, configuration) => configuration
+    .ReadFrom.Configuration(context.Configuration)
+    .ReadFrom.Services(services)
+    .Enrich.FromLogContext());
+
+// Montaje del hexágono: núcleo + adaptadores conducidos.
+builder.Services.AddHexagon();
+builder.Services.AddPersistenceAdapter(builder.Configuration);
+builder.Services.AddNotificationsAdapter();
+
+builder.Services.AddRazorComponents()
+    .AddInteractiveServerComponents();
+
+var app = builder.Build();
+
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler("/Error", createScopeForErrors: true);
+    app.UseHsts();
+}
+
+app.UseSerilogRequestLogging();
+app.UseHttpsRedirection();
+app.UseAntiforgery();
+app.MapStaticAssets();
+
+app.MapRazorComponents<App>()
+    .AddInteractiveServerRenderMode();
+
+await PersistenceAdapterInstaller.InitializeStoreAsync(app.Services);
+
+Log.Information("{{Solution}} adaptador Blazor listo.");
+await app.RunAsync();

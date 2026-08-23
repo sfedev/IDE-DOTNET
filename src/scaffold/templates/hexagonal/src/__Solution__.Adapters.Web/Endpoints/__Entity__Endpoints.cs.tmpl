@@ -1,0 +1,55 @@
+namespace {{Solution}}.Adapters.Web.Endpoints;
+
+using {{Solution}}.Ports.Inbound;
+
+/// <summary>
+/// Traducción HTTP -> puerto de entrada. Este archivo es intencionadamente tonto: no toma
+/// decisiones de negocio, sólo adapta protocolos.
+/// </summary>
+public static class {{Entity}}Endpoints
+{
+    public static IEndpointRouteBuilder Map{{EntityPlural}}Endpoints(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup("/api/{{entityRoute}}").WithTags("{{EntityPlural}}");
+
+        group.MapGet("/", async (string? search, IManage{{EntityPlural}} port, CancellationToken cancellationToken) =>
+                Results.Ok(await port.BrowseAsync(search, cancellationToken)))
+            .WithName("Browse{{EntityPlural}}");
+
+        group.MapGet("/{id:guid}", async (Guid id, IManage{{EntityPlural}} port, CancellationToken cancellationToken) =>
+                ToHttp(await port.FindAsync(id, cancellationToken)))
+            .WithName("Find{{Entity}}");
+
+        group.MapPost("/", async (Register{{Entity}}Command command, IManage{{EntityPlural}} port, CancellationToken cancellationToken) =>
+            {
+                var result = await port.RegisterAsync(command, cancellationToken);
+                return result.IsSuccess
+                    ? Results.Created($"/api/{{entityRoute}}/{result.Value.Id}", result.Value)
+                    : Problem(result.Error!);
+            })
+            .WithName("Register{{Entity}}");
+
+        group.MapPut("/{id:guid}", async (Guid id, Amend{{Entity}}Command command, IManage{{EntityPlural}} port, CancellationToken cancellationToken) =>
+                ToHttp(await port.AmendAsync(id, command, cancellationToken)))
+            .WithName("Amend{{Entity}}");
+
+        group.MapDelete("/{id:guid}", async (Guid id, IManage{{EntityPlural}} port, CancellationToken cancellationToken) =>
+            {
+                var result = await port.WithdrawAsync(id, cancellationToken);
+                return result.IsSuccess ? Results.NoContent() : Problem(result.Error!);
+            })
+            .WithName("Withdraw{{Entity}}");
+
+        return app;
+    }
+
+    private static IResult ToHttp<TValue>(Result<TValue> result)
+        => result.IsSuccess ? Results.Ok(result.Value) : Problem(result.Error!);
+
+    private static IResult Problem(Error error) => error.Code switch
+    {
+        "not_found" => Results.Problem(title: "Recurso no encontrado", detail: error.Message, statusCode: StatusCodes.Status404NotFound),
+        "conflict" => Results.Problem(title: "Conflicto", detail: error.Message, statusCode: StatusCodes.Status409Conflict),
+        _ => Results.Problem(title: "Solicitud no válida", detail: error.Message, statusCode: StatusCodes.Status400BadRequest),
+    };
+}

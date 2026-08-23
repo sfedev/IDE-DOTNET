@@ -1,0 +1,100 @@
+# Compilación y empaquetado de DotForge IDE para Windows y macOS.
+#
+# El .dmg y el .app se generan en un runner macOS porque electron-builder no puede producirlos
+# desde otra plataforma. Este workflow es la ruta oficial para obtener los artefactos de macOS.
+
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Pruebas (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            9.0.x
+            10.0.x
+
+      # El primer `dotnet build` de cada plantilla restaura paquetes; cachearlos ahorra minutos.
+      - name: Cachear paquetes NuGet
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('src/scaffold/context.ts') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - run: npm ci
+      - run: npm run build
+      - run: npx tsc --noEmit
+      - run: npm test
+
+  build-windows:
+    name: Artefactos de Windows
+    needs: test
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+      - run: npm run icons
+      - run: npm run dist:win
+      - run: node scripts/verify-dist.mjs --require win
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dotforge-ide-windows
+          path: |
+            dist/*.exe
+            dist/*.zip
+          if-no-files-found: error
+
+  build-macos:
+    name: Artefactos de macOS
+    needs: test
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+      - run: npm run icons
+      - run: npm run dist:mac
+      - run: node scripts/verify-dist.mjs --require mac
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dotforge-ide-macos
+          path: |
+            dist/*.dmg
+            dist/*.zip
+          if-no-files-found: error

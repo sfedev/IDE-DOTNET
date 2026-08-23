@@ -1,0 +1,47 @@
+namespace {{Solution}}.Infrastructure.Persistence;
+
+using Microsoft.EntityFrameworkCore;
+using {{Solution}}.Application.Abstractions;
+using {{Solution}}.Infrastructure.Events;
+using {{Solution}}.SharedKernel;
+
+/// <summary>
+/// Unidad de trabajo que publica los eventos de dominio DESPUÉS de confirmar.
+///
+/// El orden es deliberado: primero se persiste, luego se publica. Publicar antes significaría
+/// anunciar hechos que un rollback podría dejar en nada.
+/// </summary>
+public sealed class UnitOfWork : IUnitOfWork
+{
+    private readonly AppDbContext _context;
+    private readonly DomainEventPublisher _publisher;
+
+    public UnitOfWork(AppDbContext context, DomainEventPublisher publisher)
+    {
+        _context = context;
+        _publisher = publisher;
+    }
+
+    public async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        var aggregates = _context.ChangeTracker
+            .Entries<AggregateRoot>()
+            .Select(entry => entry.Entity)
+            .Where(aggregate => aggregate.DomainEvents.Count > 0)
+            .ToList();
+
+        var domainEvents = aggregates.SelectMany(aggregate => aggregate.DomainEvents).ToList();
+
+        // Se limpian antes de publicar para que un handler que vuelva a guardar no los repita.
+        foreach (var aggregate in aggregates)
+        {
+            aggregate.ClearDomainEvents();
+        }
+
+        var affected = await _context.SaveChangesAsync(cancellationToken);
+
+        await _publisher.PublishAsync(domainEvents, cancellationToken);
+
+        return affected;
+    }
+}

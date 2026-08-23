@@ -1,0 +1,21 @@
+namespace {{Solution}}.Infrastructure.Persistence;
+
+using Microsoft.EntityFrameworkCore;
+using {{Solution}}.Domain.Entities;
+
+/// <summary>Contexto de EF Core. Único punto que conoce el esquema físico de la base de datos.</summary>
+public sealed class AppDbContext : DbContext
+{
+    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options)
+    {
+    }
+
+    public DbSet<{{Entity}}> {{EntityPlural}} => Set<{{Entity}}>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        // Aplica todas las clases IEntityTypeConfiguration de este ensamblado.
+        modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
+        base.OnModelCreating(modelBuilder);
+    }
+}

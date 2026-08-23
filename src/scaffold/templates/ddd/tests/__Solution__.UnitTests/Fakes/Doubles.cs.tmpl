@@ -1,0 +1,63 @@
+namespace {{Solution}}.UnitTests.Fakes;
+
+using {{Solution}}.Application.Abstractions;
+using {{Solution}}.Domain.{{EntityPlural}};
+
+/// <summary>Repositorio del agregado en memoria, con unidad de trabajo incorporada.</summary>
+public sealed class InMemory{{Entity}}Repository : I{{Entity}}Repository, IUnitOfWork
+{
+    private readonly List<{{Entity}}> _items = [];
+
+    public int SaveChangesCalls { get; private set; }
+
+    /// <summary>Eventos que la unidad de trabajo habría publicado al confirmar.</summary>
+    public List<string> PublishedEvents { get; } = [];
+
+    public Task<IReadOnlyList<{{Entity}}>> ListAsync(string? search, CancellationToken cancellationToken = default)
+    {
+        IEnumerable<{{Entity}}> query = _items;
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim();
+            query = query.Where(x =>
+                x.Name.Contains(term, StringComparison.OrdinalIgnoreCase) ||
+                x.Sku.Value.Contains(term, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return Task.FromResult<IReadOnlyList<{{Entity}}>>(query.OrderBy(x => x.Name).ToList());
+    }
+
+    public Task<{{Entity}}?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+        => Task.FromResult(_items.FirstOrDefault(x => x.Id == id));
+
+    public Task<bool> ExistsWithSkuAsync(Sku sku, Guid? excludingId = null, CancellationToken cancellationToken = default)
+        => Task.FromResult(_items.Any(x => x.Sku == sku && (excludingId is null || x.Id != excludingId)));
+
+    public void Add({{Entity}} {{entity}}) => _items.Add({{entity}});
+
+    public void Remove({{Entity}} {{entity}}) => _items.Remove({{entity}});
+
+    public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        SaveChangesCalls++;
+
+        // Reproduce el comportamiento real: recoger, limpiar y "publicar" tras confirmar.
+        foreach (var aggregate in _items.Where(x => x.DomainEvents.Count > 0).ToList())
+        {
+            PublishedEvents.AddRange(aggregate.DomainEvents.Select(e => e.GetType().Name));
+            aggregate.ClearDomainEvents();
+        }
+
+        return Task.FromResult(_items.Count);
+    }
+}
+
+/// <summary>Reloj congelado para hacer deterministas las aserciones temporales.</summary>
+public sealed class FrozenClock : IDateTimeProvider
+{
+    public FrozenClock(DateTimeOffset? now = null)
+        => UtcNow = now ?? new DateTimeOffset(2026, 1, 15, 10, 30, 0, TimeSpan.Zero);
+
+    public DateTimeOffset UtcNow { get; set; }
+}

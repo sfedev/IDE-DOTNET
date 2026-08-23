@@ -1,0 +1,65 @@
+namespace {{Solution}}.Domain.ValueObjects;
+
+using {{Solution}}.Domain.Common;
+
+/// <summary>
+/// Objeto de valor monetario: inmutable, sin identidad y comparado por valor.
+/// Se persiste como tipo propiedad (owned type) de EF Core, en columnas de la tabla dueña.
+/// </summary>
+public sealed class Money : IEquatable<Money>
+{
+    public const string DefaultCurrency = "EUR";
+
+    // Constructor sin parámetros requerido por EF Core para materializar el owned type.
+    private Money()
+    {
+        Currency = DefaultCurrency;
+    }
+
+    private Money(decimal amount, string currency)
+    {
+        Amount = amount;
+        Currency = currency;
+    }
+
+    public decimal Amount { get; private set; }
+
+    public string Currency { get; private set; }
+
+    public static Money Zero => new(0m, DefaultCurrency);
+
+    public static Money Of(decimal amount, string currency = DefaultCurrency)
+    {
+        DomainException.ThrowIf(amount < 0m, "El importe no puede ser negativo.");
+        DomainException.ThrowIf(string.IsNullOrWhiteSpace(currency), "La divisa es obligatoria.");
+        DomainException.ThrowIf(currency.Trim().Length != 3, "La divisa debe seguir ISO 4217 (3 letras).");
+
+        return new Money(decimal.Round(amount, 2, MidpointRounding.ToEven), currency.Trim().ToUpperInvariant());
+    }
+
+    public Money Add(Money other)
+    {
+        EnsureSameCurrency(other);
+        return new Money(Amount + other.Amount, Currency);
+    }
+
+    public Money MultiplyBy(int factor)
+    {
+        DomainException.ThrowIf(factor < 0, "El factor no puede ser negativo.");
+        return new Money(Amount * factor, Currency);
+    }
+
+    private void EnsureSameCurrency(Money other)
+        => DomainException.ThrowIf(
+            !string.Equals(Currency, other.Currency, StringComparison.Ordinal),
+            "No se pueden operar importes en divisas distintas.");
+
+    public bool Equals(Money? other)
+        => other is not null && Amount == other.Amount && Currency == other.Currency;
+
+    public override bool Equals(object? obj) => obj is Money money && Equals(money);
+
+    public override int GetHashCode() => HashCode.Combine(Amount, Currency);
+
+    public override string ToString() => $"{Amount:0.00} {Currency}";
+}

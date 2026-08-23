@@ -1,0 +1,21 @@
+namespace {{Solution}}.Application.Abstractions;
+
+using {{Solution}}.Domain.Entities;
+
+/// <summary>
+/// Puerto de persistencia para <see cref="{{Entity}}"/>.
+/// Lo define la capa de Aplicación y lo implementa Infrastructure: así la dependencia apunta
+/// siempre hacia dentro (regla de dependencia de Clean Architecture).
+/// </summary>
+public interface I{{Entity}}Repository
+{
+    Task<IReadOnlyList<{{Entity}}>> ListAsync(string? search, CancellationToken cancellationToken = default);
+
+    Task<{{Entity}}?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
+
+    Task<bool> SkuExistsAsync(string sku, Guid? excludingId = null, CancellationToken cancellationToken = default);
+
+    Task AddAsync({{Entity}} {{entity}}, CancellationToken cancellationToken = default);
+
+    void Remove({{Entity}} {{entity}});
+}

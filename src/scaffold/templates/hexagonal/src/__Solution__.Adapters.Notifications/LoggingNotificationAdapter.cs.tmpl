@@ -1,0 +1,29 @@
+namespace {{Solution}}.Adapters.Notifications;
+
+using Microsoft.Extensions.Logging;
+using {{Solution}}.Ports.Outbound;
+
+/// <summary>
+/// Implementación de referencia del puerto de notificaciones: escribe en el log.
+///
+/// Para pasar a correo o a una cola, escribe otro adaptador que implemente
+/// <see cref="INotificationPort"/> y cámbialo en el instalador. El hexágono no se entera.
+/// </summary>
+internal sealed class LoggingNotificationAdapter : INotificationPort
+{
+    private readonly ILogger<LoggingNotificationAdapter> _logger;
+
+    public LoggingNotificationAdapter(ILogger<LoggingNotificationAdapter> logger) => _logger = logger;
+
+    public Task Notify{{Entity}}RegisteredAsync(Guid id, string name, string sku, CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Notificación: alta de {{entity}} {Name} ({Sku}) con id {Id}", name, sku, id);
+        return Task.CompletedTask;
+    }
+
+    public Task Notify{{Entity}}WithdrawnAsync(Guid id, string sku, CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Notificación: baja de {{entity}} {Sku} con id {Id}", sku, id);
+        return Task.CompletedTask;
+    }
+}

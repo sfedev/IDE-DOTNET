@@ -1,0 +1,56 @@
+namespace {{Solution}}.UnitTests.Domain;
+
+using Xunit;
+using {{Solution}}.Domain.Model;
+
+public class {{Entity}}Tests
+{
+    private static readonly DateTimeOffset Now = new(2026, 1, 15, 10, 30, 0, TimeSpan.Zero);
+
+    [Fact]
+    public void Create_normaliza_nombre_y_sku()
+    {
+        var {{entity}} = {{Entity}}.Create("  Teclado mecánico  ", " kb-87-tkl ", 89.9m, 5, Now);
+
+        Assert.Equal("Teclado mecánico", {{entity}}.Name);
+        Assert.Equal("KB-87-TKL", {{entity}}.Sku);
+        Assert.Equal(89.90m, {{entity}}.Price.Amount);
+        Assert.Equal(Now, {{entity}}.CreatedAtUtc);
+        Assert.True({{entity}}.IsAvailable);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Create_rechaza_nombre_vacio(string name)
+        => Assert.Throws<DomainException>(() => {{Entity}}.Create(name, "SKU-1", 10m, 1, Now));
+
+    [Fact]
+    public void Create_rechaza_precio_negativo()
+        => Assert.Throws<DomainException>(() => {{Entity}}.Create("Nombre", "SKU-1", -1m, 1, Now));
+
+    [Fact]
+    public void AdjustStock_no_permite_dejar_stock_negativo()
+    {
+        var {{entity}} = {{Entity}}.Create("Nombre", "SKU-1", 10m, 2, Now);
+
+        Assert.Throws<DomainException>(() => {{entity}}.AdjustStock(-3, Now));
+        Assert.Equal(2, {{entity}}.Stock);
+    }
+
+    [Fact]
+    public void El_nucleo_recibe_el_tiempo_desde_fuera()
+    {
+        var {{entity}} = {{Entity}}.Create("Nombre", "SKU-1", 10m, 2, Now);
+        Assert.Null({{entity}}.UpdatedAtUtc);
+
+        var later = Now.AddHours(3);
+        {{entity}}.AdjustStock(1, later);
+
+        Assert.Equal(later, {{entity}}.UpdatedAtUtc);
+    }
+
+    [Fact]
+    public void Money_compara_por_valor()
+        => Assert.Equal(Money.Of(10.005m), Money.Of(10.00m));
+}

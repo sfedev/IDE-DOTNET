@@ -1,0 +1,93 @@
+namespace {{Solution}}.UnitTests.Domain;
+
+using Xunit;
+using {{Solution}}.Domain.{{EntityPlural}};
+using {{Solution}}.Domain.{{EntityPlural}}.Events;
+using {{Solution}}.SharedKernel;
+
+public class {{Entity}}AggregateTests
+{
+    private static readonly DateTimeOffset Now = new(2026, 1, 15, 10, 30, 0, TimeSpan.Zero);
+
+    [Fact]
+    public void Register_crea_el_agregado_y_levanta_su_evento()
+    {
+        var {{entity}} = {{Entity}}.Register("  Teclado  ", " kb-1 ", 49.9m, 5, Now);
+
+        Assert.Equal("Teclado", {{entity}}.Name);
+        Assert.Equal("KB-1", {{entity}}.Sku.Value);
+        Assert.Single({{entity}}.DomainEvents);
+        Assert.IsType<{{Entity}}RegisteredDomainEvent>({{entity}}.DomainEvents.Single());
+    }
+
+    [Fact]
+    public void AdjustStock_levanta_evento_de_ajuste()
+    {
+        var {{entity}} = {{Entity}}.Register("Teclado", "KB-1", 49.9m, 5, Now);
+        {{entity}}.ClearDomainEvents();
+
+        {{entity}}.AdjustStock(-2, Now);
+
+        var adjusted = Assert.IsType<{{Entity}}StockAdjustedDomainEvent>({{entity}}.DomainEvents.Single());
+        Assert.Equal(5, adjusted.PreviousStock);
+        Assert.Equal(3, adjusted.CurrentStock);
+    }
+
+    [Fact]
+    public void Quedarse_sin_stock_levanta_ademas_el_evento_de_rotura()
+    {
+        var {{entity}} = {{Entity}}.Register("Teclado", "KB-1", 49.9m, 2, Now);
+        {{entity}}.ClearDomainEvents();
+
+        {{entity}}.AdjustStock(-2, Now);
+
+        Assert.Equal(2, {{entity}}.DomainEvents.Count);
+        Assert.Contains({{entity}}.DomainEvents, e => e is {{Entity}}OutOfStockDomainEvent);
+        Assert.False({{entity}}.IsAvailable);
+    }
+
+    [Fact]
+    public void No_se_levanta_rotura_si_ya_estaba_a_cero()
+    {
+        var {{entity}} = {{Entity}}.Register("Teclado", "KB-1", 49.9m, 0, Now);
+        {{entity}}.ClearDomainEvents();
+
+        {{entity}}.AdjustStock(0, Now);
+
+        Assert.DoesNotContain({{entity}}.DomainEvents, e => e is {{Entity}}OutOfStockDomainEvent);
+    }
+
+    [Fact]
+    public void AdjustStock_protege_la_invariante_de_stock_no_negativo()
+    {
+        var {{entity}} = {{Entity}}.Register("Teclado", "KB-1", 49.9m, 1, Now);
+
+        Assert.Throws<DomainException>(() => {{entity}}.AdjustStock(-2, Now));
+        Assert.Equal(1, {{entity}}.Stock);
+    }
+
+    [Theory]
+    [InlineData("SKU 1")]
+    [InlineData("SKU!")]
+    [InlineData("")]
+    public void Sku_rechaza_valores_invalidos(string value)
+        => Assert.Throws<DomainException>(() => Sku.Of(value));
+
+    [Fact]
+    public void Los_objetos_de_valor_se_comparan_por_valor()
+    {
+        Assert.Equal(Sku.Of("kb-1"), Sku.Of("KB-1"));
+        Assert.Equal(Money.Of(10m, "eur"), Money.Of(10.00m, "EUR"));
+        Assert.NotEqual(Money.Of(10m, "EUR"), Money.Of(10m, "USD"));
+    }
+
+    [Fact]
+    public void Las_entidades_se_comparan_por_identidad()
+    {
+        var a = {{Entity}}.Register("Teclado", "KB-1", 49.9m, 1, Now);
+        var b = {{Entity}}.Register("Teclado", "KB-2", 49.9m, 1, Now);
+
+        Assert.NotEqual(a, b);
+        Assert.Equal(a, a);
+    }
+}

@@ -1,0 +1,15 @@
+namespace {{Solution}}.Ports.Outbound;
+
+/// <summary>
+/// PUERTO DE SALIDA no persistente.
+///
+/// Está aquí para dejar claro que un puerto de salida no es sinónimo de base de datos: también
+/// lo es enviar un correo, publicar en una cola o llamar a una API de terceros. El adaptador
+/// incluido escribe en el log; sustitúyelo sin tocar el hexágono.
+/// </summary>
+public interface INotificationPort
+{
+    Task Notify{{Entity}}RegisteredAsync(Guid id, string name, string sku, CancellationToken cancellationToken = default);
+
+    Task Notify{{Entity}}WithdrawnAsync(Guid id, string sku, CancellationToken cancellationToken = default);
+}

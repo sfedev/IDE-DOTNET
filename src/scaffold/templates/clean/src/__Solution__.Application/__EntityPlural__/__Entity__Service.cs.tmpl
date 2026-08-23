@@ -1,0 +1,108 @@
+namespace {{Solution}}.Application.{{EntityPlural}};
+
+using Microsoft.Extensions.Logging;
+using {{Solution}}.Application.Abstractions;
+using {{Solution}}.Application.Common;
+using {{Solution}}.Domain.Common;
+using {{Solution}}.Domain.Entities;
+
+/// <summary>
+/// Implementación de los casos de uso de {{EntityPlural}}.
+///
+/// Responsabilidades: orquestar el dominio, aplicar reglas de aplicación (unicidad del SKU),
+/// traducir las excepciones de dominio a <see cref="Result"/> y confirmar la unidad de trabajo.
+/// No contiene reglas de negocio: esas viven en la entidad.
+/// </summary>
+public sealed class {{Entity}}Service : I{{Entity}}Service
+{
+    private readonly I{{Entity}}Repository _repository;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly ILogger<{{Entity}}Service> _logger;
+
+    public {{Entity}}Service(
+        I{{Entity}}Repository repository,
+        IUnitOfWork unitOfWork,
+        ILogger<{{Entity}}Service> logger)
+    {
+        _repository = repository;
+        _unitOfWork = unitOfWork;
+        _logger = logger;
+    }
+
+    public async Task<IReadOnlyList<{{Entity}}Dto>> ListAsync(string? search, CancellationToken cancellationToken = default)
+    {
+        var items = await _repository.ListAsync(search, cancellationToken);
+        return items.Select({{Entity}}Dto.From).ToList();
+    }
+
+    public async Task<Result<{{Entity}}Dto>> GetAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var found = await _repository.GetByIdAsync(id, cancellationToken);
+        return found is null
+            ? Result.Failure<{{Entity}}Dto>(Error.NotFound($"el {{entity}} {id}"))
+            : Result.Success({{Entity}}Dto.From(found));
+    }
+
+    public async Task<Result<{{Entity}}Dto>> CreateAsync(Create{{Entity}}Request request, CancellationToken cancellationToken = default)
+    {
+        if (await _repository.SkuExistsAsync(request.Sku, excludingId: null, cancellationToken))
+        {
+            return Result.Failure<{{Entity}}Dto>(Error.Conflict($"Ya existe un {{entity}} con el SKU '{request.Sku}'."));
+        }
+
+        try
+        {
+            var created = {{Entity}}.Create(request.Name, request.Sku, request.Price, request.Stock, request.Currency);
+            await _repository.AddAsync(created, cancellationToken);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation("{{Entity}} {Id} creado con SKU {Sku}", created.Id, created.Sku);
+            return Result.Success({{Entity}}Dto.From(created));
+        }
+        catch (DomainException ex)
+        {
+            return Result.Failure<{{Entity}}Dto>(Error.Validation(ex.Message));
+        }
+    }
+
+    public async Task<Result<{{Entity}}Dto>> UpdateAsync(Guid id, Update{{Entity}}Request request, CancellationToken cancellationToken = default)
+    {
+        var existing = await _repository.GetByIdAsync(id, cancellationToken);
+        if (existing is null)
+        {
+            return Result.Failure<{{Entity}}Dto>(Error.NotFound($"el {{entity}} {id}"));
+        }
+
+        try
+        {
+            existing.Rename(request.Name);
+            existing.ChangePrice(request.Price, request.Currency);
+            if (request.StockDelta != 0)
+            {
+                existing.AdjustStock(request.StockDelta);
+            }
+
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            return Result.Success({{Entity}}Dto.From(existing));
+        }
+        catch (DomainException ex)
+        {
+            return Result.Failure<{{Entity}}Dto>(Error.Validation(ex.Message));
+        }
+    }
+
+    public async Task<Result> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var existing = await _repository.GetByIdAsync(id, cancellationToken);
+        if (existing is null)
+        {
+            return Result.Failure(Error.NotFound($"el {{entity}} {id}"));
+        }
+
+        _repository.Remove(existing);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("{{Entity}} {Id} eliminado", id);
+
+        return Result.Success();
+    }
+}

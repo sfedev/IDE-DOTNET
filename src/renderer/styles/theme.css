@@ -1,0 +1,146 @@
+/*
+ * DotForge Purple — tokens de tema.
+ *
+ * Regla del proyecto: ningún componente escribe un color literal. Todo sale de estas variables,
+ * así que cambiar de tema es cambiar un atributo `data-theme` en la raíz.
+ *
+ * El acento base es #512BD4, el púrpura de la identidad de .NET. Sobre superficies oscuras
+ * neutras se usa la variante clara #8B6CF5 para mantener el contraste AA en texto.
+ */
+
+:root,
+[data-theme='dotforge-dark'] {
+  color-scheme: dark;
+
+  /* Superficies, de más profunda a más elevada */
+  --bg-deep: #100e18;
+  --bg: #14121c;
+  --surface-1: #1a1727;
+  --surface-2: #221e33;
+  --surface-3: #2b2542;
+  --overlay-scrim: rgba(8, 6, 14, 0.65);
+
+  /* Bordes y separadores */
+  --border: #322c4d;
+  --border-strong: #443b66;
+  --border-subtle: #241f38;
+
+  /* Texto */
+  --text: #e9e6f7;
+  --text-muted: #a49dc6;
+  --text-faint: #736c94;
+  --text-inverse: #14121c;
+
+  /* Acento .NET */
+  --accent: #8b6cf5;
+  --accent-strong: #512bd4;
+  --accent-soft: rgba(139, 108, 245, 0.16);
+  --accent-contrast: #ffffff;
+
+  /* Semánticos */
+  --danger: #ff6b6b;
+  --danger-soft: rgba(255, 107, 107, 0.15);
+  --warning: #ffc857;
+  --warning-soft: rgba(255, 200, 87, 0.15);
+  --success: #3ddc97;
+  --success-soft: rgba(61, 220, 151, 0.15);
+  --info: #58b6ff;
+  --info-soft: rgba(88, 182, 255, 0.15);
+
+  /* Sintaxis del editor (se traducen a reglas de Monaco en monaco-theme.ts) */
+  --syntax-comment: #6f6a8f;
+  --syntax-keyword: #c792ea;
+  --syntax-control: #ff9ec4;
+  --syntax-string: #b8e58c;
+  --syntax-number: #f5b57a;
+  --syntax-type: #6fd3c7;
+  --syntax-interface: #7fd6a8;
+  --syntax-method: #82b8ff;
+  --syntax-variable: #dcd8f0;
+  --syntax-razor: #ffb86c;
+  --syntax-tag: #86d0ff;
+  --syntax-attribute: #d8b6ff;
+  --syntax-component: #ffd479;
+
+  --radius-sm: 5px;
+  --radius: 8px;
+  --radius-lg: 12px;
+
+  --shadow-panel: 0 12px 32px rgba(0, 0, 0, 0.45);
+  --shadow-popover: 0 18px 48px rgba(0, 0, 0, 0.55);
+
+  --font-ui: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', sans-serif;
+  --font-mono: 'Cascadia Code', 'JetBrains Mono', 'SF Mono', Consolas, Menlo, monospace;
+
+  --titlebar-height: 38px;
+  --statusbar-height: 24px;
+  --activitybar-width: 52px;
+}
+
+[data-theme='dotforge-light'] {
+  color-scheme: light;
+
+  --bg-deep: #eceaf4;
+  --bg: #f6f5fb;
+  --surface-1: #ffffff;
+  --surface-2: #f1eefb;
+  --surface-3: #e6e1f6;
+  --overlay-scrim: rgba(32, 26, 54, 0.35);
+
+  --border: #d9d3ec;
+  --border-strong: #c2b9de;
+  --border-subtle: #e8e4f4;
+
+  --text: #241f38;
+  --text-muted: #5c5480;
+  --text-faint: #857da8;
+  --text-inverse: #ffffff;
+
+  --accent: #5b34d8;
+  --accent-strong: #512bd4;
+  --accent-soft: rgba(81, 43, 212, 0.12);
+  --accent-contrast: #ffffff;
+
+  --danger: #c92a2a;
+  --danger-soft: rgba(201, 42, 42, 0.12);
+  --warning: #a06800;
+  --warning-soft: rgba(160, 104, 0, 0.14);
+  --success: #10794f;
+  --success-soft: rgba(16, 121, 79, 0.12);
+  --info: #0b6bb5;
+  --info-soft: rgba(11, 107, 181, 0.12);
+
+  --syntax-comment: #6d7a86;
+  --syntax-keyword: #7719aa;
+  --syntax-control: #af00db;
+  --syntax-string: #0a7d38;
+  --syntax-number: #b34700;
+  --syntax-type: #0f6b6b;
+  --syntax-interface: #0d7a52;
+  --syntax-method: #1c50b5;
+  --syntax-variable: #241f38;
+  --syntax-razor: #a35200;
+  --syntax-tag: #0c5a99;
+  --syntax-attribute: #6a2fb0;
+  --syntax-component: #8a5a00;
+
+  --shadow-panel: 0 12px 28px rgba(60, 47, 105, 0.14);
+  --shadow-popover: 0 18px 40px rgba(60, 47, 105, 0.2);
+}
+
+/* Foco siempre visible: la navegación por teclado es un requisito, no un extra. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+
+/* Quien haya pedido menos movimiento no debería sufrir las transiciones de los paneles. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

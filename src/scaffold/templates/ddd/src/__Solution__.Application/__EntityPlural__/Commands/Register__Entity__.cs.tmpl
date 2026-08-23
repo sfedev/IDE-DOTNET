@@ -1,0 +1,84 @@
+namespace {{Solution}}.Application.{{EntityPlural}}.Commands;
+
+using {{Solution}}.Application.Abstractions;
+using {{Solution}}.Domain.{{EntityPlural}};
+using {{Solution}}.SharedKernel;
+
+public sealed record Register{{Entity}}Command(
+    string Name,
+    string Sku,
+    decimal Price,
+    int Stock,
+    string Currency = "EUR") : ICommand<{{Entity}}Response>;
+
+/// <summary>Validación de forma. Las invariantes de negocio las impone el agregado.</summary>
+public sealed class Register{{Entity}}Validator : IValidator<Register{{Entity}}Command>
+{
+    public IEnumerable<string> Validate(Register{{Entity}}Command request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name)) yield return "El nombre es obligatorio.";
+        if (string.IsNullOrWhiteSpace(request.Sku)) yield return "El SKU es obligatorio.";
+        if (request.Price <= 0m) yield return "El precio debe ser mayor que cero.";
+        if (request.Stock < 0) yield return "El stock no puede ser negativo.";
+    }
+}
+
+public sealed class Register{{Entity}}Handler : ICommandHandler<Register{{Entity}}Command, {{Entity}}Response>
+{
+    private readonly I{{Entity}}Repository _repository;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly IDateTimeProvider _clock;
+
+    public Register{{Entity}}Handler(
+        I{{Entity}}Repository repository,
+        IUnitOfWork unitOfWork,
+        IDateTimeProvider clock)
+    {
+        _repository = repository;
+        _unitOfWork = unitOfWork;
+        _clock = clock;
+    }
+
+    public async Task<Result<{{Entity}}Response>> HandleAsync(
+        Register{{Entity}}Command command,
+        CancellationToken cancellationToken = default)
+    {
+        Sku sku;
+        try
+        {
+            sku = Sku.Of(command.Sku);
+        }
+        catch (DomainException ex)
+        {
+            return Result.Failure<{{Entity}}Response>(Error.Validation(ex.Message));
+        }
+
+        if (await _repository.ExistsWithSkuAsync(sku, excludingId: null, cancellationToken))
+        {
+            return Result.Failure<{{Entity}}Response>(
+                Error.Conflict($"Ya existe un {{entity}} con el SKU '{sku.Value}'."));
+        }
+
+        try
+        {
+            var {{entity}} = {{Entity}}.Register(
+                command.Name,
+                command.Sku,
+                command.Price,
+                command.Stock,
+                _clock.UtcNow,
+                command.Currency);
+
+            _repository.Add({{entity}});
+
+            // Al confirmar, la unidad de trabajo publica los eventos que el agregado ha acumulado.
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            return Result.Success({{Entity}}Response.From({{entity}}));
+        }
+        catch (DomainException ex)
+        {
+            return Result.Failure<{{Entity}}Response>(Error.Validation(ex.Message));
+        }
+    }
+}

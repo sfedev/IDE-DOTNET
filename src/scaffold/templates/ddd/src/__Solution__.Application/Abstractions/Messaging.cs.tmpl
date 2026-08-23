@@ -1,0 +1,65 @@
+namespace {{Solution}}.Application.Abstractions;
+
+using {{Solution}}.SharedKernel;
+
+/// <summary>
+/// Comando: expresa una INTENCIÓN de cambiar el estado del sistema. Puede ser rechazado.
+/// Se nombra en imperativo: Register{{Entity}}, no {{Entity}}Registered.
+/// </summary>
+public interface ICommand<TResponse>;
+
+/// <summary>Consulta: pide datos y no cambia nada. Nunca debe tener efectos secundarios.</summary>
+public interface IQuery<TResponse>;
+
+public interface ICommandHandler<in TCommand, TResponse>
+    where TCommand : ICommand<TResponse>
+{
+    Task<Result<TResponse>> HandleAsync(TCommand command, CancellationToken cancellationToken = default);
+}
+
+public interface IQueryHandler<in TQuery, TResponse>
+    where TQuery : IQuery<TResponse>
+{
+    Task<Result<TResponse>> HandleAsync(TQuery query, CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Punto único de entrada a la capa de aplicación. La presentación despacha mensajes y no
+/// conoce ni un solo handler: por eso añadir un caso de uso no toca la Web API ni Blazor.
+/// </summary>
+public interface IDispatcher
+{
+    Task<Result<TResponse>> SendAsync<TResponse>(ICommand<TResponse> command, CancellationToken cancellationToken = default);
+
+    Task<Result<TResponse>> QueryAsync<TResponse>(IQuery<TResponse> query, CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Comportamiento transversal alrededor de un handler (logging, validación, transacciones...).
+/// Se encadenan como cebolla: el primero registrado es el más externo.
+/// </summary>
+public interface IPipelineBehavior<in TRequest, TResponse>
+{
+    Task<Result<TResponse>> HandleAsync(
+        TRequest request,
+        Func<Task<Result<TResponse>>> next,
+        CancellationToken cancellationToken = default);
+}
+
+/// <summary>Validación de un mensaje antes de llegar a su handler.</summary>
+public interface IValidator<in TRequest>
+{
+    IEnumerable<string> Validate(TRequest request);
+}
+
+/// <summary>Unidad de trabajo. Al confirmar, publica los eventos de dominio acumulados.</summary>
+public interface IUnitOfWork
+{
+    Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
+}
+
+/// <summary>Reloj inyectable: mantiene los casos de uso deterministas en pruebas.</summary>
+public interface IDateTimeProvider
+{
+    DateTimeOffset UtcNow { get; }
+}

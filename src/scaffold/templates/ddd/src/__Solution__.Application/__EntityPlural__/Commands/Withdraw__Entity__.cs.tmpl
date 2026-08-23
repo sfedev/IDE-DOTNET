@@ -1,0 +1,35 @@
+namespace {{Solution}}.Application.{{EntityPlural}}.Commands;
+
+using {{Solution}}.Application.Abstractions;
+using {{Solution}}.Domain.{{EntityPlural}};
+using {{Solution}}.SharedKernel;
+
+public sealed record Withdraw{{Entity}}Command(Guid Id) : ICommand<bool>;
+
+public sealed class Withdraw{{Entity}}Handler : ICommandHandler<Withdraw{{Entity}}Command, bool>
+{
+    private readonly I{{Entity}}Repository _repository;
+    private readonly IUnitOfWork _unitOfWork;
+
+    public Withdraw{{Entity}}Handler(I{{Entity}}Repository repository, IUnitOfWork unitOfWork)
+    {
+        _repository = repository;
+        _unitOfWork = unitOfWork;
+    }
+
+    public async Task<Result<bool>> HandleAsync(
+        Withdraw{{Entity}}Command command,
+        CancellationToken cancellationToken = default)
+    {
+        var {{entity}} = await _repository.GetByIdAsync(command.Id, cancellationToken);
+        if ({{entity}} is null)
+        {
+            return Result.Failure<bool>(Error.NotFound($"el {{entity}} {command.Id}"));
+        }
+
+        _repository.Remove({{entity}});
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return Result.Success(true);
+    }
+}

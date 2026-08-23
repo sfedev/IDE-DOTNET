@@ -1,0 +1,40 @@
+namespace {{Solution}}.Domain.{{EntityPlural}};
+
+using {{Solution}}.SharedKernel;
+
+/// <summary>
+/// Objeto de valor: un SKU es un concepto del negocio con reglas propias, no un string.
+/// Modelarlo como tipo elimina de raíz la clase de errores en la que un identificador
+/// acaba donde iba un nombre.
+/// </summary>
+public sealed class Sku : ValueObject
+{
+    public const int MaxLength = 32;
+
+    // Requerido por EF Core para materializar el owned type.
+    private Sku() => Value = string.Empty;
+
+    private Sku(string value) => Value = value;
+
+    public string Value { get; private set; }
+
+    public static Sku Of(string value)
+    {
+        DomainException.ThrowIf(string.IsNullOrWhiteSpace(value), "El SKU es obligatorio.");
+
+        var normalized = value.Trim().ToUpperInvariant();
+        DomainException.ThrowIf(normalized.Length > MaxLength, $"El SKU supera {MaxLength} caracteres.");
+        DomainException.ThrowIf(
+            !normalized.All(c => char.IsLetterOrDigit(c) || c is '-' or '_'),
+            "El SKU sólo admite letras, dígitos, '-' y '_'.");
+
+        return new Sku(normalized);
+    }
+
+    protected override IEnumerable<object?> GetEqualityComponents()
+    {
+        yield return Value;
+    }
+
+    public override string ToString() => Value;
+}

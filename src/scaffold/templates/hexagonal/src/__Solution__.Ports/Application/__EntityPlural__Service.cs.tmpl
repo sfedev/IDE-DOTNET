@@ -1,0 +1,122 @@
+namespace {{Solution}}.Ports.Application;
+
+using Microsoft.Extensions.Logging;
+using {{Solution}}.Domain.Model;
+using {{Solution}}.Ports.Inbound;
+using {{Solution}}.Ports.Outbound;
+
+/// <summary>
+/// Servicio de aplicación: implementa el puerto de entrada <see cref="IManage{{EntityPlural}}"/>
+/// apoyándose exclusivamente en puertos de salida.
+///
+/// Fíjate en lo que NO hay aquí: ni DbContext, ni HttpContext, ni DateTime.UtcNow. Eso es lo que
+/// permite ejercitar todo el hexágono en pruebas con adaptadores dobles y sin infraestructura.
+/// </summary>
+public sealed class {{EntityPlural}}Service : IManage{{EntityPlural}}
+{
+    private readonly I{{Entity}}RepositoryPort _repository;
+    private readonly INotificationPort _notifications;
+    private readonly IClockPort _clock;
+    private readonly ILogger<{{EntityPlural}}Service> _logger;
+
+    public {{EntityPlural}}Service(
+        I{{Entity}}RepositoryPort repository,
+        INotificationPort notifications,
+        IClockPort clock,
+        ILogger<{{EntityPlural}}Service> logger)
+    {
+        _repository = repository;
+        _notifications = notifications;
+        _clock = clock;
+        _logger = logger;
+    }
+
+    public async Task<IReadOnlyList<{{Entity}}View>> BrowseAsync(string? search, CancellationToken cancellationToken = default)
+    {
+        var found = await _repository.SearchAsync(search, cancellationToken);
+        return found.Select({{Entity}}View.From).ToList();
+    }
+
+    public async Task<Result<{{Entity}}View>> FindAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var found = await _repository.FindAsync(id, cancellationToken);
+        return found is null
+            ? Result.Failure<{{Entity}}View>(Error.NotFound($"el {{entity}} {id}"))
+            : Result.Success({{Entity}}View.From(found));
+    }
+
+    public async Task<Result<{{Entity}}View>> RegisterAsync(Register{{Entity}}Command command, CancellationToken cancellationToken = default)
+    {
+        if (await _repository.ExistsBySkuAsync(command.Sku, excludingId: null, cancellationToken))
+        {
+            return Result.Failure<{{Entity}}View>(Error.Conflict($"Ya existe un {{entity}} con el SKU '{command.Sku}'."));
+        }
+
+        try
+        {
+            var created = {{Entity}}.Create(
+                command.Name,
+                command.Sku,
+                command.Price,
+                command.Stock,
+                _clock.UtcNow,
+                command.Currency);
+
+            await _repository.SaveAsync(created, cancellationToken);
+            await _repository.CommitAsync(cancellationToken);
+            await _notifications.Notify{{Entity}}RegisteredAsync(created.Id, created.Name, created.Sku, cancellationToken);
+
+            _logger.LogInformation("{{Entity}} {Id} registrado con SKU {Sku}", created.Id, created.Sku);
+            return Result.Success({{Entity}}View.From(created));
+        }
+        catch (DomainException ex)
+        {
+            return Result.Failure<{{Entity}}View>(Error.Validation(ex.Message));
+        }
+    }
+
+    public async Task<Result<{{Entity}}View>> AmendAsync(Guid id, Amend{{Entity}}Command command, CancellationToken cancellationToken = default)
+    {
+        var existing = await _repository.FindAsync(id, cancellationToken);
+        if (existing is null)
+        {
+            return Result.Failure<{{Entity}}View>(Error.NotFound($"el {{entity}} {id}"));
+        }
+
+        try
+        {
+            var now = _clock.UtcNow;
+            existing.Rename(command.Name, now);
+            existing.ChangePrice(command.Price, now, command.Currency);
+            if (command.StockDelta != 0)
+            {
+                existing.AdjustStock(command.StockDelta, now);
+            }
+
+            await _repository.SaveAsync(existing, cancellationToken);
+            await _repository.CommitAsync(cancellationToken);
+
+            return Result.Success({{Entity}}View.From(existing));
+        }
+        catch (DomainException ex)
+        {
+            return Result.Failure<{{Entity}}View>(Error.Validation(ex.Message));
+        }
+    }
+
+    public async Task<Result> WithdrawAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var existing = await _repository.FindAsync(id, cancellationToken);
+        if (existing is null)
+        {
+            return Result.Failure(Error.NotFound($"el {{entity}} {id}"));
+        }
+
+        await _repository.DeleteAsync(existing, cancellationToken);
+        await _repository.CommitAsync(cancellationToken);
+        await _notifications.Notify{{Entity}}WithdrawnAsync(existing.Id, existing.Sku, cancellationToken);
+
+        _logger.LogInformation("{{Entity}} {Id} retirado", id);
+        return Result.Success();
+    }
+}

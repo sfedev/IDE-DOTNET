@@ -1,0 +1,24 @@
+namespace {{Solution}}.SharedKernel;
+
+/// <summary>
+/// Entidad: tiene identidad propia y su igualdad se decide por esa identidad, nunca por su estado.
+/// Dos entidades con los mismos atributos y distinto Id son cosas distintas.
+/// </summary>
+public abstract class Entity : IEquatable<Entity>
+{
+    protected Entity(Guid id) => Id = id;
+
+    public Guid Id { get; protected set; }
+
+    public bool Equals(Entity? other)
+    {
+        if (other is null) return false;
+        if (ReferenceEquals(this, other)) return true;
+        if (GetType() != other.GetType()) return false;
+        return Id != Guid.Empty && Id == other.Id;
+    }
+
+    public override bool Equals(object? obj) => obj is Entity entity && Equals(entity);
+
+    public override int GetHashCode() => Id.GetHashCode();
+}

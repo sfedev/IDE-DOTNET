@@ -1,0 +1,22 @@
+@page "/Error"
+@using Microsoft.AspNetCore.Http
+
+<PageTitle>Error</PageTitle>
+
+<h1 class="text-danger">Error</h1>
+<p class="text-danger">Se ha producido un error al procesar la solicitud.</p>
+
+@if (!string.IsNullOrEmpty(RequestId))
+{
+    <p><strong>Id de solicitud:</strong> <code>@RequestId</code></p>
+}
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    private string? RequestId { get; set; }
+
+    protected override void OnInitialized()
+        => RequestId = System.Diagnostics.Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+}

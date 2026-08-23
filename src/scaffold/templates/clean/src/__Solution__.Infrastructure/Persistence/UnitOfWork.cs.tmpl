@@ -1,0 +1,14 @@
+namespace {{Solution}}.Infrastructure.Persistence;
+
+using {{Solution}}.Application.Abstractions;
+
+/// <summary>Unidad de trabajo respaldada por el <see cref="AppDbContext"/>.</summary>
+public sealed class UnitOfWork : IUnitOfWork
+{
+    private readonly AppDbContext _context;
+
+    public UnitOfWork(AppDbContext context) => _context = context;
+
+    public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        => _context.SaveChangesAsync(cancellationToken);
+}

@@ -1,0 +1,55 @@
+namespace {{Solution}}.Application;
+
+using System.Reflection;
+using Microsoft.Extensions.DependencyInjection;
+using {{Solution}}.Application.Abstractions;
+using {{Solution}}.Application.Behaviors;
+using {{Solution}}.Application.Dispatching;
+using {{Solution}}.SharedKernel;
+
+/// <summary>
+/// Registro de la capa de aplicación.
+///
+/// Los handlers, validadores y manejadores de eventos se descubren por reflexión sobre este
+/// ensamblado: añadir un caso de uso es añadir una clase, sin tocar este archivo.
+/// </summary>
+public static class DependencyInjection
+{
+    private static readonly Type[] OpenInterfaces =
+    [
+        typeof(ICommandHandler<,>),
+        typeof(IQueryHandler<,>),
+        typeof(IValidator<>),
+        typeof(IDomainEventHandler<>),
+    ];
+
+    public static IServiceCollection AddApplication(this IServiceCollection services)
+    {
+        services.AddScoped<IDispatcher, Dispatcher>();
+
+        // El orden importa: el primero registrado es el comportamiento más externo del pipeline.
+        services.AddTransient(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
+        services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
+
+        RegisterHandlers(services, typeof(DependencyInjection).Assembly);
+
+        return services;
+    }
+
+    private static void RegisterHandlers(IServiceCollection services, Assembly assembly)
+    {
+        var implementations = assembly.GetTypes()
+            .Where(type => type is { IsAbstract: false, IsInterface: false, IsGenericTypeDefinition: false });
+
+        foreach (var implementation in implementations)
+        {
+            foreach (var contract in implementation.GetInterfaces().Where(IsHandlerContract))
+            {
+                services.AddScoped(contract, implementation);
+            }
+        }
+    }
+
+    private static bool IsHandlerContract(Type contract)
+        => contract.IsGenericType && OpenInterfaces.Contains(contract.GetGenericTypeDefinition());
+}

@@ -1,0 +1,60 @@
+namespace {{Solution}}.Adapters.Persistence;
+
+using Microsoft.EntityFrameworkCore;
+using {{Solution}}.Domain.Model;
+using {{Solution}}.Ports.Outbound;
+
+/// <summary>
+/// Adaptador conducido: traduce el puerto de salida a EF Core.
+///
+/// Es la única clase de la solución que sabe que existe una base de datos relacional.
+/// Sustituirla por un adaptador Dapper o Mongo no obliga a tocar ni el núcleo ni los puertos.
+/// </summary>
+internal sealed class Ef{{Entity}}RepositoryAdapter : I{{Entity}}RepositoryPort
+{
+    private readonly HexagonDbContext _context;
+
+    public Ef{{Entity}}RepositoryAdapter(HexagonDbContext context) => _context = context;
+
+    public async Task<IReadOnlyList<{{Entity}}>> SearchAsync(string? search, CancellationToken cancellationToken = default)
+    {
+        var query = _context.{{EntityPlural}}.AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim();
+            query = query.Where(x => EF.Functions.Like(x.Name, $"%{term}%") || EF.Functions.Like(x.Sku, $"%{term}%"));
+        }
+
+        return await query.OrderBy(x => x.Name).ToListAsync(cancellationToken);
+    }
+
+    public Task<{{Entity}}?> FindAsync(Guid id, CancellationToken cancellationToken = default)
+        => _context.{{EntityPlural}}.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+    public Task<bool> ExistsBySkuAsync(string sku, Guid? excludingId = null, CancellationToken cancellationToken = default)
+    {
+        var normalized = sku.Trim().ToUpperInvariant();
+        return _context.{{EntityPlural}}
+            .AsNoTracking()
+            .AnyAsync(x => x.Sku == normalized && (excludingId == null || x.Id != excludingId), cancellationToken);
+    }
+
+    public async Task SaveAsync({{Entity}} {{entity}}, CancellationToken cancellationToken = default)
+    {
+        var tracked = _context.Entry({{entity}});
+        if (tracked.State == EntityState.Detached)
+        {
+            await _context.{{EntityPlural}}.AddAsync({{entity}}, cancellationToken);
+        }
+    }
+
+    public Task DeleteAsync({{Entity}} {{entity}}, CancellationToken cancellationToken = default)
+    {
+        _context.{{EntityPlural}}.Remove({{entity}});
+        return Task.CompletedTask;
+    }
+
+    public Task CommitAsync(CancellationToken cancellationToken = default)
+        => _context.SaveChangesAsync(cancellationToken);
+}

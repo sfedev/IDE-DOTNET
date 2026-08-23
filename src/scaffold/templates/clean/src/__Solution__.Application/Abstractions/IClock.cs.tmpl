@@ -1,0 +1,10 @@
+namespace {{Solution}}.Application.Abstractions;
+
+/// <summary>
+/// Reloj inyectable. Sacar <c>DateTimeOffset.UtcNow</c> de los casos de uso los hace
+/// deterministas y testeables.
+/// </summary>
+public interface IClock
+{
+    DateTimeOffset UtcNow { get; }
+}

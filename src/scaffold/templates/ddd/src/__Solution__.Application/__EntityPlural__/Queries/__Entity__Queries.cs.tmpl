@@ -1,0 +1,45 @@
+namespace {{Solution}}.Application.{{EntityPlural}}.Queries;
+
+using {{Solution}}.Application.Abstractions;
+using {{Solution}}.Domain.{{EntityPlural}};
+using {{Solution}}.SharedKernel;
+
+/// <summary>Listado de {{entityPlural}}, opcionalmente filtrado.</summary>
+public sealed record List{{EntityPlural}}Query(string? Search) : IQuery<IReadOnlyList<{{Entity}}Response>>;
+
+/// <summary>Un {{entity}} por su identificador.</summary>
+public sealed record Get{{Entity}}ByIdQuery(Guid Id) : IQuery<{{Entity}}Response>;
+
+public sealed class List{{EntityPlural}}Handler
+    : IQueryHandler<List{{EntityPlural}}Query, IReadOnlyList<{{Entity}}Response>>
+{
+    private readonly I{{Entity}}Repository _repository;
+
+    public List{{EntityPlural}}Handler(I{{Entity}}Repository repository) => _repository = repository;
+
+    public async Task<Result<IReadOnlyList<{{Entity}}Response>>> HandleAsync(
+        List{{EntityPlural}}Query query,
+        CancellationToken cancellationToken = default)
+    {
+        var items = await _repository.ListAsync(query.Search, cancellationToken);
+        IReadOnlyList<{{Entity}}Response> response = items.Select({{Entity}}Response.From).ToList();
+        return Result.Success(response);
+    }
+}
+
+public sealed class Get{{Entity}}ByIdHandler : IQueryHandler<Get{{Entity}}ByIdQuery, {{Entity}}Response>
+{
+    private readonly I{{Entity}}Repository _repository;
+
+    public Get{{Entity}}ByIdHandler(I{{Entity}}Repository repository) => _repository = repository;
+
+    public async Task<Result<{{Entity}}Response>> HandleAsync(
+        Get{{Entity}}ByIdQuery query,
+        CancellationToken cancellationToken = default)
+    {
+        var found = await _repository.GetByIdAsync(query.Id, cancellationToken);
+        return found is null
+            ? Result.Failure<{{Entity}}Response>(Error.NotFound($"el {{entity}} {query.Id}"))
+            : Result.Success({{Entity}}Response.From(found));
+    }
+}
