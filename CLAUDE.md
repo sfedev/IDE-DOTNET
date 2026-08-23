@@ -49,9 +49,13 @@ IDE-DOTNET/
 │   │   ├── lsp/                # Adquisición y cliente del servidor de lenguaje
 │   │   └── debug/              # NetCoreDbg + bridge DAP + controlador de sesión
 │   └── renderer/           # UI (Monaco, explorador, paneles, wizard, depuración)
+│       ├── icons.ts            # Sistema de iconos: 61 piezas vectoriales propias
+│       ├── icon-gallery.ts     # Galería de revisión visual (modo --icons)
+│       ├── file-icons.ts       # Icono/insignia por archivo, carpeta y proyecto + anidamiento
+│       ├── ui-lib.ts           # Bundle sin DOM de esas reglas, para poder probarlas
 │       ├── languages/          # razor.ts (config, snippets, auto-cierre) + razor-tokens.ts (Monarch)
-│       ├── views/              # explorer, editor, nuget, panel, palette, statusbar, welcome,
-│       │                       # wizard, debug
+│       ├── views/              # explorer, editor, nuget, panel, palette, statusbar, settings,
+│       │                       # welcome, wizard, debug
 │       └── styles/             # theme.css (tokens), layout.css, components.css
 ├── resources/              # Iconos multirresolución, branding
 ├── scripts/                # Build, generación de iconos, fetch de toolchain, verificación
@@ -131,7 +135,14 @@ npx electron . --smoke-test
   tokenización de Razor, e imprime `SMOKE_OK` o `SMOKE_FAIL` con el detalle. Sale con 0 o 1.
 - `--tokenize=<código>` — imprime cómo tokeniza Monaco ese fragmento en Razor. Indispensable para
   depurar la gramática: Monarch compila sin quejarse y falla en ejecución.
-- `--screenshot=<ruta>` — guarda una captura de la ventana y sale.
+- `--screenshot=<ruta>` — guarda una captura de la ventana, muestrea los píxeles del chrome y sale.
+- `--icons` — sustituye la interfaz por la galería de iconos, a 16 y 24 px.
+- `--ui=<vista>` — abre una vista antes de la captura pulsando los mismos controles que pulsaría
+  un usuario (`wizard`, `settings`, `nuget`, `debug`, `terminal`, `palette`, `light`, `nesting`).
+- `--probe=<expresión>` — evalúa una expresión en el renderer y la imprime. Es la forma de zanjar
+  una duda sobre CSS: leer el valor calculado en vez de interpretar una captura.
+- `node scripts/read-pixels.mjs <png> <x,y>…` — decodifica una captura y dice el color exacto de
+  esos píxeles. Es la segunda opinión cuando `--probe=` y lo que se ve no parecen coincidir.
 - `--open=<ruta>` o un argumento posicional — abre una carpeta o un archivo al arrancar.
 
 > **Nota de plataforma:** `dist:mac` produce artefactos firmados/notarizados sólo en un host
@@ -170,6 +181,21 @@ npx electron . --smoke-test
 - El path de destino se deriva del path de la plantilla; `__Solution__` se sustituye en el path.
 - **Regla crítica:** cada plantilla debe compilar con `dotnet build`. Si añades una arquitectura,
   añade su caso a `tests/scaffold-build.test.mjs`.
+
+### Sistema de diseño
+
+- **Ningún componente escribe un color literal.** Todo sale de los tokens de `theme.css`. Si hace
+  falta un color nuevo, se añade como token en los dos temas, no como hex suelto en un componente.
+- **Nada de negro puro ni blanco puro.** El fondo más oscuro es `#1b1d27` y el texto más claro
+  `#c8cee2`. El objetivo es reducir la fatiga visual en sesiones largas sin perder legibilidad.
+- **Contraste AA (≥ 4.5:1) en todo el texto funcional**, incluidos los tonos `--text-faint`.
+- **Un solo acento.** El violeta marca lo activo y lo que reclama atención. Si todo es violeta,
+  el violeta no significa nada.
+- **Iconos, no glifos de texto.** Se usa `icon(name)` de `src/renderer/icons.ts`. Añadir uno
+  nuevo obliga a revisarlo con `npx electron . --icons` y pasa por las pruebas de geometría.
+- **El renderer nunca inyecta marcado**: ni `innerHTML` para HTML ni para SVG. Los iconos se
+  construyen con `createElementNS`.
+- **Densidad:** filas de árbol de 26 px, sangría de 15 px, rejilla base de 8 px.
 
 ### C# generado
 
@@ -229,6 +255,14 @@ npm run fetch:toolchain -- --platform win32 --arch x64
 - **Escritura de plantillas por shell:** un comando de shell por encima de ~10 KB se trunca y el
   heredoc queda sin cerrar (`unexpected EOF`). Escribe las plantillas en lotes de menos de ~8 KB
   o usa la herramienta de escritura de archivos.
+- **Nunca escribas contrabarras a través del shell.** Un heredoc se come un nivel de escapes, y
+  `/^(\d+\.\d+)/` llega al archivo como `/^(d+.d+)/`: compila, no avisa y deja de casar. Ha pasado
+  tres veces (los regex de Razor, el indicador del SDK, las pruebas de rutas). Cualquier archivo
+  con `\d`, `\r`, `\b` o rutas de Windows se escribe con la herramienta de edición, y en el código
+  se prefiere `new RegExp(String.raw\`…\`)`.
+- **Finales de línea:** el repositorio está en LF. Una herramienta que reescriba un archivo en CRLF
+  rompe los scripts que buscan patrones a final de línea —`devlog.mjs` llegó a informar 0/0 por
+  eso— así que normaliza antes de guardar (`tr -d '\r'`).
 - **`{{` en C# interpolado:** el motor de plantillas interpreta `{{Nombre}}` como token, así que
   una plantilla **no puede** usar `{{` como escape de llave literal en un string interpolado de C#.
   Si necesitas una llave literal, sácala a una constante.
@@ -242,6 +276,10 @@ npm run fetch:toolchain -- --platform win32 --arch x64
   que ambas se pinten y gane la última.
 - **`TargetFramework` heredado:** las soluciones modernas lo declaran en `Directory.Build.props`,
   no en cada `.csproj`. El parser sube buscándolo (`readInheritedProperties`).
+- **No juzgues un color mirando una captura.** El visor puede aplicar su propio perfil o su propio
+  tema y enseñar oscuro lo que en el archivo es claro. Hay dos formas de medirlo de verdad:
+  `--probe=` para leer `getComputedStyle` en el renderer, y `scripts/read-pixels.mjs` para leer los
+  bytes del PNG. Las dos coincidieron en el tema claro; la captura vista a ojo, no.
 - **Eventos hacia un renderer que aún no existe:** el renderer tarda en estar listo (carga Monaco),
   así que un evento emitido en `did-finish-load` se pierde. Para esos casos se usa una **consulta**
   desde el renderer (`workspace:pending-file`), no un evento.

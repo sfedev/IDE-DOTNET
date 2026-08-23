@@ -5,13 +5,25 @@
  * los atajos: el que no recuerde `Ctrl+Shift+B` lo encuentra escribiendo "compilar".
  */
 import { byId, clear, el, fuzzyMatch } from '../dom.js';
+import { icon, type IconName } from '../icons.js';
 
 export interface Command {
   id: string;
   title: string;
   group: string;
   keybinding?: string;
+  /** Icono opcional: ayuda a reconocer los comandos frecuentes de un vistazo. */
+  icon?: IconName;
   run(): void | Promise<void>;
+}
+
+/** Convierte "Ctrl+Shift+B" en chips independientes, como los muestran los IDE modernos. */
+function renderKeybinding(keybinding: string): HTMLElement {
+  const chips = el('span', { className: 'kbd' });
+  for (const key of keybinding.split('+')) {
+    chips.appendChild(el('span', { text: key }));
+  }
+  return chips;
 }
 
 export class CommandPalette {
@@ -47,8 +59,9 @@ export class CommandPalette {
       attrs: { 'aria-label': 'Buscar comando' },
     }) as HTMLInputElement;
 
+    const search = el('div', { className: 'palette-search' }, icon('search', { size: 17 }), input);
     const list = el('div', { className: 'palette-list' });
-    const palette = el('div', { className: 'palette', role: 'dialog' }, input, list);
+    const palette = el('div', { className: 'palette', role: 'dialog' }, search, list);
 
     const renderList = (): void => {
       clear(list);
@@ -77,9 +90,10 @@ export class CommandPalette {
                 },
               },
             },
+            icon(command.icon ?? 'chevron-right', { size: 15 }),
+            el('span', { className: 'title', text: command.title }),
             el('span', { className: 'group', text: command.group }),
-            el('span', { text: command.title }),
-            command.keybinding ? el('span', { className: 'kbd', text: command.keybinding }) : null,
+            command.keybinding ? renderKeybinding(command.keybinding) : null,
           ),
         );
       });

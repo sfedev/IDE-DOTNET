@@ -1,8 +1,12 @@
 /**
  * Asistente visual de generación de arquitecturas.
  *
- * Tres pasos: elegir arquitectura, configurar la solución y revisar el resultado. Llama al mismo
- * generador que la CLI, así que lo que aquí se ve es exactamente lo que producen los tests.
+ * Tres pasos: elegir arquitectura, configurar y revisar. Llama al mismo generador que la CLI, así
+ * que lo que aquí se ve es exactamente lo que producen los tests.
+ *
+ * Rediseño: cada arquitectura es una tarjeta con icono, una frase que la resume y el **diagrama
+ * de sus capas** con flechas. Ese diagrama comunica la forma de la arquitectura mejor que
+ * cualquier párrafo, y es lo que permite elegir sin haber leído la documentación.
  */
 import type {
   ArchitectureId,
@@ -14,6 +18,8 @@ import type {
   UiTarget,
 } from '../../shared/scaffold-types.js';
 import { byId, clear, el, formatBytes } from '../dom.js';
+import { presentProject } from '../file-icons.js';
+import { icon, type IconName } from '../icons.js';
 
 export interface WizardHost {
   openWorkspace(path: string): void;
@@ -37,6 +43,19 @@ interface FormState {
 
 const NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/;
 const ENTITY_PATTERN = /^[A-Za-z][A-Za-z0-9]*$/;
+
+/** Icono que representa cada arquitectura en su tarjeta. */
+const ARCHITECTURE_ICON: Record<ArchitectureId, IconName> = {
+  clean: 'solution',
+  hexagonal: 'hexagon',
+  ddd: 'puzzle',
+};
+
+const STEP_LABELS: Record<Step, string> = {
+  architecture: 'Arquitectura',
+  configure: 'Configuración',
+  result: 'Resultado',
+};
 
 export class WizardView {
   private blueprints: BlueprintInfo[] = [];
@@ -83,7 +102,7 @@ export class WizardView {
     const problems: string[] = [];
 
     if (!NAME_PATTERN.test(this.form.solutionName.trim())) {
-      problems.push('El nombre de la solución debe ser un identificador válido, opcionalmente con puntos (Acme.Shop).');
+      problems.push('El nombre debe ser un identificador válido, opcionalmente con puntos (Acme.Shop).');
     }
     if (!ENTITY_PATTERN.test(this.form.entity.trim())) {
       problems.push('La entidad debe empezar por letra y contener sólo letras y dígitos.');
@@ -95,6 +114,8 @@ export class WizardView {
     return problems;
   }
 
+  // --- Render -----------------------------------------------------------------------------------
+
   private render(): void {
     const overlay = byId('overlay');
     overlay.hidden = false;
@@ -102,42 +123,44 @@ export class WizardView {
     clear(overlay);
 
     const dialog = el('div', { className: 'dialog', role: 'dialog' });
-
-    dialog.appendChild(this.renderHeader());
-    dialog.appendChild(this.renderBody());
-    dialog.appendChild(this.renderFooter());
-
+    dialog.append(this.renderHeader(), this.renderBody(), this.renderFooter());
     overlay.appendChild(dialog);
 
-    // Cerrar con Escape mientras no haya una generación en curso.
     overlay.onkeydown = (event) => {
       if (event.key === 'Escape' && !this.busy) this.close();
     };
 
-    const firstInput = dialog.querySelector<HTMLElement>('input, button.arch-card');
-    firstInput?.focus();
+    dialog.querySelector<HTMLElement>('input, button.arch-card')?.focus();
   }
 
   private renderHeader(): HTMLElement {
-    const titles: Record<Step, [string, string]> = {
-      architecture: ['Nueva solución', 'Elige la arquitectura de referencia'],
-      configure: ['Nueva solución', 'Configura la solución que se va a generar'],
-      result: ['Solución generada', 'Todo listo para compilar y ejecutar'],
+    const subtitles: Record<Step, string> = {
+      architecture: 'Elige la arquitectura de referencia',
+      configure: 'Ajusta cómo se va a generar la solución',
+      result: 'Todo listo para compilar y ejecutar',
     };
-
-    const [title, subtitle] = titles[this.step];
 
     return el(
       'div',
       { className: 'dialog-header' },
-      el('div', {}, el('h2', { text: title }), el('p', { text: subtitle })),
-      el('button', {
-        className: 'icon-btn',
-        text: '✕',
-        title: 'Cerrar',
-        disabled: this.busy,
-        on: { click: () => this.close() },
-      }),
+      el('span', { className: 'dialog-mark' }, icon(this.step === 'result' ? 'check' : 'wand', { size: 20 })),
+      el(
+        'div',
+        { style: { minWidth: '0' } },
+        el('h2', { text: this.step === 'result' ? 'Solución generada' : 'Nueva solución' }),
+        el('p', { text: subtitles[this.step] }),
+      ),
+      el('span', { className: 'spacer' }),
+      el(
+        'button',
+        {
+          className: 'icon-btn',
+          title: 'Cerrar',
+          disabled: this.busy,
+          on: { click: () => this.close() },
+        },
+        icon('x', { size: 16 }),
+      ),
     );
   }
 
@@ -145,7 +168,14 @@ export class WizardView {
     const body = el('div', { className: 'dialog-body' });
 
     if (this.error) {
-      body.appendChild(el('div', { className: 'notice error', text: this.error }));
+      body.appendChild(
+        el(
+          'div',
+          { className: 'notice error' },
+          icon('alert-circle', { size: 15 }),
+          el('span', { text: this.error }),
+        ),
+      );
     }
 
     switch (this.step) {
@@ -163,7 +193,10 @@ export class WizardView {
     return body;
   }
 
+  // --- Paso 1: arquitectura -----------------------------------------------------------------------
+
   private renderArchitectureStep(): HTMLElement {
+    const container = el('div');
     const grid = el('div', { className: 'arch-grid' });
 
     for (const blueprint of this.blueprints) {
@@ -179,6 +212,7 @@ export class WizardView {
                 this.form.architecture = blueprint.id;
                 this.render();
               },
+              // Doble clic: elegir y avanzar. Ahorra un viaje al botón "Siguiente".
               dblclick: () => {
                 this.form.architecture = blueprint.id;
                 this.step = 'configure';
@@ -186,40 +220,73 @@ export class WizardView {
               },
             },
           },
-          el('h3', { text: blueprint.title }),
-          el('div', { className: 'tagline', text: blueprint.tagline }),
           el(
             'div',
-            { className: 'arch-layers' },
-            ...blueprint.layers.map((layer) => el('span', { className: 'chip', text: layer.name })),
+            { className: 'arch-card-head' },
+            el('span', { className: 'arch-card-mark' }, icon(ARCHITECTURE_ICON[blueprint.id], { size: 19 })),
+            el('div', { style: { minWidth: '0' } }, el('h3', { text: blueprint.title })),
           ),
+          el('p', { className: 'tagline', text: blueprint.tagline }),
+          this.renderLayerDiagram(blueprint),
         ),
       );
     }
 
-    const container = el('div', {}, grid);
+    container.appendChild(grid);
 
     const chosen = this.blueprints.find((blueprint) => blueprint.id === this.form.architecture);
-    if (chosen) {
-      container.appendChild(
-        el(
-          'div',
-          { style: { marginTop: '18px' } },
-          el('p', { className: 'help', text: chosen.description, style: { color: 'var(--text-muted)' } }),
-          el('h3', { text: 'Qué incluye', style: { fontSize: '12px', marginBottom: '6px' } }),
-          el('ul', { className: 'result-list' }, ...chosen.highlights.map((item) => el('li', { text: item }))),
-          el('h3', { text: 'Patrones aplicados', style: { fontSize: '12px', margin: '12px 0 6px' } }),
-          el(
-            'div',
-            { className: 'arch-layers' },
-            ...chosen.patterns.map((pattern) => el('span', { className: 'chip accent', text: pattern })),
-          ),
-        ),
-      );
-    }
+    if (chosen) container.appendChild(this.renderArchitectureDetail(chosen));
 
     return container;
   }
+
+  /** Diagrama de capas: `Domain → Application → Infrastructure → UI`. */
+  private renderLayerDiagram(blueprint: BlueprintInfo): HTMLElement {
+    const diagram = el('div', { className: 'arch-layers' });
+
+    // La flecha va dentro del mismo grupo que la capa que precede, para que al envolverse la
+    // línea no quede una flecha suelta apuntando al vacío.
+    blueprint.layers.forEach((layer, index) => {
+      diagram.appendChild(
+        el(
+          'span',
+          { className: 'arch-layer-group' },
+          index > 0 ? el('span', { className: 'arch-arrow' }, icon('chevron-right', { size: 11 })) : null,
+          el('span', { className: 'arch-layer', text: layer.name }),
+        ),
+      );
+    });
+
+    return diagram;
+  }
+
+  private renderArchitectureDetail(blueprint: BlueprintInfo): HTMLElement {
+    const detail = el('div', { className: 'arch-detail' });
+
+    detail.append(
+      el('h4', { text: 'Qué es' }),
+      el('p', { text: blueprint.description }),
+      el('h4', { text: 'Qué incluye la solución generada' }),
+    );
+
+    const list = el('ul', { className: 'feature-list' });
+    for (const highlight of blueprint.highlights) {
+      list.appendChild(el('li', {}, icon('check', { size: 13 }), el('span', { text: highlight })));
+    }
+    detail.appendChild(list);
+
+    detail.appendChild(el('h4', { text: 'Patrones aplicados' }));
+
+    const chips = el('div', { className: 'chip-row' });
+    for (const pattern of blueprint.patterns) {
+      chips.appendChild(el('span', { className: 'chip accent', text: pattern }));
+    }
+    detail.appendChild(chips);
+
+    return detail;
+  }
+
+  // --- Paso 2: configuración -----------------------------------------------------------------------
 
   private renderConfigureStep(): HTMLElement {
     const container = el('div');
@@ -242,6 +309,7 @@ export class WizardView {
             input: (event) => {
               onChange((event.target as HTMLInputElement).value);
               this.refreshFooter();
+              this.refreshDestinationHint();
             },
           },
         }),
@@ -250,8 +318,9 @@ export class WizardView {
 
     const segmented = <T extends string>(
       label: string,
-      options: Array<[T, string]>,
+      options: Array<[value: T, text: string, iconName?: IconName]>,
       current: T,
+      help: string,
       onChange: (value: T) => void,
     ): HTMLElement =>
       el(
@@ -261,73 +330,81 @@ export class WizardView {
         el(
           'div',
           { className: 'segmented' },
-          ...options.map(([value, text]) =>
-            el('button', {
-              className: value === current ? 'active' : '',
-              text,
-              on: {
-                click: () => {
-                  onChange(value);
-                  this.render();
+          ...options.map(([value, text, iconName]) =>
+            el(
+              'button',
+              {
+                className: value === current ? 'active' : '',
+                on: {
+                  click: () => {
+                    onChange(value);
+                    this.render();
+                  },
                 },
               },
-            }),
+              iconName ? icon(iconName, { size: 13 }) : null,
+              text,
+            ),
           ),
         ),
+        el('span', { className: 'help', text: help }),
       );
 
-    const grid = el(
-      'div',
-      { className: 'field-grid' },
-      textField('Nombre de la solución', this.form.solutionName, 'Prefijo de todos los proyectos.', (value) => {
-        this.form.solutionName = value;
-      }),
-      textField('Entidad de ejemplo', this.form.entity, 'El CRUD generado girará en torno a ella.', (value) => {
-        this.form.entity = value;
-      }),
-      segmented<UiTarget>(
-        'Presentación',
-        [
-          ['webapi', 'Web API'],
-          ['blazor', 'Blazor'],
-          ['both', 'Ambas'],
-        ],
-        this.form.ui,
-        (value) => {
-          this.form.ui = value;
-        },
-      ),
-      segmented<FrameworkMoniker>(
-        'Framework',
-        [
-          ['net9.0', '.NET 9'],
-          ['net10.0', '.NET 10'],
-        ],
-        this.form.framework,
-        (value) => {
-          this.form.framework = value;
-        },
-      ),
-      segmented<DbProvider>(
-        'Persistencia',
-        [
-          ['sqlite', 'SQLite'],
-          ['inmemory', 'En memoria'],
-        ],
-        this.form.db,
-        (value) => {
-          this.form.db = value;
-        },
-      ),
-    );
-
-    container.appendChild(grid);
-
-    // Destino
     container.appendChild(
       el(
         'div',
-        { className: 'field', style: { marginTop: '14px' } },
+        { className: 'field-grid' },
+        textField('Nombre de la solución', this.form.solutionName, 'Prefijo de todos los proyectos.', (value) => {
+          this.form.solutionName = value;
+        }),
+        textField('Entidad de ejemplo', this.form.entity, 'El CRUD generado girará en torno a ella.', (value) => {
+          this.form.entity = value;
+        }),
+        segmented<UiTarget>(
+          'Presentación',
+          [
+            ['webapi', 'Web API', 'route'],
+            ['blazor', 'Blazor', 'razor'],
+            ['both', 'Ambas', 'puzzle'],
+          ],
+          this.form.ui,
+          'Qué proyectos de interfaz se generan.',
+          (value) => {
+            this.form.ui = value;
+          },
+        ),
+        segmented<FrameworkMoniker>(
+          'Framework',
+          [
+            ['net9.0', '.NET 9'],
+            ['net10.0', '.NET 10'],
+          ],
+          this.form.framework,
+          'Determina también las versiones de los paquetes.',
+          (value) => {
+            this.form.framework = value;
+          },
+        ),
+        segmented<DbProvider>(
+          'Persistencia',
+          [
+            ['sqlite', 'SQLite', 'database'],
+            ['inmemory', 'En memoria', 'zap'],
+          ],
+          this.form.db,
+          'Proveedor de EF Core preconfigurado.',
+          (value) => {
+            this.form.db = value;
+          },
+        ),
+      ),
+    );
+
+    // --- Destino ----------------------------------------------------------------------------
+    container.appendChild(
+      el(
+        'div',
+        { className: 'field', style: { marginTop: '18px' } },
         el('label', { text: 'Directorio de destino' }),
         el(
           'div',
@@ -340,37 +417,37 @@ export class WizardView {
               input: (event) => {
                 this.form.outputDir = (event.target as HTMLInputElement).value;
                 this.refreshFooter();
+                this.refreshDestinationHint();
               },
             },
           }),
-          el('button', {
-            className: 'btn',
-            text: 'Examinar…',
-            on: {
-              click: () => {
-                void window.dotforge.scaffold.pickOutputDir().then((directory) => {
-                  if (directory) {
-                    this.form.outputDir = directory;
-                    this.render();
-                  }
-                });
+          el(
+            'button',
+            {
+              className: 'btn',
+              on: {
+                click: () => {
+                  void window.dotforge.scaffold.pickOutputDir().then((directory) => {
+                    if (directory) {
+                      this.form.outputDir = directory;
+                      this.render();
+                    }
+                  });
+                },
               },
             },
-          }),
+            icon('folder-open', { size: 14 }),
+            'Examinar',
+          ),
         ),
-        el('span', {
-          className: 'help',
-          text: this.form.outputDir
-            ? `Se creará ${this.form.outputDir}${this.pathSeparator()}${this.form.solutionName || '…'}`
-            : 'La solución se creará en una subcarpeta con su nombre.',
-        }),
+        el('span', { className: 'help', id: 'wizard-destination', text: this.destinationHint() }),
       ),
     );
 
     container.appendChild(
       el(
         'div',
-        { style: { display: 'flex', gap: '18px', marginTop: '14px', flexWrap: 'wrap' } },
+        { style: { display: 'flex', gap: '22px', marginTop: '18px', flexWrap: 'wrap' } },
         this.checkbox('Incluir proyecto de pruebas', this.form.includeTests, (value) => {
           this.form.includeTests = value;
         }),
@@ -387,13 +464,26 @@ export class WizardView {
       container.appendChild(
         el(
           'div',
-          { className: 'notice warn', style: { marginTop: '14px' } },
-          ...problems.map((problem) => el('div', { text: problem })),
+          { className: 'notice warn', style: { marginTop: '18px' } },
+          icon('alert-triangle', { size: 15 }),
+          el('div', {}, ...problems.map((problem) => el('div', { text: problem }))),
         ),
       );
     }
 
     return container;
+  }
+
+  private destinationHint(): string {
+    const separator = navigator.platform.toLowerCase().includes('win') ? '\\' : '/';
+    return this.form.outputDir
+      ? `Se creará ${this.form.outputDir}${separator}${this.form.solutionName || '…'}`
+      : 'La solución se creará en una subcarpeta con su nombre.';
+  }
+
+  private refreshDestinationHint(): void {
+    const hint = document.getElementById('wizard-destination');
+    if (hint) hint.textContent = this.destinationHint();
   }
 
   private checkbox(label: string, checked: boolean, onChange: (value: boolean) => void): HTMLElement {
@@ -406,58 +496,93 @@ export class WizardView {
     return el('label', { className: 'checkbox' }, input, label);
   }
 
+  // --- Paso 3: resultado -----------------------------------------------------------------------------
+
   private renderResultStep(): HTMLElement {
     const result = this.result;
     if (!result) return el('div', { className: 'empty-state', text: 'Sin resultado.' });
 
-    const container = el(
-      'div',
-      {},
-      el('div', {
-        className: 'notice ok',
-        text: `${result.solutionName} generada: ${result.files.length} archivos (${formatBytes(result.totalBytes)}) en ${result.durationMs} ms.`,
-      }),
-      el('h3', { text: 'Proyectos', style: { fontSize: '12px', margin: '4px 0 6px' } }),
+    const container = el('div');
+
+    container.appendChild(
+      el(
+        'div',
+        { className: 'notice ok' },
+        icon('check', { size: 15 }),
+        el(
+          'div',
+          { className: 'result-summary' },
+          el('strong', { text: `${result.solutionName} generada` }),
+          el('span', {
+            text: `${result.projects.length} proyectos · ${result.files.length} archivos · ${formatBytes(result.totalBytes)} · ${result.durationMs} ms`,
+          }),
+        ),
+      ),
     );
 
-    const table = el('div', { className: 'tree' });
+    container.appendChild(el('h4', { className: 'section-title', text: 'Proyectos creados' }));
+
+    const tree = el('div', { className: 'tree' });
     for (const project of result.projects) {
-      table.appendChild(
+      // La insignia se deduce del nombre: el resultado del generador no lleva el tipo, pero el
+      // sufijo del proyecto es suficiente para acertar en la abrumadora mayoría de los casos.
+      const presentation = presentProject(
+        /UnitTests$|Tests$/.test(project.name)
+          ? 'tests'
+          : /Blazor$/.test(project.name)
+            ? 'blazor-server'
+            : /WebApi$|Adapters\.Web$/.test(project.name)
+              ? 'webapi'
+              : 'library',
+      );
+
+      tree.appendChild(
         el(
           'div',
           { className: 'tree-row', style: { cursor: 'default' } },
-          el('span', { className: 'glyph csproj', text: '⬡' }),
-          el('span', { className: 'label', text: project.name }),
-          el('span', { className: 'hint', text: project.layer }),
+          el('span', { className: 'tree-guides' }),
+          el('span', { className: 'tree-twisty' }),
+          icon(presentation.icon, { size: 15, className: `tree-icon tone-${presentation.tone}` }),
+          el('span', { className: 'tree-label', text: project.name }),
+          el('span', { className: `tree-badge tone-${presentation.tone}`, text: presentation.badge }),
+          el('span', { className: 'tree-hint', text: project.layer }),
         ),
       );
     }
-    container.appendChild(table);
+    container.appendChild(tree);
 
     if (result.warnings.length > 0) {
       container.appendChild(
-        el('div', { className: 'notice warn' }, ...result.warnings.map((warning) => el('div', { text: warning }))),
+        el(
+          'div',
+          { className: 'notice warn', style: { marginTop: '16px' } },
+          icon('alert-triangle', { size: 15 }),
+          el('div', {}, ...result.warnings.map((warning) => el('div', { text: warning }))),
+        ),
       );
     }
 
-    container.appendChild(el('h3', { text: 'Siguientes pasos', style: { fontSize: '12px', margin: '14px 0 6px' } }));
-    const steps = el('pre', { className: 'output', style: { background: 'var(--bg)', borderRadius: 'var(--radius-sm)' } });
+    container.appendChild(
+      el('h4', { className: 'section-title', style: { marginTop: '18px' }, text: 'Siguientes pasos' }),
+    );
+
+    const steps = el('pre', {
+      className: 'output',
+      style: { background: 'var(--bg)', borderRadius: 'var(--radius-sm)', marginTop: '8px' },
+    });
     for (const step of result.nextSteps) {
-      steps.appendChild(el('div', { className: 'line-cmd', text: `$ ${step}` }));
+      steps.appendChild(el('div', { className: 'line-cmd', text: `❯ ${step}` }));
     }
     container.appendChild(steps);
 
     return container;
   }
 
-  private pathSeparator(): string {
-    return navigator.platform.toLowerCase().includes('win') ? '\\' : '/';
-  }
+  // --- Pie ---------------------------------------------------------------------------------------------
 
   private renderFooter(): HTMLElement {
     const footer = el('div', { className: 'dialog-footer', id: 'wizard-footer' });
-    footer.appendChild(this.renderSteps());
-    footer.appendChild(this.renderActions());
+    footer.append(this.renderSteps(), this.renderActions());
     return footer;
   }
 
@@ -466,26 +591,35 @@ export class WizardView {
     const footer = document.getElementById('wizard-footer');
     if (!footer) return;
     clear(footer);
-    footer.appendChild(this.renderSteps());
-    footer.appendChild(this.renderActions());
+    footer.append(this.renderSteps(), this.renderActions());
   }
 
   private renderSteps(): HTMLElement {
     const order: Step[] = ['architecture', 'configure', 'result'];
     const currentIndex = order.indexOf(this.step);
 
-    const dots = el('div', { className: 'steps' });
-    order.forEach((_, index) => {
-      if (index > 0) dots.appendChild(el('span', { className: 'step-line' }));
-      dots.appendChild(
-        el('span', {
-          className: `step-dot${index === currentIndex ? ' active' : index < currentIndex ? ' done' : ''}`,
-          text: index < currentIndex ? '✓' : String(index + 1),
-        }),
+    const steps = el('div', { className: 'steps' });
+
+    order.forEach((step, index) => {
+      if (index > 0) steps.appendChild(el('span', { className: 'step-line' }));
+
+      const state = index === currentIndex ? 'active' : index < currentIndex ? 'done' : '';
+
+      steps.appendChild(
+        el(
+          'span',
+          { className: `step ${state}`.trim() },
+          el(
+            'span',
+            { className: 'step-dot' },
+            index < currentIndex ? icon('check', { size: 11 }) : el('span', { text: String(index + 1) }),
+          ),
+          el('span', { text: STEP_LABELS[step] }),
+        ),
       );
     });
 
-    return dots;
+    return steps;
   }
 
   private renderActions(): HTMLElement {
@@ -494,34 +628,42 @@ export class WizardView {
     if (this.step === 'architecture') {
       actions.append(
         el('button', { className: 'btn', text: 'Cancelar', on: { click: () => this.close() } }),
-        el('button', {
-          className: 'btn primary',
-          text: 'Siguiente',
-          disabled: this.form.architecture === null,
-          on: {
-            click: () => {
-              this.step = 'configure';
-              this.render();
+        el(
+          'button',
+          {
+            className: 'btn primary',
+            disabled: this.form.architecture === null,
+            on: {
+              click: () => {
+                this.step = 'configure';
+                this.render();
+              },
             },
           },
-        }),
+          'Siguiente',
+          icon('chevron-right', { size: 14 }),
+        ),
       );
       return actions;
     }
 
     if (this.step === 'configure') {
       actions.append(
-        el('button', {
-          className: 'btn',
-          text: 'Atrás',
-          disabled: this.busy,
-          on: {
-            click: () => {
-              this.step = 'architecture';
-              this.render();
+        el(
+          'button',
+          {
+            className: 'btn',
+            disabled: this.busy,
+            on: {
+              click: () => {
+                this.step = 'architecture';
+                this.render();
+              },
             },
           },
-        }),
+          icon('chevron-left', { size: 14 }),
+          'Atrás',
+        ),
         el(
           'button',
           {
@@ -529,8 +671,8 @@ export class WizardView {
             disabled: this.busy || this.validationErrors().length > 0,
             on: { click: () => void this.generate() },
           },
-          this.busy ? el('span', { className: 'spinner' }) : null,
-          this.busy ? ' Generando…' : 'Generar solución',
+          this.busy ? el('span', { className: 'spinner' }) : icon('wand', { size: 14 }),
+          this.busy ? 'Generando…' : 'Generar solución',
         ),
       );
       return actions;
@@ -538,17 +680,21 @@ export class WizardView {
 
     actions.append(
       el('button', { className: 'btn', text: 'Cerrar', on: { click: () => this.close() } }),
-      el('button', {
-        className: 'btn primary',
-        text: 'Abrir la solución',
-        on: {
-          click: () => {
-            const path = this.result?.rootDir;
-            this.close();
-            if (path) this.host.openWorkspace(path);
+      el(
+        'button',
+        {
+          className: 'btn primary',
+          on: {
+            click: () => {
+              const path = this.result?.rootDir;
+              this.close();
+              if (path) this.host.openWorkspace(path);
+            },
           },
         },
-      }),
+        icon('folder-open', { size: 14 }),
+        'Abrir la solución',
+      ),
     );
 
     return actions;
@@ -577,9 +723,8 @@ export class WizardView {
       this.step = 'result';
       this.host.notify(`Solución ${this.result.solutionName} generada.`, 'ok');
     } catch (error) {
-      this.error = error instanceof Error ? error.message : String(error);
-      // El mensaje del proceso principal llega con el prefijo de Electron: se limpia.
-      this.error = this.error.replace(/^Error invoking remote method '[^']+':\s*/, '');
+      const raw = error instanceof Error ? error.message : String(error);
+      this.error = raw.replace(/^Error invoking remote method '[^']+':\s*/, '');
     } finally {
       this.busy = false;
       this.render();

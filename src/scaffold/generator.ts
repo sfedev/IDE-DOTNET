@@ -12,6 +12,8 @@ import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 
+import { APP_VERSION } from '../shared/version.js';
+
 import type { ScaffoldOptions, ScaffoldResult } from '../shared/scaffold-types.js';
 import { getBlueprint } from './blueprints/index.js';
 import type { Blueprint } from './blueprints/types.js';
@@ -236,7 +238,7 @@ export async function generateSolution(options: ScaffoldOptions, baseDir: string
   // --- Manifiesto: permite al IDE reabrir el wizard con las mismas opciones ---------------
   const manifest = {
     generator: 'DotForge IDE',
-    generatorVersion: '1.0.0',
+    generatorVersion: APP_VERSION,
     generatedAtUtc: new Date().toISOString(),
     architecture: resolved.architecture,
     solutionName: resolved.solutionName,

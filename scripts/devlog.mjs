@@ -12,13 +12,24 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+/**
+ * Lee el devlog normalizando los finales de línea.
+ *
+ * Un editor de Windows puede dejar el archivo en CRLF. Entonces cada línea termina con un retorno
+ * de carro que las expresiones de este script no esperan, y el informe sale a cero sin decir por
+ * qué.
+ */
+function readDoc(path) {
+  return readFileSync(path, 'utf8').replace(new RegExp(String.raw`\r\n`, 'g'), '\n');
+}
+
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const file = join(root, 'PROJECT_DEVLOG.md');
 
 const MARKS = { done: '[x]', wip: '[~]', todo: '[ ]' };
 
 function setMarks(ids, mark) {
-  let doc = readFileSync(file, 'utf8');
+  let doc = readDoc(file);
   const missing = [];
   for (const id of ids) {
     const lines = doc.split('\n');
@@ -45,14 +56,14 @@ function setMarks(ids, mark) {
 }
 
 function setStatus(text) {
-  let doc = readFileSync(file, 'utf8');
+  let doc = readDoc(file);
   doc = doc.replace(/^- \*\*Estado global:\*\*.*$/m, `- **Estado global:** ${text}`);
   writeFileSync(file, doc, 'utf8');
   console.log(`[devlog] estado global -> ${text}`);
 }
 
 function report() {
-  const doc = readFileSync(file, 'utf8');
+  const doc = readDoc(file);
   const lines = doc.split('\n');
   let phase = null;
   const phases = [];

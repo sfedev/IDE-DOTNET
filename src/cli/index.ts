@@ -18,8 +18,7 @@ import type {
 import { DEFAULT_SCAFFOLD_OPTIONS } from '../shared/scaffold-types.js';
 import { isArchitectureId, listBlueprints } from '../scaffold/blueprints/index.js';
 import { generateSolution } from '../scaffold/generator.js';
-
-const VERSION = '1.0.0';
+import { APP_VERSION as VERSION } from '../shared/version.js';
 
 const COLORS = {
   reset: '\u001b[0m',

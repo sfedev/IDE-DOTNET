@@ -1,49 +1,54 @@
 /**
- * Panel inferior: salida de las tareas y lista de problemas.
+ * Panel inferior: salida, terminal, problemas y depuración.
  *
  * La salida se acota a un número máximo de líneas: un `dotnet watch` de horas no puede llenar la
- * memoria del renderer. Los problemas se pintan como botones clicables que llevan al editor.
+ * memoria del renderer. Los problemas se pintan como filas clicables que llevan a la línea exacta.
  */
 import type { BuildDiagnostic, DotnetTaskExit, DotnetTaskStarted } from '../../shared/contracts.js';
 import { byId, clear, el } from '../dom.js';
+import { icon, type IconName } from '../icons.js';
 
 const MAX_OUTPUT_LINES = 5000;
 
-export type PanelTab = 'output' | 'problems' | 'terminal' | 'debug';
+export type PanelTab = 'output' | 'terminal' | 'problems' | 'debug';
 
 export interface PanelHost {
   openDiagnostic(diagnostic: BuildDiagnostic): void;
   cancelTask(taskId: string): void;
   runCommand(line: string): void;
-  /** Pinta la vista de depuración dentro del panel. */
   renderDebug(container: HTMLElement): void;
 }
 
+type LineKind = 'plain' | 'error' | 'ok' | 'command';
+
+const LINE_CLASS: Record<LineKind, string> = {
+  plain: '',
+  error: 'line-err',
+  ok: 'line-ok',
+  command: 'line-cmd',
+};
+
+const SEVERITY_ICON: Record<BuildDiagnostic['severity'], IconName> = {
+  error: 'alert-circle',
+  warning: 'alert-triangle',
+  info: 'info',
+};
+
 export class PanelView {
   private tab: PanelTab = 'output';
-  private lines: Array<{ text: string; kind: 'plain' | 'error' | 'ok' | 'command' }> = [];
+  private lines: Array<{ text: string; kind: LineKind }> = [];
   private diagnostics: BuildDiagnostic[] = [];
   private runningTasks = new Map<string, DotnetTaskStarted>();
   private collapsed = false;
 
-  /** Historial de la terminal, navegable con las flechas arriba/abajo. */
+  /** Historial de la terminal, navegable con las flechas arriba y abajo. */
   private readonly history: string[] = [];
   private historyIndex = -1;
   private allowedCommands: string[] = [];
 
   constructor(private readonly host: PanelHost) {}
 
-  setTab(tab: PanelTab): void {
-    this.tab = tab;
-    this.collapsed = false;
-    this.render();
-  }
-
-  toggleCollapsed(): void {
-    this.collapsed = !this.collapsed;
-    byId('app').querySelector('.main')?.classList.toggle('panel-collapsed', this.collapsed);
-    this.render();
-  }
+  // --- Estado -------------------------------------------------------------------------------
 
   currentTab(): PanelTab {
     return this.tab;
@@ -53,11 +58,29 @@ export class PanelView {
     return this.collapsed;
   }
 
+  setTab(tab: PanelTab): void {
+    this.tab = tab;
+    this.collapsed = false;
+    this.render();
+  }
+
   show(tab: PanelTab): void {
     this.collapsed = false;
     byId('app').querySelector('.main')?.classList.remove('panel-collapsed');
     this.setTab(tab);
   }
+
+  toggleCollapsed(): void {
+    this.collapsed = !this.collapsed;
+    byId('app').querySelector('.main')?.classList.toggle('panel-collapsed', this.collapsed);
+    this.render();
+  }
+
+  setAllowedCommands(commands: string[]): void {
+    this.allowedCommands = commands;
+  }
+
+  // --- Salida --------------------------------------------------------------------------------
 
   clearOutput(): void {
     this.lines = [];
@@ -75,13 +98,13 @@ export class PanelView {
     }
   }
 
-  private classify(line: string): 'plain' | 'error' | 'ok' {
+  private classify(line: string): LineKind {
     if (/\b(error|Error)\b/.test(line)) return 'error';
     if (/(Build succeeded|Compilación correcta|Passed!|Correctas!)/.test(line)) return 'ok';
     return 'plain';
   }
 
-  private push(text: string, kind: 'plain' | 'error' | 'ok' | 'command'): void {
+  private push(text: string, kind: LineKind): void {
     this.lines.push({ text, kind });
     if (this.lines.length > MAX_OUTPUT_LINES) {
       this.lines.splice(0, this.lines.length - MAX_OUTPUT_LINES);
@@ -89,9 +112,11 @@ export class PanelView {
     if ((this.tab === 'output' || this.tab === 'terminal') && !this.collapsed) this.render();
   }
 
+  // --- Tareas --------------------------------------------------------------------------------
+
   taskStarted(task: DotnetTaskStarted): void {
     this.runningTasks.set(task.taskId, task);
-    this.appendCommand(`$ ${task.command}`);
+    this.appendCommand(`❯ ${task.command}`);
     this.renderTabs();
   }
 
@@ -101,9 +126,7 @@ export class PanelView {
 
     const seconds = (exit.durationMs / 1000).toFixed(1);
     this.push(
-      exit.code === 0
-        ? `✓ Terminado en ${seconds} s`
-        : `✗ Terminado con código ${exit.code} en ${seconds} s`,
+      exit.code === 0 ? `✓ Terminado en ${seconds} s` : `✗ Terminado con código ${exit.code} en ${seconds} s`,
       exit.code === 0 ? 'ok' : 'error',
     );
 
@@ -127,6 +150,8 @@ export class PanelView {
     return [...this.runningTasks.values()];
   }
 
+  // --- Render ---------------------------------------------------------------------------------
+
   render(): void {
     this.renderTabs();
 
@@ -135,46 +160,69 @@ export class PanelView {
 
     if (this.collapsed) return;
 
-    if (this.tab === 'debug') {
-      const host = el('div', { style: { height: '100%', display: 'flex', flexDirection: 'column' } });
-      this.host.renderDebug(host);
-      content.appendChild(host);
-      return;
-    }
-
-    if (this.tab === 'terminal') {
-      content.appendChild(this.renderTerminal());
-      return;
-    }
-
-    if (this.tab === 'output') {
-      const pre = el('pre', { className: 'output' });
-      for (const line of this.lines) {
-        const className =
-          line.kind === 'error' ? 'line-err' : line.kind === 'ok' ? 'line-ok' : line.kind === 'command' ? 'line-cmd' : '';
-        pre.appendChild(el('div', { className, text: line.text }));
+    switch (this.tab) {
+      case 'debug': {
+        const host = el('div', { style: { height: '100%', display: 'flex', flexDirection: 'column' } });
+        this.host.renderDebug(host);
+        content.appendChild(host);
+        return;
       }
-      if (this.lines.length === 0) {
-        pre.appendChild(el('div', { text: 'Sin salida todavía. Compila o ejecuta un proyecto (Ctrl/Cmd+Shift+B).' }));
-      }
-      content.appendChild(pre);
-      // Auto-scroll: al compilar interesa el final, no el principio.
-      content.scrollTop = content.scrollHeight;
-      return;
+
+      case 'terminal':
+        content.appendChild(this.renderTerminal());
+        return;
+
+      case 'output':
+        content.appendChild(this.renderOutput());
+        content.scrollTop = content.scrollHeight;
+        return;
+
+      case 'problems':
+        content.appendChild(this.renderProblems());
+        return;
+    }
+  }
+
+  private renderOutput(): HTMLElement {
+    if (this.lines.length === 0) {
+      return el(
+        'div',
+        { className: 'empty-state' },
+        icon('panel-bottom', { size: 30, className: 'empty-state-icon' }),
+        el('p', { text: 'Sin salida todavía' }),
+        el('p', { className: 'empty-state-hint', text: 'Compila o ejecuta un proyecto para ver aquí su salida.' }),
+      );
     }
 
+    const pre = el('pre', { className: 'output' });
+    for (const line of this.lines) {
+      pre.appendChild(el('div', { className: LINE_CLASS[line.kind], text: line.text }));
+    }
+    return pre;
+  }
+
+  private renderProblems(): HTMLElement {
     if (this.diagnostics.length === 0) {
-      content.appendChild(el('div', { className: 'empty-state', text: 'Ningún problema detectado.' }));
-      return;
+      return el(
+        'div',
+        { className: 'empty-state' },
+        icon('check', { size: 30, className: 'empty-state-icon' }),
+        el('p', { text: 'Ningún problema detectado' }),
+        el('p', {
+          className: 'empty-state-hint',
+          text: 'Los errores y advertencias de la compilación aparecerán aquí.',
+        }),
+      );
     }
+
+    const container = el('div');
 
     for (const diagnostic of this.diagnostics) {
-      const symbol = diagnostic.severity === 'error' ? '✖' : diagnostic.severity === 'warning' ? '▲' : 'ℹ';
       const where = diagnostic.file
         ? `${diagnostic.file.split(/[\\/]/).pop()}:${diagnostic.line}:${diagnostic.column}`
         : 'solución';
 
-      content.appendChild(
+      container.appendChild(
         el(
           'button',
           {
@@ -182,52 +230,40 @@ export class PanelView {
             title: diagnostic.file ?? '',
             on: { click: () => this.host.openDiagnostic(diagnostic) },
           },
-          el('span', { className: `sev ${diagnostic.severity}`, text: symbol }),
-          el(
-            'span',
-            {},
-            el('span', { className: 'code', text: `${diagnostic.code} ` }),
-            diagnostic.message,
-          ),
+          icon(SEVERITY_ICON[diagnostic.severity], { size: 14, className: `sev ${diagnostic.severity}` }),
+          el('span', {}, el('span', { className: 'code', text: `${diagnostic.code} ` }), diagnostic.message),
           el('span', { className: 'where', text: where }),
         ),
       );
     }
-  }
 
-  setAllowedCommands(commands: string[]): void {
-    this.allowedCommands = commands;
+    return container;
   }
 
   /**
    * Terminal integrada.
    *
-   * Sin pseudoterminal: se ejecutan comandos concretos y se muestra su salida. Se dice
-   * explícitamente en la ayuda para que nadie espere un shell interactivo.
+   * Sin pseudoterminal: se ejecutan comandos concretos y se muestra su salida. Se dice en la
+   * propia pantalla vacía para que nadie espere un shell interactivo.
    */
   private renderTerminal(): HTMLElement {
     const container = el('div', { style: { display: 'flex', flexDirection: 'column', height: '100%' } });
 
     const log = el('pre', { className: 'output', style: { flex: '1', margin: '0', overflow: 'auto' } });
-    for (const line of this.lines) {
-      const className =
-        line.kind === 'error' ? 'line-err' : line.kind === 'ok' ? 'line-ok' : line.kind === 'command' ? 'line-cmd' : '';
-      log.appendChild(el('div', { className, text: line.text }));
-    }
+
     if (this.lines.length === 0) {
       log.appendChild(
-        el('div', {
-          text:
-            'Terminal de comandos. Ejecuta ' +
-            (this.allowedCommands.length > 0 ? this.allowedCommands.join(', ') : 'dotnet, git, npm') +
-            '.',
-        }),
+        el('div', { text: `Programas disponibles: ${this.allowedCommands.join(', ') || 'dotnet, git, npm'}` }),
       );
       log.appendChild(
         el('div', {
-          text: 'No hay pseudoterminal: los programas interactivos (REPL, editores de consola) no funcionarán.',
+          text: 'Sin pseudoterminal: los programas interactivos (REPL, editores de consola) no funcionarán.',
         }),
       );
+    } else {
+      for (const line of this.lines) {
+        log.appendChild(el('div', { className: LINE_CLASS[line.kind], text: line.text }));
+      }
     }
 
     const input = el('input', {
@@ -269,16 +305,11 @@ export class PanelView {
       }
     });
 
-    const prompt = el(
-      'div',
-      { style: { display: 'flex', gap: '8px', alignItems: 'center', padding: '8px 12px', borderTop: '1px solid var(--border-subtle)' } },
-      el('span', { className: 'mono', style: { color: 'var(--accent)' }, text: '❯' }),
-      input,
+    container.append(
+      log,
+      el('div', { className: 'terminal-prompt' }, el('span', { className: 'caret', text: '❯' }), input),
     );
 
-    container.append(log, prompt);
-
-    // El foco va al prompt en cuanto se abre la pestaña.
     setTimeout(() => input.focus(), 0);
     log.scrollTop = log.scrollHeight;
 
@@ -292,7 +323,7 @@ export class PanelView {
     const errors = this.diagnostics.filter((diagnostic) => diagnostic.severity === 'error').length;
     const warnings = this.diagnostics.filter((diagnostic) => diagnostic.severity === 'warning').length;
 
-    const makeTab = (id: PanelTab, label: string, badge?: HTMLElement | null): HTMLElement =>
+    const makeTab = (id: PanelTab, iconName: IconName, label: string, badge?: HTMLElement | null): HTMLElement =>
       el(
         'button',
         {
@@ -300,16 +331,17 @@ export class PanelView {
           role: 'tab',
           on: { click: () => this.show(id) },
         },
+        icon(iconName, { size: 14 }),
         label,
         badge ?? null,
       );
 
-    tabs.appendChild(makeTab('output', 'Salida'));
-    tabs.appendChild(makeTab('terminal', 'Terminal'));
-    tabs.appendChild(makeTab('debug', 'Depuración'));
-    tabs.appendChild(
+    tabs.append(
+      makeTab('output', 'list', 'Salida'),
+      makeTab('terminal', 'terminal', 'Terminal'),
       makeTab(
         'problems',
+        'alert-circle',
         'Problemas',
         errors + warnings > 0
           ? el('span', {
@@ -318,41 +350,40 @@ export class PanelView {
             })
           : null,
       ),
+      makeTab('debug', 'bug', 'Depuración'),
+      el('span', { className: 'spacer', style: { flex: '1' } }),
     );
-
-    tabs.appendChild(el('span', { className: 'spacer', style: { flex: '1' } }));
 
     for (const task of this.runningTasks.values()) {
       tabs.appendChild(
         el(
           'button',
           {
-            className: 'btn ghost',
+            className: 'btn ghost small',
             title: task.command,
             on: { click: () => this.host.cancelTask(task.taskId) },
           },
           el('span', { className: 'spinner' }),
-          ' Detener',
+          'Detener',
         ),
       );
     }
 
-    tabs.appendChild(
-      el('button', {
-        className: 'icon-btn',
-        text: '⌫',
-        title: 'Limpiar salida',
-        on: { click: () => this.clearOutput() },
-      }),
-    );
-
-    tabs.appendChild(
-      el('button', {
-        className: 'icon-btn',
-        text: this.collapsed ? '▴' : '▾',
-        title: this.collapsed ? 'Mostrar panel' : 'Ocultar panel',
-        on: { click: () => this.toggleCollapsed() },
-      }),
+    tabs.append(
+      el(
+        'button',
+        { className: 'icon-btn', title: 'Limpiar salida', on: { click: () => this.clearOutput() } },
+        icon('trash', { size: 14 }),
+      ),
+      el(
+        'button',
+        {
+          className: 'icon-btn',
+          title: this.collapsed ? 'Mostrar el panel' : 'Ocultar el panel',
+          on: { click: () => this.toggleCollapsed() },
+        },
+        icon(this.collapsed ? 'chevron-up' : 'chevron-down', { size: 14 }),
+      ),
     );
   }
 }

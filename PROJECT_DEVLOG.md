@@ -4,7 +4,7 @@ Bitácora viva de desarrollo. Se actualiza **en cada iteración** del bucle de t
 
 - **Proyecto:** DotForge IDE — distribución de IDE para C# / .NET 9+ / Blazor
 - **Inicio:** 2026-08-23
-- **Estado global:** 🟢 Completado — v1.0.0 empaquetada y verificada
+- **Estado global:** 🟢 Completado — v1.1.0 empaquetada y verificada
 
 Leyenda: `[ ]` pendiente · `[~]` en curso · `[x]` completado y **verificado con un comando**
 
@@ -112,6 +112,31 @@ por tanto **compila** pero no **ejecuta** los proyectos generados. Se añade el 
 - [x] F6.5 `npm test` verde de punta a punta
 - [x] F6.6 `README.md` final
 - [x] F6.7 Revisión final de `CLAUDE.md`, `AGENTS.md`, `PROJECT_DEVLOG.md`
+
+### Fase 7 — Rediseño de UI/UX
+- [x] F7.1 Sistema de iconos vectoriales propio (61 piezas, rejilla 24×24, trazo 1.75)
+- [x] F7.2 Galería de iconos como modo de diagnóstico (`--icons`) para revisarlos a ojo
+- [x] F7.3 Paleta suave estilo Slate/Tokyo Night, sin negros puros ni blancos brillantes
+- [x] F7.4 Variante clara completa con contraste AA
+- [x] F7.5 Escala tipográfica y de espaciado en tokens (`--text-*`, `--leading-*`)
+- [x] F7.6 Resintonizado de la sintaxis C#/Razor a un rango de saturación estrecho
+- [x] F7.7 Explorador: jerarquía real solución → carpetas → proyectos → archivos
+- [x] F7.8 Anidamiento inteligente de archivos (`.razor.cs`, `.razor.css`, `appsettings.*.json`, …)
+- [x] F7.9 Guías de sangría con resalte del nivel activo
+- [x] F7.10 Insignias de tipo de proyecto (Blazor, Web API, Lib, Tests, RCL, CLI, Job, WASM)
+- [x] F7.11 Detección del tipo de proyecto en el proceso principal (SDK + contenido)
+- [x] F7.12 Iconos por carpeta con significado (Controllers, Models, Services, Pages, …)
+- [x] F7.13 Filtro de archivos en el explorador y "contraer todo"
+- [x] F7.14 Menú contextual de proyecto con iconos y reposicionamiento dentro de la ventana
+- [x] F7.15 Barra de actividad reducida a 5 herramientas + ajustes
+- [x] F7.16 Barra de estado simplificada: SDK, LSP, rama de Git, problemas
+- [x] F7.17 Servicio de estado de Git (rama y archivos sucios) con caché
+- [x] F7.18 Panel de ajustes en la barra lateral
+- [x] F7.19 Asistente de arquitecturas con tarjetas, iconos y diagrama de capas
+- [x] F7.20 Iconos en pestañas del editor, panel, paleta y bienvenida
+- [x] F7.21 Modos de diagnóstico `--ui=` y `--probe=` para revisar la interfaz sin ganchos en producción
+- [x] F7.22 Pruebas de las reglas visuales (anidamiento, iconos, insignias, geometría SVG)
+- [x] F7.23 Compilación de prueba del rediseño: artefactos Windows, verificación y arranque real
 
 ---
 
@@ -379,3 +404,154 @@ haber compilado antes; si no, el error dice exactamente qué comando ejecutar.
 
 **Estado final:** 60/63 tareas del roadmap. La única pendiente real es F5.7 (artefactos de macOS),
 bloqueada por plataforma y resuelta mediante el workflow de CI incluido.
+
+---
+
+### ADR-006 — Sistema de iconos propio en vez de una librería
+**Fecha:** 2026-08-23
+**Contexto:** La interfaz usaba glifos de texto (`⬡`, `🗀`, `C#`, `@`) como iconos. Se renderizan
+distinto en cada sistema, no heredan el color, no se alinean con el texto y algunos son emoji a
+todo color que rompen la coherencia visual.
+**Opciones:**
+- (a) Lucide / Phosphor como dependencia: cientos de iconos, licencia permisiva, cero trabajo.
+- (b) Un set propio dibujado sobre la misma rejilla y con el mismo lenguaje visual.
+**Decisión:** (b), 61 iconos en `src/renderer/icons.ts`, rejilla 24×24, trazo 1.75, extremos
+redondeados, todo heredando `currentColor`.
+**Consecuencias:** cero dependencias nuevas y control total sobre las piezas que no existen en
+ningún set genérico (la almohadilla de C#, la arroba de Razor, la caja de proyecto .csproj). A
+cambio, hay que dibujarlos y revisarlos: por eso existe el modo `--icons`, que los pinta todos a
+varios tamaños, y las pruebas que validan la geometría de cada ruta.
+
+### ADR-007 — Barra de estado neutra en vez de una banda de acento
+**Fecha:** 2026-08-23
+**Contexto:** La barra de estado era una banda violeta saturada a todo lo ancho de la ventana.
+**Decisión:** superficie neutra (`--bg-deep`) con el color reservado para lo que reclama atención:
+errores en rojo, tarea en curso en ámbar, servidor de lenguaje listo en verde.
+**Consecuencias:** el acento vuelve a significar algo. Cuando todo va bien, la barra desaparece
+del campo de visión, que es exactamente lo que debe hacer.
+
+### ADR-008 — Anidamiento de archivos que agrupa, nunca oculta
+**Fecha:** 2026-08-23
+**Contexto:** Una solución Blazor genera tres archivos por componente (`Home.razor`,
+`Home.razor.cs`, `Home.razor.css`) y varios `appsettings.<Entorno>.json`. El árbol se llena de
+filas que nadie busca.
+**Decisión:** los archivos satélite se agrupan bajo su archivo principal, con una regla explícita
+por patrón (`nestingParentsOf`).
+**Consecuencias:** el árbol de un proyecto Blazor pierde alrededor de un tercio de sus filas. La
+regla dura es que **si el padre no existe, el hijo se queda como raíz**: agrupar nunca puede
+hacer que un archivo desaparezca. Hay un test dedicado a esa invariante y otro que comprueba que
+la suma de nodos raíz e hijos es siempre igual al número de archivos de entrada.
+
+---
+
+### Iteración 5 — 2026-08-23 — Rediseño integral de UI/UX
+**Objetivo:** hacer la interfaz sencilla, limpia y amable a la vista, con un árbol de soluciones
+.NET realmente comprensible.
+
+**Hecho:**
+- **Iconografía.** 61 iconos vectoriales propios sustituyen a los glifos de texto. Incluyen marcas
+  específicas del ecosistema (C#, Razor, solución, proyecto) y de carpetas con significado
+  (Controllers, Models, Services, Pages, Components, wwwroot, Domain, Ports, Commands, Events…).
+- **Color y tipografía.** Paleta suave: el fondo más oscuro es `#1b1d27` y el texto más claro
+  `#c8cee2`; el violeta de .NET se lleva a un pastel `#a58cf5` y el `#512BD4` original queda sólo
+  para el logotipo. Escala tipográfica y de espaciado en tokens. Sintaxis resintonizada dentro de
+  un rango de saturación estrecho para que ningún color salte por encima del resto.
+- **Explorador.** Jerarquía real de la solución, insignias de tipo de proyecto, guías de sangría
+  con resalte del nivel activo, anidamiento de archivos satélite, filtro por nombre, "contraer
+  todo", menú contextual con iconos, y el proyecto de aplicación abierto por defecto para que
+  abrir una solución no cueste tres clics antes de ver código.
+- **Declutter.** Barra de actividad reducida a cinco herramientas más ajustes; barra de estado con
+  sólo SDK, LSP, rama de Git y problemas; el `.csproj` ya no se repite dentro de su propio
+  proyecto; el target framework sólo se muestra cuando la solución mezcla varios.
+- **Ajustes** como vista de la barra lateral, con efecto inmediato.
+- **Asistente de arquitecturas** con tarjetas, icono por arquitectura y diagrama de capas con
+  flechas, que comunica la forma de cada arquitectura mejor que cualquier párrafo.
+
+**Verificado con comandos reales:**
+- `npm test` → **359 pruebas, 0 fallos** (61 nuevas para las reglas visuales).
+- `npx electron . --icons` → las 61 piezas revisadas a 16 y 24 px.
+- Tema oscuro: chrome en `rgb(23, 25, 34)`. Tema claro: `rgb(232, 234, 240)`. Medido dos veces:
+  con `--probe=` sobre `getComputedStyle` y leyendo los bytes del PNG capturado.
+
+**Errores encontrados y solucionados:**
+17. *Síntoma:* los nombres de proyecto salían truncados (`Acme.Shop.Sh…`).
+    *Causa raíz:* la insignia y el target framework competían por el ancho con el nombre, que es
+    justo lo que el usuario está leyendo.
+    *Arreglo:* insignias cortas (`Lib`, `CLI`, `Job`) y el framework sólo cuando la solución
+    mezcla varios; el dato completo vive en el tooltip.
+18. *Síntoma:* el explorador y el panel NuGet se pintaban los dos sobre el mismo contenedor al
+    cargar una solución, y ganaba el último: la barra mostraba NuGet con el icono del explorador
+    activo.
+    *Arreglo:* cada vista de la barra lateral tiene un flag `visible` y sólo pinta si está activa.
+19. *Síntoma:* al abrir un workspace, la salida registraba dos veces "N proyectos".
+    *Causa raíz:* la solución llegaba por dos caminos, la llamada directa y el evento difundido
+    por el proceso principal.
+    *Arreglo:* `applySolution` detecta la segunda vuelta sobre la misma solución y no repite el
+    aviso ni recarga el árbol.
+20. *Síntoma:* el indicador del SDK no aparecía en la barra de estado.
+    *Causa raíz:* un heredoc de shell se comió los backslashes de una expresión regular y
+    `/^(\d+\.\d+)/` quedó como `/^(d+.d+)/`.
+    *Arreglo:* corregida con edición directa del archivo. Es la tercera vez que un heredoc largo
+    corrompe escapes; la regla ya está en `CLAUDE.md`.
+21. *Síntoma:* el diagrama de capas del asistente dejaba una flecha suelta al final de línea
+    cuando las capas se envolvían.
+    *Arreglo:* cada capa viaja en el mismo grupo que su flecha.
+22. *Síntoma:* dos iconos dibujados a mano (`hammer` y `tool`) eran ilegibles a 16 px.
+    *Cómo se encontró:* la galería `--icons`, que es justamente para esto.
+    *Arreglo:* rediseñados; el martillo pasó a cabeza inclinada y mango, y la llave inglesa a una
+    silueta cerrada.
+
+**Nota sobre el método:** varias capturas del tema claro parecían mostrar el chrome oscuro sobre
+contenido claro, lo que apuntaba a un fallo del tema. Dos medidas independientes dicen lo
+contrario: `--probe=` devuelve `rgb(232, 234, 240)` para la barra de título y la de estado, y
+`scripts/read-pixels.mjs`, que decodifica el PNG y lee los bytes, devuelve exactamente el mismo
+valor en esas coordenadas. El archivo es correcto; lo que engañaba era el visor. De ahí salieron
+`--probe=`, `--ui=` y el lector de píxeles: un color se mide, no se mira.
+
+**Cierre de la iteración — hallazgos de la compilación de prueba:**
+23. *Síntoma:* la lista de recientes mostraba dos entradas idénticas, `Acme.Shop` con la ruta
+    `C:\Users\Sergio\AppData\Local\Te…` repetida.
+    *Causa raíz:* no era un duplicado. Eran dos soluciones distintas con el mismo nombre en
+    carpetas distintas, y el recorte por el final borraba justo la parte que las distingue.
+    *Arreglo:* la entrada muestra ahora las dos carpetas contenedoras (`…\scratchpad\final` frente
+    a `…\Temp\dfdemo`) y la ruta completa vive en el tooltip. La función vive en
+    `src/renderer/paths.ts`, fuera del DOM, y tiene sus propias pruebas.
+24. *Síntoma:* el muestreo de píxeles de `--screenshot=` informaba de un color de barra de estado
+    que no correspondía a ningún token.
+    *Causa raíz:* las coordenadas de muestreo estaban fijas en el código y caían fuera del lienzo
+    capturado; el recorte devolvía un píxel que no era de nadie.
+    *Arreglo:* las coordenadas se derivan del tamaño real de la imagen. Confirmado contra
+    `getComputedStyle`: las cuatro zonas coinciden ahora con sus tokens.
+
+**Compilación de prueba final:** `npm run icons`, `npm run dist:win`, `verify-dist.mjs --require win`
+y arranque real del ejecutable empaquetado (`SMOKE_OK`). Capturas regeneradas desde el binario y
+desde el código con el mismo resultado.
+
+### ADR-009 — La versión se declara una sola vez, en `package.json`
+**Fecha:** 2026-08-23
+**Contexto:** El número `1.0.0` estaba escrito a mano en cuatro sitios: el CLI, el `clientInfo` que
+el cliente LSP envía en el handshake, el manifiesto `dotforge.json` de cada solución generada y el
+propio `package.json`. Al subir a 1.1.0 se vio el problema: basta olvidar uno para que el IDE diga
+una versión, el instalador otra y el manifiesto una tercera.
+**Decisión:** `package.json` es la única fuente. `scripts/build.mjs` inyecta el valor como constante
+de compilación (`define` de esbuild) y `src/shared/version.ts` lo expone como `APP_VERSION`, con un
+`0.0.0-dev` de reserva por si alguien ejecuta el código sin pasar por el build.
+**Consecuencias:** `npm version` ya basta para cambiarla en todas partes. El coste es que la versión
+sólo es correcta en el código compilado, no leyendo el fuente, que es un intercambio razonable
+porque el producto siempre se ejecuta compilado.
+
+---
+
+### Iteración 6 — 2026-08-23 — v1.1.0
+El rediseño de UI/UX añade funcionalidad —vista de ajustes, anidamiento de archivos, sistema de
+iconos, estado de Git en la barra inferior, modos de diagnóstico `--icons`, `--ui=` y `--probe=`—,
+así que por semver le corresponde subir el segundo número, no el tercero: 1.0.0 → **1.1.0**.
+
+**Hecho:**
+- Versión centralizada (ADR-009) y `1.1.0` en `package.json`.
+- Artefactos regenerados: los nombres los compone electron-builder con `${version}`, así que pasan
+  a `DotForge IDE-1.1.0-*` sin tocar `electron-builder.yml`.
+- Referencias actualizadas en `README.md` y en la cabecera de esta bitácora.
+
+**Verificado:** `node build/cli.js --version` → `1.1.0`; los tres bundles (`cli`, `scaffold`, `main`)
+contienen el literal inyectado; `npm test` en verde; `verify-dist` reconoce los artefactos nuevos.

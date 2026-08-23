@@ -76,8 +76,19 @@ desde el primer minuto, con un CRUD funcional de ejemplo.
 - **Explorador de soluciones** que lee `.sln`, `.slnx` y `.csproj` SDK-style, con carpetas de
   solución, referencias de proyecto y de paquete, y target framework heredado de
   `Directory.Build.props`.
+- Cada proyecto lleva una **insignia** con lo que realmente es —Blazor, Web API, librería, pruebas,
+  worker— deducida del SDK y del contenido, no del nombre.
+- **Anidamiento de archivos**: `Home.razor.cs` y `Home.razor.css` cuelgan de `Home.razor`, y
+  `appsettings.Development.json` de `appsettings.json`. Agrupa, nunca oculta: si el archivo padre
+  no existe, el hijo se queda a la vista.
+- **Guías de sangría** que resaltan el nivel activo, para que una jerarquía Clean o DDD siga
+  siendo legible siete niveles adentro.
+- `bin`, `obj`, `.vs`, `.git` y `node_modules` están ocultos por defecto.
+- Filtro por nombre y "contraer todo" en la cabecera del panel.
 - Vista alternativa de archivos para lo que no pertenece a ningún proyecto.
 - Menú contextual por proyecto: compilar, ejecutar, hot reload, pruebas, paquetes.
+
+![Explorador de soluciones con anidamiento e insignias](docs/screenshot-tree.png)
 
 ### Compilación y ejecución
 
@@ -100,7 +111,16 @@ desde el primer minuto, con un CRUD funcional de ejemplo.
 
 ### Producto
 
-- Tema **DotForge Purple** (oscuro) y variante clara, con contraste AA.
+- Tema **DotForge Purple** (oscuro) y variante clara, con contraste AA. Tonos apagados, sin negros
+  ni blancos puros: el fondo más oscuro es `#1b1d27` y el texto más claro `#c8cee2`, pensado para
+  sesiones largas.
+- **61 iconos vectoriales propios** en una sola rejilla, incluidas las marcas del ecosistema (C#,
+  Razor, solución, proyecto) y de las carpetas con significado: `Controllers`, `Models`,
+  `Services`, `Pages`, `Components`, `Domain`, `Ports`, `wwwroot`…
+- Barra de actividad reducida a cinco herramientas y barra de estado con lo imprescindible: SDK
+  activo, estado del servidor de lenguaje, rama de Git y errores.
+- **Ajustes** en la barra lateral, con efecto inmediato: tema, tamaño de fuente, tabulación,
+  minimapa, ajuste de línea, formateo al guardar e IntelliSense.
 - Iconografía multirresolución propia: `.ico` (7 tamaños), `.icns` (11 entradas), PNG de 16 a 1024.
 - Paleta de comandos con todo lo que hace el IDE, buscable por teclado.
 - Atajos compatibles con Windows y macOS.
@@ -115,10 +135,10 @@ Descarga el artefacto de tu plataforma desde `dist/` o desde los artefactos del 
 
 | Plataforma | Artefacto | Notas |
 |---|---|---|
-| Windows | `DotForge IDE-1.0.0-Setup-x64.exe` | Instalador NSIS; permite elegir carpeta |
-| Windows | `DotForge IDE-1.0.0-win-x64.zip` | Portable, sin instalación |
-| macOS | `DotForge IDE-1.0.0-arm64.dmg` | Apple Silicon |
-| macOS | `DotForge IDE-1.0.0-x64.dmg` | Intel |
+| Windows | `DotForge IDE-1.1.0-Setup-x64.exe` | Instalador NSIS; permite elegir carpeta |
+| Windows | `DotForge IDE-1.1.0-win-x64.zip` | Portable, sin instalación |
+| macOS | `DotForge IDE-1.1.0-arm64.dmg` | Apple Silicon |
+| macOS | `DotForge IDE-1.1.0-x64.dmg` | Intel |
 
 > Los artefactos no están firmados: Windows mostrará el aviso de SmartScreen y macOS pedirá
 > confirmación en Gatekeeper. Es lo esperado sin certificado de desarrollador.
@@ -388,11 +408,11 @@ No hay certificados en el repositorio. Para firmar:
 npm test
 ```
 
-**298 pruebas** en cuatro grupos:
+**359 pruebas** en cuatro grupos:
 
 | Grupo | Qué verifica |
 |---|---|
-| `unit` | Motor de plantillas, nombres y pluralización, invariantes de los blueprints, emisor de `.sln`, parseo de `.sln`/`.csproj`, diagnósticos de MSBuild, auto-cierre de etiquetas |
+| `unit` | Motor de plantillas, nombres y pluralización, invariantes de los blueprints, emisor de `.sln`, parseo de `.sln`/`.csproj`, diagnósticos de MSBuild, auto-cierre de etiquetas, reglas del árbol (anidamiento, iconos, insignias) y geometría de los iconos |
 | `security` | Path traversal, superficie del preload, configuración de Electron, CSP, ausencia de `shell:true`, troceado de comandos de la terminal |
 | `package` | Configuración de empaquetado, árbol de `build/`, validez real de `.ico` y `.icns`, arranque de Electron y tokenización de Razor dentro del renderer |
 | `scaffold` | Genera 6 combinaciones de arquitectura y opciones, ejecuta **`dotnet build` de verdad** exigiendo 0 errores y 0 advertencias, ejecuta `dotnet test`, arranca la Web API generada y ejercita el CRUD por HTTP, y depura un programa real parando en un breakpoint |

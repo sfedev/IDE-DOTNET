@@ -229,7 +229,8 @@ const screenshotTarget = (() => {
 
 function captureScreenshot(window: BrowserWindow, target: string): void {
   window.webContents.once('did-finish-load', () => {
-    // Margen para que Monaco termine de cargar y el shell quede pintado del todo.
+    // Margen para que Monaco termine de cargar, se ejecute la acción de UI y el shell quede
+    // pintado del todo.
     setTimeout(() => {
       void window.webContents
         .capturePage()
@@ -238,6 +239,26 @@ function captureScreenshot(window: BrowserWindow, target: string): void {
           const { dirname } = await import('node:path');
           await mkdir(dirname(target), { recursive: true });
           await writeFile(target, image.toPNG());
+
+          // Muestreo de píxeles de la imagen realmente capturada. Comparar el color pintado con
+          // el que dice getComputedStyle es la única forma de zanjar una discrepancia entre lo
+          // que el DOM cree y lo que se ve.
+          // Las coordenadas se derivan del tamaño real de la imagen: la ventana no siempre mide
+          // lo mismo, y muestrear un punto fuera del lienzo devuelve un color que no es de nadie.
+          const { width, height } = image.getSize();
+          const sample = (x: number, y: number): string => {
+            const inside = {
+              x: Math.min(Math.max(0, Math.round(x)), width - 1),
+              y: Math.min(Math.max(0, Math.round(y)), height - 1),
+            };
+            const [b, g, r] = image.crop({ ...inside, width: 1, height: 1 }).toBitmap();
+            return `rgb(${r}, ${g}, ${b})`;
+          };
+
+          console.log(
+            `PIXELS titlebar=${sample(width / 2, 12)} activitybar=${sample(12, height / 2)} ` +
+              `sidebar=${sample(width * 0.12, height / 2)} statusbar=${sample(width / 2, height - 13)}`,
+          );
           console.log(`SCREENSHOT_OK ${target}`);
           app.exit(0);
         })
@@ -305,6 +326,107 @@ function findSolutionRoot(startDir: string): string {
   return startDir;
 }
 
+/**
+ * `--icons`: sustituye la interfaz por una galería con todos los iconos a varios tamaños.
+ *
+ * Un set de iconos dibujado a mano necesita revisarse a ojo: una ruta mal cerrada compila,
+ * renderiza y sólo se nota mirándola. Esto hace esa revisión posible en un segundo.
+ */
+const showIconGallery = process.argv.includes('--icons');
+
+function renderIconGallery(window: BrowserWindow): void {
+  window.webContents.once('did-finish-load', () => {
+    setTimeout(() => {
+      void window.webContents.executeJavaScript('window.__dotforgeIconGallery && window.__dotforgeIconGallery()');
+    }, 1500);
+  });
+}
+
+/**
+ * `--ui=<vista>`: abre una vista antes de la captura, pulsando los mismos controles que pulsaría
+ * un usuario. Sirve para revisar en imagen el asistente, los ajustes o la paleta sin tener que
+ * exponer ganchos de prueba en el código de producción.
+ */
+const uiAction = (() => {
+  const flag = process.argv.find((argument) => argument.startsWith('--ui='));
+  return flag ? flag.slice('--ui='.length) : null;
+})();
+
+const UI_ACTIONS: Record<string, string> = {
+  // La barra de actividad, en orden: solución, generador, NuGet, depuración, [spacer], ajustes.
+  wizard: "document.querySelectorAll('.activity-item')[1]?.click()",
+  nuget: "document.querySelectorAll('.activity-item')[2]?.click()",
+  debug: "document.querySelectorAll('.activity-item')[3]?.click()",
+  settings: "document.querySelectorAll('.activity-item')[4]?.click()",
+  palette: "document.querySelector('#statusbar button:last-of-type')?.click()",
+  terminal: "[...document.querySelectorAll('.panel-tab')].find((tab) => tab.textContent?.includes('Terminal'))?.click()",
+  // Dos pasos: abrir ajustes y pulsar "Claro". Se encadenan con un retardo porque la vista se
+  // repinta entre uno y otro.
+  light:
+    "document.querySelectorAll('.activity-item')[4]?.click();" +
+    "setTimeout(() => [...document.querySelectorAll('.segmented button')]" +
+    ".find((button) => button.textContent?.includes('Claro'))?.click(), 400)",
+  // Despliega el grupo de archivos satélite de appsettings.json.
+  'probe-theme':
+    "document.querySelectorAll('.activity-item')[4]?.click();" +
+    "setTimeout(() => {" +
+    "  [...document.querySelectorAll('.segmented button')].find((b) => b.textContent?.includes('Claro'))?.click();" +
+    "  setTimeout(() => {" +
+    "    const root = getComputedStyle(document.documentElement);" +
+    "    const bar = document.querySelector('.titlebar');" +
+    "    console.error('PROBE html data-theme=' + document.documentElement.dataset.theme" +
+    "      + ' app data-theme=' + document.getElementById('app').dataset.theme" +
+    "      + ' --bg-deep=' + root.getPropertyValue('--bg-deep').trim()" +
+    "      + ' titlebar bg=' + getComputedStyle(bar).backgroundColor);" +
+    "  }, 500);" +
+    "}, 400)",
+  nesting:
+    "[...document.querySelectorAll('.tree-row')]" +
+    ".find((row) => row.textContent?.includes('appsettings.json'))" +
+    "?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))",
+};
+
+function runUiAction(window: BrowserWindow, action: string): void {
+  const script = UI_ACTIONS[action];
+  if (!script) {
+    console.error(`acción de UI desconocida: ${action}. Disponibles: ${Object.keys(UI_ACTIONS).join(', ')}`);
+    return;
+  }
+
+  window.webContents.once('did-finish-load', () => {
+    // Se espera a que el renderer termine de montarse (Monaco tarda) antes de pulsar nada.
+    setTimeout(() => void window.webContents.executeJavaScript(script, true), 3200);
+  });
+}
+
+/**
+ * `--probe=<expresión>`: evalúa una expresión en el renderer y la imprime.
+ *
+ * Complementa a `--ui=`: primero se pulsa lo que haya que pulsar y luego se mide el resultado.
+ * Depurar CSS a base de capturas es lento y engañoso; leer el valor calculado no lo es.
+ */
+const probeExpression = (() => {
+  const flag = process.argv.find((argument) => argument.startsWith('--probe='));
+  return flag ? flag.slice('--probe='.length) : null;
+})();
+
+function runProbe(window: BrowserWindow, expression: string): void {
+  window.webContents.once('did-finish-load', () => {
+    setTimeout(() => {
+      void window.webContents
+        .executeJavaScript(`JSON.stringify(${expression})`, true)
+        .then((result: string) => {
+          console.log(`PROBE ${result}`);
+          app.exit(0);
+        })
+        .catch((error: unknown) => {
+          console.error(`PROBE_FAIL ${error instanceof Error ? error.message : String(error)}`);
+          app.exit(1);
+        });
+    }, uiAction ? 6000 : 4500);
+  });
+}
+
 function createWindow(): BrowserWindow {
   const icon = iconPath();
 
@@ -345,6 +467,9 @@ function createWindow(): BrowserWindow {
   if (isSmokeTest) runSmokeTest(window);
   if (screenshotTarget) captureScreenshot(window, screenshotTarget);
   if (tokenizeProbe !== null) runTokenizeProbe(window, tokenizeProbe);
+  if (showIconGallery) renderIconGallery(window);
+  if (uiAction) runUiAction(window, uiAction);
+  if (probeExpression) runProbe(window, probeExpression);
 
   // Toda navegación fuera de la app se abre en el navegador del sistema, nunca dentro.
   window.webContents.setWindowOpenHandler(({ url }) => {

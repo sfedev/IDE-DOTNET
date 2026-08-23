@@ -10,6 +10,8 @@ import type * as MonacoApi from 'monaco-editor';
 import type { AppSettings, EditorDocument } from '../../shared/contracts.js';
 import { baseName, byId, clear, el } from '../dom.js';
 import { didChange, didClose, didOpen, didSave } from '../lsp-bridge.js';
+import { iconForFile } from '../file-icons.js';
+import { icon } from '../icons.js';
 import { installTagAutoClose } from '../languages/razor.js';
 import { DARK_THEME, getMonaco, LIGHT_THEME } from '../monaco-setup.js';
 
@@ -374,17 +376,26 @@ export class EditorView {
     for (const tab of this.tabs.values()) {
       const isActive = tab.path === this.activePath;
 
-      const close = el('span', {
-        className: 'tab-close',
-        title: tab.dirty ? 'Cambios sin guardar' : 'Cerrar',
-        role: 'button',
-        on: {
-          click: (event) => {
-            event.stopPropagation();
-            void this.close(tab.path).then(() => this.renderTabs());
+      const spec = iconForFile(tab.name);
+
+      // El punto de "sin guardar" y la ✕ comparten sitio: el CSS decide cuál se ve según el
+      // estado y el hover, para que la pestaña no cambie de ancho al pasar el ratón.
+      const close = el(
+        'span',
+        {
+          className: 'tab-close',
+          title: tab.dirty ? 'Cambios sin guardar — clic para cerrar' : 'Cerrar',
+          role: 'button',
+          on: {
+            click: (event) => {
+              event.stopPropagation();
+              void this.close(tab.path).then(() => this.renderTabs());
+            },
           },
         },
-      });
+        icon('dot', { size: 11, className: 'icon-dirty' }),
+        icon('x', { size: 12, className: 'icon-close' }),
+      );
 
       container.appendChild(
         el(
@@ -408,6 +419,7 @@ export class EditorView {
               },
             },
           },
+          icon(spec.name, { size: 14, className: `tone-${spec.tone}` }),
           el('span', { className: 'tab-name', text: tab.name }),
           close,
         ),

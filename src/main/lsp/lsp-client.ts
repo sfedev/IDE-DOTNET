@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import type { LspState } from '../../shared/contracts.js';
+import { APP_VERSION } from '../../shared/version.js';
 import type { AcquiredServer } from './acquire.js';
 
 const HEADER_SEPARATOR = '\r\n\r\n';
@@ -149,7 +150,7 @@ export class LspClient extends EventEmitter {
     try {
       const result = (await this.request('initialize', {
         processId: process.pid,
-        clientInfo: { name: 'DotForge IDE', version: '1.0.0' },
+        clientInfo: { name: 'DotForge IDE', version: APP_VERSION },
         locale: 'es',
         rootUri: pathToFileURL(workspaceRoot).toString(),
         workspaceFolders: [{ uri: pathToFileURL(workspaceRoot).toString(), name: workspaceRoot }],

@@ -7,6 +7,8 @@
  */
 import type { AppInfo, AppSettings } from '../../shared/contracts.js';
 import { baseName, byId, clear, el } from '../dom.js';
+import { icon, type IconName } from '../icons.js';
+import { containerOf } from '../paths.js';
 
 export interface WelcomeHost {
   openWizard(): void;
@@ -30,7 +32,7 @@ export class WelcomeView {
       el(
         'div',
         { className: 'welcome-hero' },
-        el('div', { className: 'welcome-logo', text: '</>' }),
+        el('div', { className: 'welcome-logo' }, icon('code', { size: 27, strokeWidth: 2 })),
         el(
           'div',
           {},
@@ -47,132 +49,141 @@ export class WelcomeView {
 
     // --- Empezar ------------------------------------------------------------------------------
     sections.appendChild(
-      el(
-        'div',
-        { className: 'welcome-section' },
-        el('h2', { text: 'Empezar' }),
-        el(
-          'div',
-          { className: 'link-list' },
-          this.link('Nueva solución con el asistente…', `${modifier}+Shift+N`, () => this.host.openWizard()),
-          this.link('Abrir carpeta…', `${modifier}+O`, () => this.host.openFolderDialog()),
-          this.link('Paleta de comandos', `${modifier}+Shift+P`, () => this.host.runCommand('view.command-palette')),
+      this.section('Empezar', [
+        this.action('wand', 'Nueva solución con el asistente', `${modifier}+Shift+N`, () => this.host.openWizard()),
+        this.action('folder-open', 'Abrir carpeta', `${modifier}+O`, () => this.host.openFolderDialog()),
+        this.action('command', 'Paleta de comandos', `${modifier}+Shift+P`, () =>
+          this.host.runCommand('view.command-palette'),
         ),
-      ),
+      ]),
     );
 
     // --- Recientes -----------------------------------------------------------------------------
     const recents = settings?.recentWorkspaces ?? [];
     sections.appendChild(
-      el(
-        'div',
-        { className: 'welcome-section' },
-        el('h2', { text: 'Recientes' }),
+      this.section(
+        'Recientes',
         recents.length === 0
-          ? el('div', { className: 'empty-state', text: 'Todavía no has abierto ningún workspace.' })
-          : el(
-              'div',
-              { className: 'link-list' },
-              ...recents.slice(0, 8).map((path) =>
-                el(
-                  'button',
-                  {
-                    className: 'link-item',
-                    title: path,
-                    on: { click: () => this.host.openWorkspace(path) },
-                  },
-                  el('span', { text: baseName(path) }),
-                  el('span', { className: 'sub', text: path }),
-                ),
+          ? [el('div', { className: 'empty-state compact', text: 'Todavía no has abierto ningún workspace.' })]
+          : recents
+              .slice(0, 7)
+              .map((path) =>
+                this.action('solution', baseName(path), containerOf(path), () => this.host.openWorkspace(path), path),
               ),
-            ),
       ),
     );
 
     // --- Arquitecturas ---------------------------------------------------------------------------
     sections.appendChild(
-      el(
-        'div',
-        { className: 'welcome-section' },
-        el('h2', { text: 'Arquitecturas disponibles' }),
-        el(
-          'div',
-          { className: 'link-list' },
-          this.link('Clean Architecture', 'Domain · Application · Infrastructure · UI', () => this.host.openWizard()),
-          this.link('Arquitectura Hexagonal', 'Domain · Ports · Adapters', () => this.host.openWizard()),
-          this.link('DDD + CQRS', 'Agregados · Eventos · Comandos y consultas', () => this.host.openWizard()),
+      this.section('Arquitecturas disponibles', [
+        this.action('solution', 'Clean Architecture', 'Domain · Application · Infrastructure', () =>
+          this.host.openWizard(),
         ),
-      ),
+        this.action('hexagon', 'Arquitectura Hexagonal', 'Domain · Ports · Adapters', () => this.host.openWizard()),
+        this.action('puzzle', 'DDD + CQRS', 'Agregados · Eventos · Comandos', () => this.host.openWizard()),
+      ]),
     );
 
-    // --- Entorno ------------------------------------------------------------------------------------
+    // --- Entorno --------------------------------------------------------------------------------
     if (info) {
       const sdks = info.dotnetSdks.length;
-      const runtimes = info.dotnetRuntimes.length;
 
       sections.appendChild(
-        el(
-          'div',
-          { className: 'welcome-section' },
-          el('h2', { text: 'Entorno detectado' }),
+        this.section(
+          'Entorno detectado',
           sdks === 0
-            ? el('div', {
-                className: 'notice warn',
-                text: 'No se ha encontrado el SDK de .NET en el PATH. Podrás editar, pero no compilar ni ejecutar.',
-              })
-            : el(
-                'div',
-                { className: 'link-list' },
-                this.readOnlyRow('SDK de .NET', `${sdks} instalado${sdks === 1 ? '' : 's'}`),
-                this.readOnlyRow('Runtimes', `${runtimes}`),
-                this.readOnlyRow('Plataforma', `${info.platform}-${info.arch}`),
-                this.readOnlyRow('Electron', info.electron),
-              ),
+            ? [
+                el(
+                  'div',
+                  { className: 'notice warn' },
+                  icon('alert-triangle', { size: 15 }),
+                  el('span', {
+                    text: 'No se ha encontrado el SDK de .NET en el PATH. Podrás editar, pero no compilar ni ejecutar.',
+                  }),
+                ),
+              ]
+            : [
+                this.readOnly('project', 'SDK de .NET', `${sdks} instalado${sdks === 1 ? '' : 's'}`),
+                this.readOnly('package', 'Runtimes', String(info.dotnetRuntimes.length)),
+                this.readOnly('settings', 'Plataforma', `${info.platform}-${info.arch}`),
+              ],
         ),
       );
     }
 
     inner.appendChild(sections);
 
-    // --- Atajos ----------------------------------------------------------------------------------------
+    // --- Atajos ------------------------------------------------------------------------------------
     inner.appendChild(
-      el(
-        'div',
-        { className: 'welcome-section', style: { marginTop: '28px' } },
-        el('h2', { text: 'Atajos esenciales' }),
-        el(
-          'div',
-          { className: 'link-list' },
-          this.readOnlyRow('Compilar solución', `${modifier}+Shift+B`),
-          this.readOnlyRow('Ejecutar', 'F5'),
-          this.readOnlyRow('Ejecutar con Hot Reload', `${modifier}+F5`),
-          this.readOnlyRow('Detener', 'Shift+F5'),
-          this.readOnlyRow('Guardar', `${modifier}+S`),
-          this.readOnlyRow('Buscar en el archivo', `${modifier}+F`),
-          this.readOnlyRow('Formatear documento', 'Alt+Shift+F'),
-          this.readOnlyRow('Paquetes NuGet', `${modifier}+Shift+U`),
-        ),
+      this.section(
+        'Atajos esenciales',
+        [
+          ['Compilar solución', `${modifier}+Shift+B`],
+          ['Iniciar depuración', 'F5'],
+          ['Alternar breakpoint', 'F9'],
+          ['Hot Reload', `${modifier}+F5`],
+          ['Guardar', `${modifier}+S`],
+          ['Buscar en el archivo', `${modifier}+F`],
+          ['Formatear documento', 'Alt+Shift+F'],
+          ['Terminal', `${modifier}+J`],
+        ].map(([title, keys]) => this.shortcut(title!, keys!)),
+        { marginTop: '36px' },
       ),
     );
 
     container.appendChild(inner);
   }
 
-  private link(title: string, sub: string, onClick: () => void): HTMLElement {
+  private section(
+    title: string,
+    children: HTMLElement[],
+    style?: Partial<CSSStyleDeclaration>,
+  ): HTMLElement {
+    return el(
+      'div',
+      { className: 'welcome-section', ...(style ? { style } : {}) },
+      el('h2', { text: title }),
+      el('div', { className: 'link-list' }, ...children),
+    );
+  }
+
+  private action(
+    iconName: IconName,
+    title: string,
+    sub: string,
+    onClick: () => void,
+    tooltip = sub,
+  ): HTMLElement {
     return el(
       'button',
-      { className: 'link-item', on: { click: onClick } },
-      el('span', { text: title }),
+      { className: 'link-item', title: tooltip, on: { click: onClick } },
+      icon(iconName, { size: 15 }),
+      el('span', { className: 'title', text: title }),
       el('span', { className: 'sub', text: sub }),
     );
   }
 
-  private readOnlyRow(title: string, sub: string): HTMLElement {
+  private readOnly(iconName: IconName, title: string, sub: string): HTMLElement {
     return el(
       'div',
-      { className: 'link-item', style: { color: 'var(--text-muted)', cursor: 'default' } },
-      el('span', { text: title }),
+      { className: 'link-item readonly' },
+      icon(iconName, { size: 15 }),
+      el('span', { className: 'title', text: title }),
       el('span', { className: 'sub', text: sub }),
+    );
+  }
+
+  private shortcut(title: string, keys: string): HTMLElement {
+    const chips = el('span', { className: 'kbd' });
+    for (const key of keys.split('+')) {
+      chips.appendChild(el('span', { text: key }));
+    }
+
+    return el(
+      'div',
+      { className: 'link-item readonly' },
+      el('span', { className: 'title', text: title }),
+      chips,
     );
   }
 }

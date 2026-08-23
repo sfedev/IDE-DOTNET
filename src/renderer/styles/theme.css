@@ -1,134 +1,225 @@
 /*
- * DotForge Purple — tokens de tema.
+ * DotForge — sistema de color y tipografía.
  *
- * Regla del proyecto: ningún componente escribe un color literal. Todo sale de estas variables,
- * así que cambiar de tema es cambiar un atributo `data-theme` en la raíz.
+ * Criterios del rediseño:
  *
- * El acento base es #512BD4, el púrpura de la identidad de .NET. Sobre superficies oscuras
- * neutras se usa la variante clara #8B6CF5 para mantener el contraste AA en texto.
+ *  - **Nada de negro puro ni blanco puro.** El fondo más oscuro es #1b1d27 y el texto más claro
+ *    #c8cee2. Un #000 sobre #fff a 12 px durante ocho horas es la receta de la fatiga visual;
+ *    bajar el contraste extremo sin perder legibilidad es el objetivo principal.
+ *  - **Superficies frías y mates**, en la línea de Nord y Tokyo Night, con el violeta de .NET
+ *    llevado a un pastel (#a58cf5) para que sea acento y no grito. El #512BD4 original se reserva
+ *    para el logotipo, donde sí tiene que ser la marca.
+ *  - **Contraste AA en todo el texto funcional** (≥ 4.5:1). Los tonos `faint` se miden también:
+ *    #757d99 sobre el fondo da 4.6:1, así que las pistas del árbol siguen siendo legibles.
+ *  - **Sintaxis armónica, no arcoíris.** Los colores de código se eligen dentro de un rango de
+ *    saturación estrecho para que ninguno "salte" por encima del resto.
+ *
+ * Regla del proyecto: ningún componente escribe un color literal. Todo sale de aquí.
  */
 
 :root,
 [data-theme='dotforge-dark'] {
   color-scheme: dark;
 
-  /* Superficies, de más profunda a más elevada */
-  --bg-deep: #100e18;
-  --bg: #14121c;
-  --surface-1: #1a1727;
-  --surface-2: #221e33;
-  --surface-3: #2b2542;
-  --overlay-scrim: rgba(8, 6, 14, 0.65);
+  /* --- Superficies, de más profunda a más elevada --------------------------------------- */
+  --bg-deep: #171922;
+  --bg: #1b1d27;
+  --surface-1: #21242f;
+  --surface-2: #272b38;
+  --surface-3: #313648;
+  --surface-hover: #2c3040;
+  --overlay-scrim: rgba(12, 13, 19, 0.62);
 
-  /* Bordes y separadores */
-  --border: #322c4d;
-  --border-strong: #443b66;
-  --border-subtle: #241f38;
+  /* --- Bordes ---------------------------------------------------------------------------- */
+  --border-subtle: #23262f;
+  --border: #2e3342;
+  --border-strong: #3d4356;
 
-  /* Texto */
-  --text: #e9e6f7;
-  --text-muted: #a49dc6;
-  --text-faint: #736c94;
-  --text-inverse: #14121c;
+  /* --- Texto ----------------------------------------------------------------------------- */
+  --text: #c8cee2;
+  --text-strong: #dde2f0;
+  --text-muted: #949cb5;
+  --text-faint: #757d99;
+  --text-inverse: #1b1d27;
 
-  /* Acento .NET */
-  --accent: #8b6cf5;
-  --accent-strong: #512bd4;
-  --accent-soft: rgba(139, 108, 245, 0.16);
-  --accent-contrast: #ffffff;
+  /* --- Acento: violeta .NET llevado a pastel --------------------------------------------- */
+  --accent: #a58cf5;
+  --accent-hover: #b7a3f8;
+  --accent-strong: #7c5df0;
+  --accent-soft: rgba(165, 140, 245, 0.14);
+  --accent-softer: rgba(165, 140, 245, 0.08);
+  --accent-contrast: #14151d;
+  /* Sólo para el logotipo: aquí sí manda la marca. */
+  --brand-from: #a58cf5;
+  --brand-to: #512bd4;
 
-  /* Semánticos */
-  --danger: #ff6b6b;
-  --danger-soft: rgba(255, 107, 107, 0.15);
-  --warning: #ffc857;
-  --warning-soft: rgba(255, 200, 87, 0.15);
-  --success: #3ddc97;
-  --success-soft: rgba(61, 220, 151, 0.15);
-  --info: #58b6ff;
-  --info-soft: rgba(88, 182, 255, 0.15);
+  /* --- Semánticos ------------------------------------------------------------------------ */
+  --danger: #ef8f8f;
+  --danger-soft: rgba(239, 143, 143, 0.13);
+  --warning: #e3c48b;
+  --warning-soft: rgba(227, 196, 139, 0.13);
+  --success: #8ed6a6;
+  --success-soft: rgba(142, 214, 166, 0.13);
+  --info: #86b6f0;
+  --info-soft: rgba(134, 182, 240, 0.13);
 
-  /* Sintaxis del editor (se traducen a reglas de Monaco en monaco-theme.ts) */
-  --syntax-comment: #6f6a8f;
-  --syntax-keyword: #c792ea;
-  --syntax-control: #ff9ec4;
-  --syntax-string: #b8e58c;
-  --syntax-number: #f5b57a;
-  --syntax-type: #6fd3c7;
-  --syntax-interface: #7fd6a8;
-  --syntax-method: #82b8ff;
-  --syntax-variable: #dcd8f0;
-  --syntax-razor: #ffb86c;
-  --syntax-tag: #86d0ff;
-  --syntax-attribute: #d8b6ff;
-  --syntax-component: #ffd479;
+  /* --- Tonos de tipo de archivo (árbol e iconos) ------------------------------------------ */
+  --tone-csharp: #a58cf5;
+  --tone-razor: #e0a97b;
+  --tone-project: #86b6f0;
+  --tone-config: #e3c48b;
+  --tone-markup: #7fbfd6;
+  --tone-style: #c3a6f0;
+  --tone-docs: #8ed6a6;
+  --tone-asset: #dc9fc4;
+  --tone-test: #8ed6a6;
+  --tone-muted: #7b839c;
 
-  --radius-sm: 5px;
-  --radius: 8px;
-  --radius-lg: 12px;
+  /* --- Sintaxis --------------------------------------------------------------------------- */
+  --syntax-comment: #616a86;
+  --syntax-keyword: #b99cf5;
+  --syntax-control: #e690a8;
+  --syntax-string: #a5cf85;
+  --syntax-number: #e0a97b;
+  --syntax-type: #8ad0ee;
+  --syntax-interface: #85cfb8;
+  --syntax-method: #8fb2f2;
+  --syntax-variable: #c3cadf;
+  --syntax-razor: #e0a97b;
+  --syntax-tag: #86b6f0;
+  --syntax-attribute: #c3a6f0;
+  --syntax-component: #e3c48b;
 
-  --shadow-panel: 0 12px 32px rgba(0, 0, 0, 0.45);
-  --shadow-popover: 0 18px 48px rgba(0, 0, 0, 0.55);
+  /* --- Geometría --------------------------------------------------------------------------- */
+  --radius-sm: 6px;
+  --radius: 9px;
+  --radius-lg: 14px;
 
-  --font-ui: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', sans-serif;
-  --font-mono: 'Cascadia Code', 'JetBrains Mono', 'SF Mono', Consolas, Menlo, monospace;
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.22);
+  --shadow-panel: 0 10px 30px rgba(0, 0, 0, 0.34);
+  --shadow-popover: 0 20px 52px rgba(0, 0, 0, 0.46);
 
-  --titlebar-height: 38px;
-  --statusbar-height: 24px;
+  /* --- Tipografía --------------------------------------------------------------------------
+   * UI: la pila nativa de cada sistema, que es la que mejor rasteriza y no hay que descargar.
+   * Código: fuentes con ligaduras y buena distinción entre 0/O y 1/l/I.
+   */
+  --font-ui: 'Inter', 'Segoe UI Variable Text', 'Segoe UI', -apple-system, BlinkMacSystemFont,
+    'SF Pro Text', system-ui, 'Helvetica Neue', sans-serif;
+  --font-mono: 'Cascadia Code', 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Consolas',
+    'Liberation Mono', Menlo, monospace;
+
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 22px;
+  --text-2xl: 28px;
+
+  --leading-tight: 1.35;
+  --leading-normal: 1.55;
+  --tracking-wide: 0.06em;
+
+  /* --- Dimensiones del shell ---------------------------------------------------------------- */
+  --titlebar-height: 40px;
+  --statusbar-height: 26px;
   --activitybar-width: 52px;
+
+  /* --- Árbol de archivos ---------------------------------------------------------------------
+   * 26 px de alto da aire suficiente para leer sin que quepan tres archivos menos en pantalla.
+   * 15 px de sangría es el mínimo con el que la guía vertical sigue siendo distinguible.
+   */
+  --tree-row-height: 26px;
+  --tree-indent: 15px;
+  --tree-guide: rgba(148, 156, 181, 0.16);
+  --tree-guide-active: rgba(165, 140, 245, 0.42);
 }
 
 [data-theme='dotforge-light'] {
   color-scheme: light;
 
-  --bg-deep: #eceaf4;
-  --bg: #f6f5fb;
-  --surface-1: #ffffff;
-  --surface-2: #f1eefb;
-  --surface-3: #e6e1f6;
-  --overlay-scrim: rgba(32, 26, 54, 0.35);
+  --bg-deep: #e8eaf0;
+  --bg: #f4f5f9;
+  --surface-1: #fbfbfd;
+  --surface-2: #eef0f6;
+  --surface-3: #e2e5ef;
+  --surface-hover: #e7eaf3;
+  --overlay-scrim: rgba(38, 40, 54, 0.32);
 
-  --border: #d9d3ec;
-  --border-strong: #c2b9de;
-  --border-subtle: #e8e4f4;
+  --border-subtle: #e4e6ee;
+  --border: #d6d9e4;
+  --border-strong: #bfc4d4;
 
-  --text: #241f38;
-  --text-muted: #5c5480;
-  --text-faint: #857da8;
+  --text: #333849;
+  --text-strong: #232734;
+  --text-muted: #5d6377;
+  --text-faint: #767c90;
   --text-inverse: #ffffff;
 
-  --accent: #5b34d8;
-  --accent-strong: #512bd4;
-  --accent-soft: rgba(81, 43, 212, 0.12);
+  --accent: #6d4de0;
+  --accent-hover: #5b3ad4;
+  --accent-strong: #5b3ad4;
+  --accent-soft: rgba(109, 77, 224, 0.11);
+  --accent-softer: rgba(109, 77, 224, 0.06);
   --accent-contrast: #ffffff;
+  --brand-from: #7c5df0;
+  --brand-to: #512bd4;
 
-  --danger: #c92a2a;
-  --danger-soft: rgba(201, 42, 42, 0.12);
-  --warning: #a06800;
-  --warning-soft: rgba(160, 104, 0, 0.14);
-  --success: #10794f;
-  --success-soft: rgba(16, 121, 79, 0.12);
-  --info: #0b6bb5;
-  --info-soft: rgba(11, 107, 181, 0.12);
+  --danger: #c0483f;
+  --danger-soft: rgba(192, 72, 63, 0.1);
+  --warning: #96650c;
+  --warning-soft: rgba(150, 101, 12, 0.11);
+  --success: #1c7a4f;
+  --success-soft: rgba(28, 122, 79, 0.1);
+  --info: #2166b8;
+  --info-soft: rgba(33, 102, 184, 0.1);
 
-  --syntax-comment: #6d7a86;
-  --syntax-keyword: #7719aa;
-  --syntax-control: #af00db;
-  --syntax-string: #0a7d38;
-  --syntax-number: #b34700;
-  --syntax-type: #0f6b6b;
-  --syntax-interface: #0d7a52;
-  --syntax-method: #1c50b5;
-  --syntax-variable: #241f38;
-  --syntax-razor: #a35200;
-  --syntax-tag: #0c5a99;
-  --syntax-attribute: #6a2fb0;
-  --syntax-component: #8a5a00;
+  --tone-csharp: #6d4de0;
+  --tone-razor: #b06215;
+  --tone-project: #2166b8;
+  --tone-config: #96650c;
+  --tone-markup: #216b80;
+  --tone-style: #7b3fc4;
+  --tone-docs: #1c7a4f;
+  --tone-asset: #a63d7d;
+  --tone-test: #1c7a4f;
+  --tone-muted: #6b7183;
 
-  --shadow-panel: 0 12px 28px rgba(60, 47, 105, 0.14);
-  --shadow-popover: 0 18px 40px rgba(60, 47, 105, 0.2);
+  --syntax-comment: #6b7284;
+  --syntax-keyword: #7028b8;
+  --syntax-control: #b02a58;
+  --syntax-string: #26713a;
+  --syntax-number: #a1520d;
+  --syntax-type: #14657e;
+  --syntax-interface: #10714f;
+  --syntax-method: #1f56ad;
+  --syntax-variable: #333849;
+  --syntax-razor: #a1520d;
+  --syntax-tag: #1f5fa8;
+  --syntax-attribute: #7b3fc4;
+  --syntax-component: #8a5f0a;
+
+  --shadow-soft: 0 1px 2px rgba(48, 52, 70, 0.08);
+  --shadow-panel: 0 10px 26px rgba(48, 52, 70, 0.12);
+  --shadow-popover: 0 20px 44px rgba(48, 52, 70, 0.18);
+
+  --tree-guide: rgba(93, 99, 119, 0.18);
+  --tree-guide-active: rgba(109, 77, 224, 0.4);
 }
 
-/* Foco siempre visible: la navegación por teclado es un requisito, no un extra. */
+/* --- Tonos aplicables a iconos ------------------------------------------------------------- */
+.tone-csharp { color: var(--tone-csharp); }
+.tone-razor { color: var(--tone-razor); }
+.tone-project { color: var(--tone-project); }
+.tone-config { color: var(--tone-config); }
+.tone-markup { color: var(--tone-markup); }
+.tone-style { color: var(--tone-style); }
+.tone-docs { color: var(--tone-docs); }
+.tone-asset { color: var(--tone-asset); }
+.tone-test { color: var(--tone-test); }
+.tone-muted { color: var(--tone-muted); }
+
+/* El foco siempre visible: la navegación por teclado es un requisito, no un extra. */
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;

@@ -16,11 +16,12 @@
  */
 import { build, context } from 'esbuild';
 import { cp, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const outDir = join(root, 'build');
 const watch = process.argv.includes('--watch');
 const minify = process.argv.includes('--minify') || process.env.NODE_ENV === 'production';
@@ -73,6 +74,16 @@ const targets = [
     label: 'razor-lang',
     entryPoints: [join(root, 'src/renderer/languages/razor.ts')],
     outfile: join(outDir, 'razor-lang.mjs'),
+    platform: 'neutral',
+    format: 'esm',
+    target: 'es2022',
+    bundle: true,
+    banner,
+  },
+  {
+    label: 'ui-lib',
+    entryPoints: [join(root, 'src/renderer/ui-lib.ts')],
+    outfile: join(outDir, 'ui-lib.mjs'),
     platform: 'neutral',
     format: 'esm',
     target: 'es2022',
@@ -192,7 +203,14 @@ async function run() {
 
   for (const target of available) {
     const { label, ...options } = target;
-    const buildOptions = { ...options, sourcemap: !minify, minify, logLevel: 'warning' };
+    const buildOptions = {
+      ...options,
+      // Única fuente de verdad de la versión: package.json. Ver src/shared/version.ts.
+      define: { ...options.define, __DOTFORGE_VERSION__: JSON.stringify(version) },
+      sourcemap: !minify,
+      minify,
+      logLevel: 'warning',
+    };
 
     if (watch) {
       const ctx = await context(buildOptions);

@@ -38,7 +38,23 @@ export interface PackageReferenceInfo {
   centrallyManaged: boolean;
 }
 
+/**
+ * Naturaleza del proyecto, deducida del SDK, el tipo de salida y su contenido.
+ * La UI la usa para la insignia y el icono: un desarrollador .NET distingue de un vistazo una
+ * Web API de una librería de clases, y el explorador debería hacerlo también.
+ */
+export type ProjectKind =
+  | 'blazor-server'
+  | 'blazor-wasm'
+  | 'razor-library'
+  | 'webapi'
+  | 'worker'
+  | 'console'
+  | 'library'
+  | 'tests';
+
 export interface ProjectInfo {
+  kind: ProjectKind;
   name: string;
   /** Ruta absoluta del .csproj. */
   path: string;
@@ -201,6 +217,13 @@ export interface EditorDocument {
   mtimeMs: number;
 }
 
+export interface GitStatus {
+  /** Rama activa, o null si el workspace no es un repositorio. */
+  branch: string | null;
+  /** Número de archivos con cambios sin confirmar. */
+  dirtyFiles: number;
+}
+
 export interface AppInfo {
   name: string;
   version: string;
@@ -271,6 +294,7 @@ export const IPC = {
   fsDelete: 'fs:delete',
 
   solutionLoad: 'solution:load',
+  gitStatus: 'git:status',
 
   scaffoldList: 'scaffold:list',
   scaffoldGenerate: 'scaffold:generate',
@@ -391,6 +415,10 @@ export interface DotForgeApi {
   };
   solution: {
     load(path: string): Promise<SolutionInfo>;
+  };
+  git: {
+    /** Rama y número de archivos sucios del workspace. Null si no hay repositorio. */
+    status(): Promise<GitStatus | null>;
   };
   scaffold: {
     list(): Promise<BlueprintInfo[]>;

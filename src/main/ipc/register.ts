@@ -31,6 +31,7 @@ import { lspClient } from '../lsp/lsp-client.js';
 import * as commandRunner from '../services/command-runner.js';
 import * as dotnetService from '../services/dotnet-service.js';
 import * as fileService from '../services/file-service.js';
+import * as gitService from '../services/git-service.js';
 import * as nugetService from '../services/nuget-service.js';
 import * as settingsService from '../services/settings-service.js';
 import { loadSolution } from '../services/solution-service.js';
@@ -216,6 +217,7 @@ export function registerIpcHandlers(): void {
 
     // Abrir workspace es lo único que puede ampliar el ámbito de rutas permitido.
     setWorkspaceRoot(directory);
+    gitService.invalidate();
     currentSolution = await loadSolution(directory);
 
     await settingsService.rememberWorkspace(directory);
@@ -266,6 +268,9 @@ export function registerIpcHandlers(): void {
     broadcast(IPC_EVENTS.workspaceChanged, currentSolution);
     return currentSolution;
   });
+
+  // --- Git ---------------------------------------------------------------------------------
+  ipcMain.handle(IPC.gitStatus, () => (currentSolution ? gitService.readStatus(currentSolution.directory) : null));
 
   // --- Scaffolding ---------------------------------------------------------------------------
   ipcMain.handle(IPC.scaffoldList, () => listBlueprints());

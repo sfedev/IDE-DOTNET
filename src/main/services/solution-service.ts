@@ -11,6 +11,7 @@ import { XMLParser } from 'fast-xml-parser';
 
 import type {
   DotForgeManifest,
+  ProjectKind,
   PackageReferenceInfo,
   ProjectInfo,
   ProjectReferenceInfo,
@@ -177,6 +178,62 @@ function isWithin(root: string, candidate: string): boolean {
   return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath));
 }
 
+/**
+ * ¿Hay componentes Razor bajo este directorio?
+ *
+ * Es lo que distingue una Blazor de una Web API: ambas usan `Microsoft.NET.Sdk.Web` y el SDK no
+ * lo dice. La búsqueda es superficial y acotada (3 niveles, 400 entradas) porque se ejecuta al
+ * abrir la carpeta y el explorador tiene que pintarse ya.
+ */
+async function hasRazorComponents(directory: string): Promise<boolean> {
+  let budget = 400;
+
+  const walk = async (current: string, depth: number): Promise<boolean> => {
+    if (depth > 3 || budget <= 0) return false;
+
+    let entries;
+    try {
+      entries = await readdir(current, { withFileTypes: true });
+    } catch {
+      return false;
+    }
+
+    for (const entry of entries) {
+      if (budget-- <= 0) return false;
+
+      if (entry.isFile() && entry.name.endsWith('.razor')) return true;
+
+      if (entry.isDirectory() && !IGNORED_DIRECTORIES.has(entry.name) && !entry.name.startsWith('.')) {
+        if (await walk(join(current, entry.name), depth + 1)) return true;
+      }
+    }
+
+    return false;
+  };
+
+  return walk(directory, 0);
+}
+
+async function detectKind(
+  sdk: string,
+  outputType: string | null,
+  isTestProject: boolean,
+  directory: string,
+): Promise<ProjectKind> {
+  if (isTestProject) return 'tests';
+  if (sdk.includes('BlazorWebAssembly')) return 'blazor-wasm';
+  if (sdk.includes('Worker')) return 'worker';
+
+  if (sdk.includes('Web')) {
+    return (await hasRazorComponents(directory)) ? 'blazor-server' : 'webapi';
+  }
+
+  if (sdk.includes('Razor')) return 'razor-library';
+  if (outputType === 'Exe' || outputType === 'WinExe') return 'console';
+
+  return 'library';
+}
+
 /** Lee un `.csproj` SDK-style y extrae lo que la UI necesita. */
 export async function readProject(
   projectPath: string,
@@ -228,8 +285,13 @@ export async function readProject(
   }
 
   const sdk = String(project['@Sdk'] ?? 'Microsoft.NET.Sdk');
+  const outputType = property('OutputType');
+  const isTestProject =
+    property('IsTestProject') === 'true' ||
+    /.(Tests|UnitTests|IntegrationTests|FunctionalTests)$/i.test(basename(projectPath, extname(projectPath)));
 
   return {
+    kind: await detectKind(sdk, outputType, isTestProject, directory),
     name: basename(projectPath, extname(projectPath)),
     path: projectPath,
     directory,

@@ -23,6 +23,7 @@ import type {
   DotnetTaskStarted,
   EditorDocument,
   FileNode,
+  GitStatus,
   LspState,
   MenuCommand,
   NuGetSearchResult,
@@ -67,6 +68,10 @@ const api: DotForgeApi = {
 
   solution: {
     load: (path) => ipcRenderer.invoke(IPC.solutionLoad, path) as Promise<SolutionInfo>,
+  },
+
+  git: {
+    status: () => ipcRenderer.invoke(IPC.gitStatus) as Promise<GitStatus | null>,
   },
 
   scaffold: {

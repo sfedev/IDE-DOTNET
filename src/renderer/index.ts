@@ -11,12 +11,15 @@ import type {
   AppSettings,
   BuildDiagnostic,
   DotnetTaskKind,
+  GitStatus,
   LspState,
   MenuCommand,
   ProjectInfo,
   SolutionInfo,
 } from '../shared/contracts.js';
 import { byId, clear, el } from './dom.js';
+import { installIconGallery } from './icon-gallery.js';
+import { icon, type IconName } from './icons.js';
 import { applyPublishDiagnostics, reopenAll } from './lsp-bridge.js';
 import { defineThemes, getMonaco, loadMonaco } from './monaco-setup.js';
 import { EditorView, type OpenTab } from './views/editor.js';
@@ -25,11 +28,12 @@ import { NuGetView } from './views/nuget.js';
 import { PanelView } from './views/panel.js';
 import { DebugView } from './views/debug.js';
 import { CommandPalette, type Command } from './views/palette.js';
+import { SettingsView } from './views/settings.js';
 import { StatusBar } from './views/statusbar.js';
 import { WelcomeView } from './views/welcome.js';
 import { WizardView } from './views/wizard.js';
 
-type SidebarView = 'explorer' | 'nuget';
+type SidebarView = 'explorer' | 'nuget' | 'settings';
 
 class DotForgeApp {
   private info: AppInfo | null = null;
@@ -39,6 +43,8 @@ class DotForgeApp {
   private cursor: { line: number; column: number } | null = null;
   private sidebarView: SidebarView = 'explorer';
   private lspProviders: MonacoApi.IDisposable | null = null;
+  private git: GitStatus | null = null;
+  private gitTimer: number | undefined;
 
   private readonly debug = new DebugView({
     openLocation: (file, line) => void this.openFile(file, line),
@@ -87,13 +93,16 @@ class DotForgeApp {
     renderDebug: (container) => this.debug.render(container, () => this.panel.render()),
   });
 
+  private readonly settingsView = new SettingsView({
+    apply: (patch) => void this.applySettings(patch),
+  });
+
   private readonly palette = new CommandPalette();
 
   private readonly statusBar = new StatusBar({
     showProblems: () => this.panel.show('problems'),
     showOutput: () => this.panel.show('output'),
     restartLsp: () => void this.restartLsp(),
-    toggleTheme: () => void this.toggleTheme(),
     openCommandPalette: () => this.palette.show(),
   });
 
@@ -117,8 +126,12 @@ class DotForgeApp {
     this.info = await window.dotforge.app.info();
     this.settings = await window.dotforge.app.getSettings();
 
+    installIconGallery();
     document.body.classList.add(`platform-${this.info.platform}`);
     this.applyTheme(this.settings.theme);
+
+    // El logotipo es el mismo icono que el de la aplicación, no un "</>" tecleado a mano.
+    byId('brand-mark').appendChild(icon('code', { size: 15, strokeWidth: 2.1 }));
 
     await loadMonaco();
     this.editor.mount(this.settings);
@@ -131,9 +144,11 @@ class DotForgeApp {
     this.installKeyboardShortcuts();
     this.installResizers();
 
+    this.settingsView.setSettings(this.settings);
     this.welcome.render(this.info, this.settings);
     this.explorer.render();
     this.panel.render();
+    this.updateTitle();
     this.renderStatus();
 
     // La lista de programas permitidos se muestra como ayuda en la terminal.
@@ -154,6 +169,11 @@ class DotForgeApp {
     // Archivo pasado por línea de comandos (`dotforge-ide Program.cs`).
     const pending = await window.dotforge.workspace.pendingFile();
     if (pending) await this.openFile(pending);
+
+    // El estado de Git se refresca en segundo plano; el servicio del proceso principal cachea,
+    // así que sondear cada pocos segundos no cuesta un proceso por sondeo.
+    void this.refreshGit();
+    this.gitTimer = window.setInterval(() => void this.refreshGit(), 6000);
   }
 
   // -------------------------------------------------------------------------------------------
@@ -177,7 +197,21 @@ class DotForgeApp {
   }
 
   private applySolution(solution: SolutionInfo | null): void {
+    // Abrir un workspace llega por dos caminos —la llamada directa y el evento que difunde el
+    // proceso principal—, así que se ignora la segunda vuelta sobre la misma solución para no
+    // repintar el árbol ni duplicar el aviso en la salida.
+    const isSameSolution =
+      solution !== null && this.solution !== null && solution.directory === this.solution.directory;
+
     this.solution = solution;
+    void this.refreshGit();
+
+    if (isSameSolution) {
+      this.explorer.setSolution(solution);
+      this.nuget.setSolution(solution);
+      this.updateTitle();
+      return;
+    }
     this.explorer.setSolution(solution);
     this.nuget.setSolution(solution);
     this.updateTitle();
@@ -367,59 +401,89 @@ class DotForgeApp {
 
   private async toggleTheme(): Promise<void> {
     if (!this.settings) return;
-    const theme = this.settings.theme === 'dotforge-dark' ? 'dotforge-light' : 'dotforge-dark';
-    this.settings = await window.dotforge.app.setSettings({ theme });
-    this.applyTheme(theme);
-
-    // Los temas de Monaco se derivan de los tokens CSS: hay que redefinirlos tras el cambio.
-    defineThemes(getMonaco());
-    this.editor.applySettings(this.settings);
-    this.welcome.render(this.info, this.settings);
+    await this.applySettings({
+      theme: this.settings.theme === 'dotforge-dark' ? 'dotforge-light' : 'dotforge-dark',
+    });
   }
 
+/**
+   * Barra de actividad.
+   *
+   * Cinco herramientas y nada más: solución, generador, NuGet, depuración y ajustes. Antes había
+   * también atajos de tema y paleta que ya viven en la barra de estado y en el teclado; tener la
+   * misma acción en tres sitios no la hace más accesible, sólo hace la barra más ruidosa.
+   */
   private renderActivityBar(): void {
     const bar = byId('activitybar');
     clear(bar);
 
-    const button = (label: string, glyph: string, active: boolean, onClick: () => void): HTMLElement =>
-      el('button', {
-        className: `activity-item${active ? ' active' : ''}`,
-        text: glyph,
-        title: label,
-        attrs: { 'aria-label': label },
-        on: { click: onClick },
-      });
+    const button = (
+      label: string,
+      iconName: IconName,
+      active: boolean,
+      onClick: () => void,
+      badge = false,
+    ): HTMLElement =>
+      el(
+        'button',
+        {
+          className: `activity-item${active ? ' active' : ''}`,
+          title: label,
+          attrs: { 'aria-label': label },
+          on: { click: onClick },
+        },
+        icon(iconName, { size: 20 }),
+        badge ? el('span', { className: 'badge-dot' }) : null,
+      );
 
-    bar.appendChild(
-      button('Explorador de soluciones', '⬡', this.sidebarView === 'explorer', () => this.showExplorer()),
+    const errors = this.panel.getDiagnostics().filter((diagnostic) => diagnostic.severity === 'error').length;
+
+    bar.append(
+      button('Explorador de soluciones', 'solution', this.sidebarView === 'explorer', () => this.showExplorer()),
+      button('Generador de arquitecturas', 'wand', false, () => void this.wizard.open()),
+      button('Paquetes NuGet', 'package', this.sidebarView === 'nuget', () => this.showNuGet()),
+      button('Depuración y pruebas', 'bug', false, () => this.panel.show('debug'), errors > 0),
+      el('div', { className: 'spacer' }),
+      button('Ajustes', 'settings', this.sidebarView === 'settings', () => this.showSettings()),
     );
-    bar.appendChild(button('Paquetes NuGet', '◆', this.sidebarView === 'nuget', () => this.showNuGet()));
-    bar.appendChild(
-      button('Nueva solución con el asistente', '✨', false, () => void this.wizard.open()),
-    );
+  }
 
-    bar.appendChild(el('div', { className: 'spacer' }));
-
-    bar.appendChild(button('Paleta de comandos', '⌘', false, () => this.palette.show()));
-    bar.appendChild(button('Cambiar tema', '◐', false, () => void this.toggleTheme()));
+  private showSettings(): void {
+    this.sidebarView = 'settings';
+    this.explorer.setVisible(false);
+    this.nuget.setVisible(false);
+    this.settingsView.setVisible(true);
+    this.renderActivityBar();
   }
 
   private renderTitlebarActions(): void {
     const actions = byId('titlebar-actions');
     clear(actions);
 
-    const action = (glyph: string, title: string, onClick: () => void): HTMLElement =>
-      el('button', { className: 'icon-btn', text: glyph, title, on: { click: onClick } });
+    const modifier = this.info?.primaryModifier ?? 'Ctrl';
 
-    actions.appendChild(action('▶', 'Ejecutar (F5)', () => void this.runTask('run')));
-    actions.appendChild(action('⟳', 'Hot Reload (dotnet watch)', () => void this.runTask('watch')));
-    actions.appendChild(action('■', 'Detener (Shift+F5)', () => void this.stopTasks()));
-    actions.appendChild(action('⚒', 'Compilar solución', () => void this.runTask('build')));
+    const action = (iconName: IconName, title: string, onClick: () => void): HTMLElement =>
+      el(
+        'button',
+        { className: 'icon-btn', title, attrs: { 'aria-label': title }, on: { click: onClick } },
+        icon(iconName, { size: 15 }),
+      );
+
+    actions.append(
+      action('hammer', `Compilar solución (${modifier}+Shift+B)`, () => void this.runTask('build')),
+      action('play', 'Iniciar depuración (F5)', () => void this.startDebugging()),
+      action('refresh', `Hot Reload (${modifier}+F5)`, () => void this.runTask('watch')),
+      action('stop', 'Detener (Shift+F5)', () => {
+        void window.dotforge.debug.stop();
+        void this.stopTasks();
+      }),
+    );
   }
 
   private showExplorer(): void {
     this.sidebarView = 'explorer';
     this.nuget.setVisible(false);
+    this.settingsView.setVisible(false);
     this.explorer.setVisible(true);
     this.renderActivityBar();
   }
@@ -427,16 +491,28 @@ class DotForgeApp {
   private showNuGet(project?: ProjectInfo): void {
     this.sidebarView = 'nuget';
     this.explorer.setVisible(false);
+    this.settingsView.setVisible(false);
     this.nuget.setVisible(true);
     this.renderActivityBar();
     if (project) this.nuget.focusProject(project);
   }
 
   private updateTitle(): void {
+    const container = byId('titlebar-title');
+    clear(container);
+
     const tab = this.editor.activeTab();
-    const dirtyMark = tab?.dirty ? '● ' : '';
-    const parts = [dirtyMark + (tab?.name ?? ''), this.solution?.name ?? 'Sin workspace abierto'].filter(Boolean);
-    byId('titlebar-title').textContent = parts.join('  —  ');
+
+    if (tab) {
+      container.append(
+        el('span', { className: 'file', text: `${tab.dirty ? '● ' : ''}${tab.name}` }),
+        el('span', { className: 'sep', text: '—' }),
+      );
+    }
+
+    container.appendChild(
+      el('span', { className: 'solution', text: this.solution?.name ?? 'Ninguna carpeta abierta' }),
+    );
   }
 
   private renderStatus(): void {
@@ -449,9 +525,53 @@ class DotForgeApp {
       runningTask: running,
       cursor: tab ? this.cursor : null,
       languageId: tab?.languageId ?? null,
-      encoding: 'utf8',
-      branchLabel: null,
+      git: this.git,
+      sdkVersion: this.sdkVersion(),
     });
+  }
+
+  /**
+   * Versión del SDK activo, resumida a major.minor.
+   * La cadena completa (`10.0.400 [C:\Program Files\dotnet\sdk]`) no cabe en la barra.
+   */
+  private sdkVersion(): string | null {
+    const first = this.info?.dotnetSdks[0];
+    if (!first) return null;
+
+    const match = /^(\d+\.\d+)/.exec(first.trim());
+    return match?.[1] ?? null;
+  }
+
+  /** Aplica un cambio de preferencias y propaga el efecto a quien corresponda. */
+  private async applySettings(patch: Partial<AppSettings>): Promise<void> {
+    this.settings = await window.dotforge.app.setSettings(patch);
+
+    if (patch.theme) {
+      this.applyTheme(this.settings.theme);
+      // Los temas de Monaco derivan de los tokens CSS: hay que redefinirlos tras el cambio.
+      defineThemes(getMonaco());
+    }
+
+    this.editor.applySettings(this.settings);
+    this.settingsView.setSettings(this.settings);
+    this.welcome.render(this.info, this.settings);
+
+    if (patch.lspEnabled !== undefined) {
+      if (patch.lspEnabled) void this.restartLsp();
+      else void window.dotforge.lsp.stop();
+    }
+  }
+
+  /** Refresca el estado de Git y repinta la barra si ha cambiado. */
+  private async refreshGit(): Promise<void> {
+    try {
+      const status = await window.dotforge.git.status();
+      const changed = status?.branch !== this.git?.branch || status?.dirtyFiles !== this.git?.dirtyFiles;
+      this.git = status;
+      if (changed) this.renderStatus();
+    } catch {
+      this.git = null;
+    }
   }
 
   private notify(message: string, level: 'info' | 'ok' | 'warn' | 'error'): void {
@@ -475,6 +595,7 @@ class DotForgeApp {
     const commands: Command[] = [
       {
         id: 'scaffold.wizard',
+        icon: 'wand',
         title: 'Nueva solución con el asistente de arquitecturas',
         group: 'Scaffolding',
         keybinding: `${modifier}+Shift+N`,
@@ -482,6 +603,7 @@ class DotForgeApp {
       },
       {
         id: 'file.open-folder',
+        icon: 'folder-open',
         title: 'Abrir carpeta…',
         group: 'Archivo',
         keybinding: `${modifier}+O`,
@@ -519,6 +641,7 @@ class DotForgeApp {
       },
       {
         id: 'build.build',
+        icon: 'hammer',
         title: 'Compilar solución',
         group: 'Compilar',
         keybinding: `${modifier}+Shift+B`,
@@ -535,6 +658,7 @@ class DotForgeApp {
       { id: 'build.restore', title: 'Restaurar paquetes', group: 'Compilar', run: () => void this.runTask('restore') },
       {
         id: 'build.test',
+        icon: 'flask',
         title: 'Ejecutar pruebas',
         group: 'Compilar',
         keybinding: `${modifier}+Shift+T`,
@@ -542,6 +666,7 @@ class DotForgeApp {
       },
       {
         id: 'run.start',
+        icon: 'bug',
         title: 'Iniciar depuración',
         group: 'Depurar',
         keybinding: 'F5',
@@ -593,6 +718,7 @@ class DotForgeApp {
       },
       {
         id: 'run.watch',
+        icon: 'refresh',
         title: 'Ejecutar con Hot Reload (dotnet watch)',
         group: 'Depurar',
         keybinding: `${modifier}+F5`,
@@ -600,6 +726,7 @@ class DotForgeApp {
       },
       {
         id: 'run.stop',
+        icon: 'stop',
         title: 'Detener',
         group: 'Depurar',
         keybinding: 'Shift+F5',
@@ -610,6 +737,7 @@ class DotForgeApp {
       },
       {
         id: 'view.explorer',
+        icon: 'solution',
         title: 'Explorador de soluciones',
         group: 'Ver',
         keybinding: `${modifier}+Shift+E`,
@@ -617,6 +745,7 @@ class DotForgeApp {
       },
       {
         id: 'view.nuget',
+        icon: 'package',
         title: 'Paquetes NuGet',
         group: 'Ver',
         keybinding: `${modifier}+Shift+U`,
@@ -624,6 +753,7 @@ class DotForgeApp {
       },
       {
         id: 'view.problems',
+        icon: 'alert-circle',
         title: 'Problemas',
         group: 'Ver',
         keybinding: `${modifier}+Shift+M`,
@@ -631,15 +761,30 @@ class DotForgeApp {
       },
       {
         id: 'view.terminal',
+        icon: 'terminal',
         title: 'Terminal integrada',
         group: 'Ver',
         keybinding: `${modifier}+J`,
         run: () => this.panel.show('terminal'),
       },
       { id: 'view.output', title: 'Salida', group: 'Ver', run: () => this.panel.show('output') },
-      { id: 'view.toggle-theme', title: 'Cambiar tema claro/oscuro', group: 'Ver', run: () => void this.toggleTheme() },
+      {
+        id: 'view.settings',
+        title: 'Ajustes',
+        group: 'Ver',
+        icon: 'settings',
+        run: () => this.showSettings(),
+      },
+      {
+        id: 'view.toggle-theme',
+        title: 'Cambiar tema claro/oscuro',
+        group: 'Ver',
+        icon: 'moon',
+        run: () => void this.toggleTheme(),
+      },
       {
         id: 'view.command-palette',
+        icon: 'command',
         title: 'Paleta de comandos',
         group: 'Ver',
         keybinding: `${modifier}+Shift+P`,
@@ -670,6 +815,7 @@ class DotForgeApp {
       { id: 'lsp.restart', title: 'Reiniciar el servidor de lenguaje de C#', group: 'C#', run: () => void this.restartLsp() },
       {
         id: 'help.about',
+        icon: 'info',
         title: 'Acerca de DotForge IDE',
         group: 'Ayuda',
         run: () => this.showAbout(),
