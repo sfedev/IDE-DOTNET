@@ -16,6 +16,14 @@ const CACHE_TTL_MS = 4000;
 
 let cache: { at: number; directory: string; status: GitStatus | null } | null = null;
 
+/**
+ * Las ramas cambian mucho menos que el estado, y el autocompletado las pide en cada pulsación:
+ * una caché más larga evita lanzar un proceso por tecla.
+ */
+const BRANCH_CACHE_TTL_MS = 15_000;
+
+let branchCache: { at: number; directory: string; branches: string[] } | null = null;
+
 async function git(args: string[], cwd: string): Promise<string | null> {
   try {
     const { stdout } = await execFileAsync('git', args, {
@@ -61,7 +69,42 @@ export async function readStatus(directory: string): Promise<GitStatus | null> {
   return status;
 }
 
+/**
+ * Ramas locales y remotas del repositorio, para el autocompletado de la terminal.
+ *
+ * Formato: la rama actual primero —es la que más se escribe después de `git merge`— y luego el
+ * resto en el orden en que las devuelve git (por fecha de commit descendente, que aproxima bien
+ * "las que estoy tocando"). Las remotas llegan con su prefijo (`origin/main`) y se descarta
+ * `origin/HEAD`, que es un puntero simbólico y no una rama a la que se pueda cambiar.
+ */
+export async function listBranches(directory: string): Promise<string[]> {
+  if (branchCache && branchCache.directory === directory && Date.now() - branchCache.at < BRANCH_CACHE_TTL_MS) {
+    return branchCache.branches;
+  }
+
+  const output = await git(
+    ['branch', '--all', '--sort=-committerdate', '--format=%(refname:short)'],
+    directory,
+  );
+
+  const branches: string[] = [];
+  if (output !== null) {
+    const seen = new Set<string>();
+    for (const raw of output.split(new RegExp(String.raw`\r?\n`))) {
+      const branch = raw.trim();
+      if (branch === '' || branch.endsWith('/HEAD') || branch.includes('->')) continue;
+      if (seen.has(branch)) continue;
+      seen.add(branch);
+      branches.push(branch);
+    }
+  }
+
+  branchCache = { at: Date.now(), directory, branches };
+  return branches;
+}
+
 /** Invalida la caché: se llama al cambiar de workspace. */
 export function invalidate(): void {
   cache = null;
+  branchCache = null;
 }

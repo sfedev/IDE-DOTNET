@@ -69,6 +69,8 @@ export function runTask(request: DotnetTaskRequest, callbacks: DotnetTaskCallbac
     kind: request.kind,
     command: `dotnet ${args.join(' ')}`,
     target: request.target,
+    // La etiqueta la pone quien lanza la tarea: aquí no se sabe si esto es "la API" o "la UI".
+    ...(request.label ? { label: request.label } : {}),
   };
 
   const child = spawn('dotnet', args, {

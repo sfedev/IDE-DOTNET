@@ -23,6 +23,7 @@ import type {
 } from '../../shared/contracts.js';
 import { IPC, IPC_EVENTS } from '../../shared/contracts.js';
 import type { ScaffoldOptions } from '../../shared/scaffold-types.js';
+import { DEFAULT_STARTUP_CONFIG } from '../../shared/startup.js';
 import { listBlueprints } from '../../scaffold/blueprints/index.js';
 import { generateSolution } from '../../scaffold/generator.js';
 import { debugController, resolveDebugTarget } from '../debug/debug-controller.js';
@@ -34,6 +35,7 @@ import * as fileService from '../services/file-service.js';
 import * as gitService from '../services/git-service.js';
 import * as nugetService from '../services/nuget-service.js';
 import * as settingsService from '../services/settings-service.js';
+import * as startupService from '../services/startup-service.js';
 import { loadSolution } from '../services/solution-service.js';
 import { allowRoot, assertInsideWorkspace, setWorkspaceRoot } from '../services/workspace-guard.js';
 
@@ -272,6 +274,26 @@ export function registerIpcHandlers(): void {
   // --- Git ---------------------------------------------------------------------------------
   ipcMain.handle(IPC.gitStatus, () => (currentSolution ? gitService.readStatus(currentSolution.directory) : null));
 
+  ipcMain.handle(IPC.gitBranches, () =>
+    currentSolution ? gitService.listBranches(currentSolution.directory) : [],
+  );
+
+  // --- Perfiles de inicio ---------------------------------------------------------------------
+  ipcMain.handle(IPC.startupGet, () => {
+    if (!currentSolution) return { ...DEFAULT_STARTUP_CONFIG };
+    // Se pasan los proyectos actuales: un perfil que apunta a un .csproj que ya no existe se
+    // limpia solo en vez de dejar el botón de Play apuntando al vacío.
+    return startupService.load(
+      currentSolution.directory,
+      currentSolution.projects.map((project) => project.path),
+    );
+  });
+
+  ipcMain.handle(IPC.startupSave, (_event, config: unknown) => {
+    if (!currentSolution) throw new Error('abre una solución antes de guardar perfiles de inicio');
+    return startupService.save(currentSolution.directory, config);
+  });
+
   // --- Scaffolding ---------------------------------------------------------------------------
   ipcMain.handle(IPC.scaffoldList, () => listBlueprints());
 
@@ -313,7 +335,9 @@ export function registerIpcHandlers(): void {
       ? task.extraArgs.filter((arg): arg is string => typeof arg === 'string')
       : [];
 
-    return dotnetService.runTask({ kind: task.kind, target, extraArgs }, taskCallbacks);
+    const label = typeof task.label === 'string' && task.label.trim() !== '' ? task.label.trim() : undefined;
+
+    return dotnetService.runTask({ kind: task.kind, target, extraArgs, label }, taskCallbacks);
   });
 
   ipcMain.handle(IPC.dotnetCancelTask, (_event, taskId: unknown) => {

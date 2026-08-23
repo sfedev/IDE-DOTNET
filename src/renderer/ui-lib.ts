@@ -15,4 +15,15 @@ export {
 export type { IconSpec, ProjectPresentation, Tone, NestedNode } from './file-icons.js';
 export { ICON_NAMES, ICON_SHAPES } from './icons.js';
 export { containerOf } from './paths.js';
+export {
+  applySuggestion,
+  caretAfterApply,
+  endsInsideQuotes,
+  ghostText,
+  splitLine,
+  suggest,
+  SUGGESTION_SOURCES,
+} from './terminal-suggest.js';
+export type { Suggestion, SuggestContext, SuggestionKind } from './terminal-suggest.js';
+export { detectListeningUrl, portOf } from './run-output.js';
 export type { IconName } from './icons.js';

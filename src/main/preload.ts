@@ -31,6 +31,7 @@ import type {
 } from '../shared/contracts.js';
 import { IPC, IPC_EVENTS } from '../shared/contracts.js';
 import type { BlueprintInfo, ScaffoldOptions, ScaffoldResult } from '../shared/scaffold-types.js';
+import type { StartupConfig } from '../shared/startup.js';
 
 /** Suscribe un handler a un canal de evento y devuelve la función para darse de baja. */
 function subscribe<T>(channel: string, handler: (payload: T) => void): () => void {
@@ -72,6 +73,12 @@ const api: DotForgeApi = {
 
   git: {
     status: () => ipcRenderer.invoke(IPC.gitStatus) as Promise<GitStatus | null>,
+    branches: () => ipcRenderer.invoke(IPC.gitBranches) as Promise<string[]>,
+  },
+
+  startup: {
+    get: () => ipcRenderer.invoke(IPC.startupGet) as Promise<StartupConfig>,
+    save: (config: StartupConfig) => ipcRenderer.invoke(IPC.startupSave, config) as Promise<StartupConfig>,
   },
 
   scaffold: {

@@ -26,3 +26,18 @@ export {
   readLaunchEnvironment,
   selectProfile,
 } from './services/launch-settings.js';
+
+export {
+  availableProfiles,
+  coerceStartupConfig,
+  DEFAULT_STARTUP_CONFIG,
+  implicitProfile,
+  isRunnableProject,
+  launchPlan,
+  nextProfileId,
+  resolveActiveProfile,
+  runnableProjects,
+  shortProjectName,
+  suggestProfileName,
+} from '../shared/startup.js';
+export type { LaunchStep, RunMode, StartupConfig, StartupProfile } from '../shared/startup.js';

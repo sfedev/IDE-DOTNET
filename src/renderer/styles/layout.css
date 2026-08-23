@@ -106,6 +106,24 @@ body {
   -webkit-app-region: no-drag;
 }
 
+/*
+  Selector de inicio: va pegado a la marca, a la izquierda, como en Visual Studio y Rider.
+  `no-drag` es obligatorio: dentro de la barra de título, un control que no lo declare se traga
+  el clic porque la ventana entera es zona de arrastre.
+*/
+.titlebar-startup {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+
+.startup-empty {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
 /* --- Cuerpo ---------------------------------------------------------------------------- */
 
 .body {

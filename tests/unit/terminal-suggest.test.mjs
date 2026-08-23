@@ -1,0 +1,252 @@
+/**
+ * Pruebas del motor de sugerencias de la terminal.
+ *
+ * Es lógica pura sobre cadenas, con muchos casos borde: dónde acaba un token, cuándo hay que
+ * ofrecer ramas y cuándo no, y qué texto fantasma corresponde a lo ya escrito. Justo el tipo de
+ * reglas que se rompen sin que nadie se entere hasta que alguien pulsa Tab y aparece una tontería.
+ */
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+
+import {
+  applySuggestion,
+  caretAfterApply,
+  detectListeningUrl,
+  endsInsideQuotes,
+  ghostText,
+  portOf,
+  splitLine,
+  suggest,
+  SUGGESTION_SOURCES,
+} from '../../build/ui-lib.mjs';
+
+const CONTEXT = {
+  branches: ['main', 'feature/startup-bar', 'origin/main'],
+  projects: ['C:/s/Api/Acme.WebApi.csproj'],
+  programs: ['dotnet', 'git', 'npm', 'msbuild'],
+};
+
+const values = (list) => list.map((entry) => entry.value);
+
+describe('troceo de la línea', () => {
+  it('un espacio final empieza un token nuevo', () => {
+    assert.deepEqual(splitLine('git '), { tokens: ['git'], typing: '' });
+  });
+
+  it('sin espacio final, el último token es el que se está escribiendo', () => {
+    assert.deepEqual(splitLine('git st'), { tokens: ['git'], typing: 'st' });
+  });
+
+  it('la línea vacía no tiene tokens', () => {
+    assert.deepEqual(splitLine(''), { tokens: [], typing: '' });
+  });
+
+  it('los espacios repetidos no crean tokens vacíos', () => {
+    assert.deepEqual(splitLine('dotnet   add  package'), { tokens: ['dotnet', 'add'], typing: 'package' });
+  });
+});
+
+describe('primer token: programas', () => {
+  it('ofrece los programas conocidos', () => {
+    const result = values(suggest('', CONTEXT));
+    assert.ok(result.includes('dotnet'));
+    assert.ok(result.includes('git'));
+  });
+
+  it('filtra por prefijo y mantiene el orden por frecuencia de uso', () => {
+    // "do" casa con dotnet y docker; en un IDE de .NET, dotnet va primero.
+    assert.deepEqual(values(suggest('do', CONTEXT)), ['dotnet', 'docker']);
+    assert.deepEqual(values(suggest('gi', CONTEXT)), ['git']);
+  });
+
+  it('añade los permitidos por el proceso principal que no están en la lista base', () => {
+    assert.ok(values(suggest('ms', CONTEXT)).includes('msbuild'));
+  });
+
+  it('un programa desconocido no sugiere nada', () => {
+    assert.deepEqual(suggest('vim ', CONTEXT), []);
+  });
+});
+
+describe('sugerencias de git', () => {
+  it('"git " ofrece los subcomandos frecuentes, con status primero', () => {
+    const result = values(suggest('git ', CONTEXT));
+    assert.equal(result[0], 'status');
+    for (const expected of ['commit -m ""', 'checkout -b', 'pull', 'push', 'switch', 'merge']) {
+      assert.ok(result.includes(expected), `falta "${expected}"`);
+    }
+  });
+
+  it('filtra los subcomandos por lo escrito', () => {
+    assert.deepEqual(values(suggest('git pu', CONTEXT)), ['pull', 'push']);
+  });
+
+  it('"git checkout " y "git switch " ofrecen las ramas reales del repositorio', () => {
+    assert.deepEqual(values(suggest('git checkout ', CONTEXT)), CONTEXT.branches);
+    assert.deepEqual(values(suggest('git switch ', CONTEXT)), CONTEXT.branches);
+    assert.deepEqual(values(suggest('git merge ', CONTEXT)), CONTEXT.branches);
+  });
+
+  it('distingue rama local de remota en el detalle', () => {
+    const remota = suggest('git checkout origin/', CONTEXT).find((entry) => entry.value === 'origin/main');
+    assert.equal(remota.detail, 'rama remota');
+    assert.equal(remota.kind, 'branch');
+  });
+
+  it('filtra las ramas por prefijo', () => {
+    assert.deepEqual(values(suggest('git switch fea', CONTEXT)), ['feature/startup-bar']);
+  });
+
+  it('"git checkout -b " no sugiere ramas: la rama todavía no existe', () => {
+    assert.deepEqual(suggest('git checkout -b ', CONTEXT), []);
+    assert.deepEqual(suggest('git switch -c ', CONTEXT), []);
+  });
+
+  it('sin repositorio no inventa ramas', () => {
+    assert.deepEqual(suggest('git checkout ', { branches: [] }), []);
+  });
+
+  it('ofrece opciones útiles tras un subcomando conocido', () => {
+    assert.ok(values(suggest('git push ', CONTEXT)).includes('--set-upstream origin'));
+  });
+});
+
+describe('sugerencias de la CLI de .NET', () => {
+  it('"dotnet " ofrece los subcomandos habituales', () => {
+    const result = values(suggest('dotnet ', CONTEXT));
+    for (const expected of ['build', 'run', 'test', 'watch', 'add package', 'ef migrations add']) {
+      assert.ok(result.includes(expected), `falta "${expected}"`);
+    }
+  });
+
+  it('filtra por prefijo, incluidos los compuestos', () => {
+    assert.deepEqual(values(suggest('dotnet ef', CONTEXT)), [
+      'ef migrations add',
+      'ef database update',
+      'ef migrations list',
+    ]);
+  });
+
+  it('"dotnet add package " sugiere paquetes de uso habitual', () => {
+    const result = values(suggest('dotnet add package ', CONTEXT));
+    assert.ok(result.includes('Serilog.AspNetCore'));
+    assert.ok(result.includes('Microsoft.EntityFrameworkCore.Design'));
+  });
+
+  it('los paquetes se filtran por prefijo sin distinguir mayúsculas', () => {
+    assert.deepEqual(values(suggest('dotnet add package seri', CONTEXT)), ['Serilog.AspNetCore']);
+  });
+
+  it('"dotnet add " distingue package de reference', () => {
+    assert.deepEqual(values(suggest('dotnet add ', CONTEXT)), ['package', 'reference']);
+  });
+
+  it('"dotnet run --project " sugiere los proyectos de la solución', () => {
+    assert.deepEqual(values(suggest('dotnet run --project ', CONTEXT)), CONTEXT.projects);
+  });
+
+  it('"dotnet ef " ofrece los subcomandos de EF Core', () => {
+    assert.ok(values(suggest('dotnet ef ', CONTEXT)).includes('migrations add'));
+  });
+
+  it('ofrece opciones tras un subcomando conocido', () => {
+    assert.ok(values(suggest('dotnet test ', CONTEXT)).includes('--filter'));
+  });
+});
+
+describe('texto fantasma', () => {
+  it('es lo que falta por escribir de la primera sugerencia', () => {
+    assert.equal(ghostText('git st', suggest('git st', CONTEXT)), 'atus');
+  });
+
+  it('con el token recién empezado, propone la sugerencia entera', () => {
+    assert.equal(ghostText('git ', suggest('git ', CONTEXT)), 'status');
+  });
+
+  it('no hay fantasma si no hay sugerencias', () => {
+    assert.equal(ghostText('vim ', []), null);
+  });
+
+  it('no hay fantasma si ya está escrito entero', () => {
+    const sugerencia = [{ value: 'status', label: 'status', detail: '', kind: 'subcommand' }];
+    assert.equal(ghostText('git status', sugerencia), null);
+  });
+
+  it('respeta las mayúsculas de lo escrito al comparar', () => {
+    assert.equal(ghostText('dotnet add package Seri', suggest('dotnet add package Seri', CONTEXT)), 'log.AspNetCore');
+  });
+});
+
+describe('aceptar una sugerencia', () => {
+  it('sustituye el token en curso y deja un espacio para seguir', () => {
+    const [primera] = suggest('git st', CONTEXT);
+    assert.equal(applySuggestion('git st', primera), 'git status ');
+  });
+
+  it('completa desde un token vacío', () => {
+    const [primera] = suggest('dotnet ', CONTEXT);
+    assert.equal(applySuggestion('dotnet ', primera), 'dotnet build ');
+  });
+
+  it('conserva los tokens anteriores', () => {
+    const sugerencia = { value: 'main', label: 'main', detail: '', kind: 'branch' };
+    assert.equal(applySuggestion('git checkout ma', sugerencia), 'git checkout main ');
+  });
+
+  it('con comillas al final, el cursor se queda dentro', () => {
+    const sugerencia = { value: 'commit -m ""', label: 'commit -m ""', detail: '', kind: 'subcommand' };
+    const linea = applySuggestion('git co', sugerencia);
+
+    assert.equal(linea, 'git commit -m ""');
+    assert.equal(endsInsideQuotes(sugerencia.value), true);
+    assert.equal(caretAfterApply(linea), linea.length - 1);
+    assert.equal(linea[caretAfterApply(linea)], '"', 'el cursor queda justo antes de la comilla de cierre');
+  });
+
+  it('sin comillas, el cursor va al final', () => {
+    assert.equal(caretAfterApply('git status '), 'git status '.length);
+  });
+});
+
+describe('inventario de sugerencias', () => {
+  it('no hay duplicados en ninguna lista', () => {
+    for (const [nombre, lista] of Object.entries(SUGGESTION_SOURCES)) {
+      assert.equal(new Set(lista).size, lista.length, `hay duplicados en ${nombre}`);
+    }
+  });
+
+  it('los subcomandos de git y dotnet cubren lo que se usa a diario', () => {
+    assert.ok(SUGGESTION_SOURCES.git.length >= 10);
+    assert.ok(SUGGESTION_SOURCES.dotnet.length >= 10);
+  });
+});
+
+describe('detección de la URL de la aplicación', () => {
+  it('reconoce el mensaje de Kestrel', () => {
+    assert.equal(detectListeningUrl('[INF] Now listening on: https://localhost:7156'), 'https://localhost:7156');
+  });
+
+  it('reconoce el mensaje traducido', () => {
+    assert.equal(detectListeningUrl('Escuchando en: http://localhost:5000'), 'http://localhost:5000');
+  });
+
+  it('descarta direcciones que no se pueden abrir en un navegador', () => {
+    assert.equal(detectListeningUrl('Now listening on: http://[::]:5000'), null);
+    assert.equal(detectListeningUrl('Now listening on: http://0.0.0.0:5000'), null);
+  });
+
+  it('una línea normal no produce URL', () => {
+    assert.equal(detectListeningUrl('Building...'), null);
+    assert.equal(detectListeningUrl('Content root path: C:\\s\\Api'), null);
+  });
+
+  it('limpia la puntuación final', () => {
+    assert.equal(detectListeningUrl('Now listening on: http://localhost:5001.'), 'http://localhost:5001');
+  });
+
+  it('extrae el puerto para enseñarlo compacto', () => {
+    assert.equal(portOf('https://localhost:7156'), '7156');
+    assert.equal(portOf('https://localhost:7156/scalar/v1'), '7156');
+    assert.equal(portOf('https://example.com'), null);
+  });
+});

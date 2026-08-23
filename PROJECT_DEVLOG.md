@@ -4,7 +4,7 @@ Bitácora viva de desarrollo. Se actualiza **en cada iteración** del bucle de t
 
 - **Proyecto:** DotForge IDE — distribución de IDE para C# / .NET 9+ / Blazor
 - **Inicio:** 2026-08-23
-- **Estado global:** 🟢 Completado — v1.2.0 empaquetada y verificada
+- **Estado global:** 🟢 Completado — v1.3.0 empaquetada y verificada
 
 Leyenda: `[ ]` pendiente · `[~]` en curso · `[x]` completado y **verificado con un comando**
 
@@ -150,6 +150,20 @@ por tanto **compila** pero no **ejecuta** los proyectos generados. Se añade el 
 - [x] F8.9 Contenido condicionado a las opciones del wizard (UI, base de datos, pruebas, framework)
 - [x] F8.10 Aviso del README en el resultado del wizard y en la salida de la CLI
 - [x] F8.11 Pruebas: estructura de las plantillas (`tests/unit`) y READMEs generados (`tests/scaffold`)
+
+### Fase 9 — Selector de inicio y terminal asistida
+- [x] F9.1 Modelo puro de perfiles de inicio (`src/shared/startup.ts`): proyectos ejecutables, perfiles, modos
+- [x] F9.2 Persistencia por workspace en `userData/startup-profiles.json`
+- [x] F9.3 Selector en la barra superior: desplegable de proyecto/perfil, conmutador de modo y Play/Stop
+- [x] F9.4 Modal multiproyecto: casillas, orden de arranque, guardar y editar perfiles con nombre
+- [x] F9.5 Orquestación del arranque del perfil activo (depuración o sin depurar con Hot Reload)
+- [x] F9.6 Un canal de salida por proceso, con nombre de proyecto, estado y puerto detectado
+- [x] F9.7 Motor de sugerencias de la terminal (`src/renderer/terminal-suggest.ts`)
+- [x] F9.8 Sugerencias de git con ramas reales del repositorio (`git:branches`)
+- [x] F9.9 Sugerencias de la CLI de .NET, incluidos compuestos y paquetes NuGet habituales
+- [x] F9.10 Texto fantasma en línea y menú, aceptables con Tab o flecha derecha
+- [x] F9.11 Modos de diagnóstico `--ui=startup`, `--ui=startup-dialog`, `--ui=terminal-suggest`
+- [x] F9.12 Pruebas: 22 del modelo de perfiles y 38 del motor de sugerencias
 
 ---
 
@@ -757,3 +771,119 @@ enabled`. Con `Ejecutar` (que es `dotnet run --project`) no pasaba.
 
 **Nota de método:** el `404 /favicon.ico` que aparece al pedirlo con `curl` es esperado y no se
 corrige: un navegador con `<link rel="icon">` en el documento no pide `/favicon.ico`.
+
+
+### ADR-012 — Una sola sesión de depuración, aunque el perfil arranque varios proyectos
+**Fecha:** 2026-08-23
+**Contexto:** El selector de inicio permite arrancar varios proyectos a la vez (API + UI). La
+pregunta inmediata es qué significa "depurar" un perfil de tres proyectos.
+**Opciones:**
+- (a) Una sesión de NetCoreDbg por proyecto. Es lo que hacen Visual Studio y Rider. Obliga a un
+  gestor de sesiones, a enrutar cada breakpoint a la sesión que corresponde, a decidir qué pila y
+  qué variables se enseñan cuando hay dos procesos detenidos y a una UI para cambiar de sesión.
+- (b) Depurar el primer proyecto del perfil y arrancar el resto sin depurador.
+- (c) No permitir depuración en perfiles multiproyecto.
+**Decisión:** (b). El primer proyecto del perfil se engancha al depurador; los demás arrancan con
+`dotnet run`. El modal lo dice explícitamente antes de guardar el perfil, con el nombre del
+proyecto que se va a depurar.
+**Consecuencias:** el caso real más común —depurar la API mientras la UI corre al lado— queda
+cubierto con una arquitectura que ya existe (`DebugController` tiene una `DebugSession`). A cambio,
+poner un breakpoint en el segundo proyecto no detiene nada, y por eso se avisa en la interfaz en
+vez de dejar que el usuario lo descubra. (a) queda como trabajo futuro: implica un
+`DebugSessionManager` y un selector de sesión activa, que es una fase entera.
+
+### ADR-013 — "Sin depurar" usa Hot Reload en las webs y `dotnet run` en el resto
+**Fecha:** 2026-08-23
+**Contexto:** El conmutador de la barra superior tiene dos posiciones, no tres, pero por debajo hay
+tres formas de arrancar: con depurador, con `dotnet run` y con `dotnet watch`.
+**Decisión:** el modo "Sin depurar" arranca los proyectos web con `dotnet watch` (Hot Reload) y los
+ejecutables de consola con `dotnet run`.
+**Consecuencias:** el conmutador sigue teniendo dos posiciones, que es lo que un usuario espera, y
+aun así se obtiene recarga en caliente donde de verdad sirve. Recargar en caliente una aplicación
+de consola reinicia el proceso a cada cambio y ensucia la salida sin aportar nada. La regla vive en
+`launchPlan`, que es una función pura y está probada caso a caso.
+
+### ADR-014 — Sugerencias por prefijo, sin fuzzy matching
+**Fecha:** 2026-08-23
+**Contexto:** El autocompletado de la terminal podía imitar al del editor (coincidencia difusa,
+puntuación por relevancia) o comportarse como una shell.
+**Decisión:** coincidencia por prefijo, con las listas ordenadas por frecuencia real de uso y sin
+reordenar por puntuación.
+**Consecuencias:** escribir `git st` y pulsar Tab da `git status` siempre, hoy y dentro de un mes.
+Ese determinismo es lo que permite escribir sin mirar. El coste es que `gst` no encuentra
+`git status`; en una terminal, donde el usuario ya sabe lo que quiere teclear, es un intercambio
+razonable, y el menú sigue estando ahí para explorar.
+
+### ADR-015 — Los perfiles se guardan en userData, no en el repositorio del usuario
+**Fecha:** 2026-08-23
+**Contexto:** Un perfil "Backend + Web" es configuración de solución. Podría vivir en un archivo
+dentro del repositorio (como hace `.vs/` o `.idea/`) o fuera.
+**Decisión:** `userData/startup-profiles.json`, con la ruta del workspace como clave.
+**Consecuencias:** el IDE no crea archivos dentro del proyecto de nadie, que es la clase de cosa que
+acaba en un commit ajeno o en una discusión sobre el `.gitignore`. A cambio, los perfiles no se
+comparten con el equipo: para eso ya existe `launchSettings.json`, que es el mecanismo del
+ecosistema y que el IDE ya lee (iteración 10). Los perfiles que apuntan a un `.csproj` que ya no
+existe se limpian al cargar, así que renombrar un proyecto no deja un botón de Play roto.
+
+---
+
+### Iteración 11 — 2026-08-23 — Fase 9: selector de inicio y terminal asistida
+**Objetivo:** cerrar la distancia con Visual Studio y Rider en las dos cosas que más se usan y que
+faltaban: decidir qué se arranca desde la barra superior, y una terminal que ayude a escribir.
+
+**Módulo 1 — Selector de inicio.**
+- `src/shared/startup.ts`: modelo puro (proyecto ejecutable, perfil, modo) y las reglas que deciden
+  qué se arranca y cómo. Sin dependencias, así que lo comparten el proceso principal, el renderer y
+  las pruebas.
+- `src/main/services/startup-service.ts`: persistencia por workspace, tolerante a archivos
+  corruptos y con limpieza de proyectos desaparecidos.
+- `src/renderer/views/startup-bar.ts`: el control de la barra superior —desplegable de proyectos y
+  perfiles, conmutador Depurar / Sin depurar, Play y Stop— y el modal multiproyecto con casillas,
+  reordenación y perfiles con nombre.
+- Canales de salida por proceso en `panel.ts`: cada proyecto arrancado tiene su pestaña con su
+  nombre, un punto de estado y el puerto en el que escucha, clicable para abrirlo.
+- Contratos nuevos: `startup:get`, `startup:save`, `git:branches` y `label` en
+  `DotnetTaskRequest`/`DotnetTaskStarted`.
+
+**Módulo 2 — Terminal asistida.**
+- `src/renderer/terminal-suggest.ts`: motor puro de sugerencias para git y la CLI de .NET, con
+  ramas y proyectos reales inyectados como contexto.
+- `git-service.listBranches()`: ramas locales y remotas ordenadas por fecha de commit, con caché de
+  15 s porque el autocompletado consulta en cada pulsación.
+- Texto fantasma en línea con indicador de `Tab`, menú navegable con las flechas y aceptación con
+  Tab o flecha derecha. Con el menú abierto las flechas navegan sugerencias; con él cerrado siguen
+  siendo el historial.
+
+**Errores encontrados:**
+- *Síntoma:* el heredoc volvió a comerse las contrabarras y `output.split(/\r?\n/)` llegó a
+  `git-service.ts` como un CR y un LF literales dentro del regex.
+  *Causa raíz:* la trampa ya documentada en `CLAUDE.md`, esta vez con dos capas (bash y node -e).
+  *Arreglo:* todos los parches de esta iteración se escribieron como archivos `.mjs` y se
+  ejecutaron con node, sin pasar el código por la shell. El regex quedó con `String.raw`.
+- *Síntoma:* el menú de sugerencias aparecía cortado por arriba: con el panel bajo de altura, las
+  primeras entradas —justo la que acepta el tabulador— quedaban fuera de la vista.
+  *Causa raíz:* `max-height` fija en CSS, sin relación con el hueco real sobre el prompt.
+  *Arreglo:* la altura se calcula al pintar, a partir de la distancia entre el prompt y el borde
+  superior del panel. Verificado con `--probe=`: el menú empieza 10 px por debajo del panel.
+- *Síntoma:* el canal de un proyecto enseñaba el puerto HTTP y no el del perfil (HTTPS).
+  *Causa raíz:* Kestrel anuncia las dos URLs y el código se quedaba con la última.
+  *Arreglo:* se conserva la primera, que es la del perfil de `launchSettings.json`, la misma que
+  abre `dotnet run`.
+- *Observado, no corregido:* al arrancar con un workspace reciente ya borrado, el proceso principal
+  registra un `ENOENT` en la consola. El renderer ya lo ignora y la aplicación arranca bien; el
+  aviso es sólo ruido en el log. Queda anotado como candidato a limpieza.
+
+**Verificado sobre la aplicación real** (solución hexagonal `Ph` con Web API + Blazor, net10.0),
+midiendo con `--ui=` y `--probe=` en vez de mirar capturas:
+- Barra superior: `{"picker":"Adapters.Blazor","modes":["Depurar*","Sin depurar"],"play":true}`.
+- Desplegable: lista los dos adaptadores conductores y la entrada "Configurar varios proyectos…".
+- Modal: las dos casillas, el orden y los botones de guardar.
+- **Arranque multiproyecto real**: tras marcar los dos proyectos y pulsar Play en modo "Sin
+  depurar", el panel mostró `["Compilación","Adapters.Blazor","Adapters.Web"]`, la pestaña Salida
+  con la insignia `2` y dos botones "Detener Adapters.Blazor" / "Detener Adapters.Web".
+- **Puertos**: con los servidores ya levantados,
+  `Adapters.Blazor:5587` y `Adapters.Web:5585`, enlazando a `https://localhost:5587` y
+  `https://localhost:5585` — exactamente los del `launchSettings.json` generado.
+- Terminal: escribiendo `git `, el fantasma dice `git status` con la tecla `Tab` y el menú lista
+  los subcomandos con su descripción.
+- `npm test` en verde de punta a punta y `--smoke-test` → `SMOKE_OK`.

@@ -8,6 +8,7 @@
  * canales `event` son notificaciones del main hacia el renderer.
  */
 import type { ArchitectureId, BlueprintInfo, ScaffoldOptions, ScaffoldResult } from './scaffold-types.js';
+import type { RunMode, StartupConfig } from './startup.js';
 
 // ---------------------------------------------------------------------------------------------
 // Modelos compartidos
@@ -114,6 +115,8 @@ export interface DotnetTaskRequest {
   target: string;
   /** Argumentos adicionales, ya troceados (nunca una línea de shell). */
   extraArgs?: string[];
+  /** Etiqueta del canal de salida. Se devuelve tal cual en `DotnetTaskStarted`. */
+  label?: string;
 }
 
 export interface DotnetTaskStarted {
@@ -121,6 +124,11 @@ export interface DotnetTaskStarted {
   kind: DotnetTaskKind;
   command: string;
   target: string;
+  /**
+   * Nombre legible del canal en el que va la salida: normalmente el del proyecto. Lo pone quien
+   * lanza la tarea, porque el proceso principal no sabe si esto es "la API" o "la UI".
+   */
+  label?: string;
 }
 
 export interface DotnetTaskOutput {
@@ -295,6 +303,10 @@ export const IPC = {
 
   solutionLoad: 'solution:load',
   gitStatus: 'git:status',
+  gitBranches: 'git:branches',
+
+  startupGet: 'startup:get',
+  startupSave: 'startup:save',
 
   scaffoldList: 'scaffold:list',
   scaffoldGenerate: 'scaffold:generate',
@@ -419,6 +431,13 @@ export interface DotForgeApi {
   git: {
     /** Rama y número de archivos sucios del workspace. Null si no hay repositorio. */
     status(): Promise<GitStatus | null>;
+    /** Ramas locales y remotas, para el autocompletado de la terminal. Vacío si no hay repo. */
+    branches(): Promise<string[]>;
+  };
+  startup: {
+    /** Perfiles de inicio guardados para el workspace abierto. */
+    get(): Promise<StartupConfig>;
+    save(config: StartupConfig): Promise<StartupConfig>;
   };
   scaffold: {
     list(): Promise<BlueprintInfo[]>;

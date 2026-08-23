@@ -92,11 +92,22 @@ desde el primer minuto, con un CRUD funcional de ejemplo.
 
 ### Compilación y ejecución
 
+- **Selector de inicio en la barra superior**, al estilo de Visual Studio y Rider: qué proyecto se
+  arranca, con qué modo y el botón de Play, siempre a la vista.
+- **Perfiles multiproyecto**: marca varios proyectos, ordénalos y guarda el conjunto con nombre
+  ("Backend + Web"). Se guardan por solución, fuera del repositorio.
+- Dos modos claros: **Depurar** (F5), que engancha NetCoreDbg y aplica `launchSettings.json`, y
+  **Sin depurar** (Ctrl+F5), que arranca las webs con Hot Reload.
+- **Un canal de salida por proceso**: cada proyecto arrancado tiene su pestaña con su nombre, su
+  estado y el puerto en el que escucha, clicable para abrirlo en el navegador.
 - Tareas de `dotnet`: `build`, `rebuild`, `clean`, `restore`, `test`, `run` y `watch`.
 - La salida de MSBuild se convierte en **diagnósticos clicables** que llevan a la línea exacta, y
   se pintan como marcadores en el editor.
 - **Hot Reload** con `dotnet watch`, con detección de la URL en la que queda escuchando la app.
-- Terminal integrada para `dotnet`, `git`, `npm` y compañía, con historial.
+- Terminal integrada para `dotnet`, `git`, `npm` y compañía, con historial y **autocompletado
+  contextual**: subcomandos de git y de la CLI de .NET, **ramas reales del repositorio** tras
+  `git checkout` o `git switch`, proyectos de la solución tras `--project` y paquetes NuGet
+  habituales tras `dotnet add package`. Se acepta con `Tab` o con la flecha derecha.
 
 ### Depuración
 
@@ -135,10 +146,10 @@ Descarga el artefacto de tu plataforma desde `dist/` o desde los artefactos del 
 
 | Plataforma | Artefacto | Notas |
 |---|---|---|
-| Windows | `DotForge IDE-1.2.0-Setup-x64.exe` | Instalador NSIS; permite elegir carpeta |
-| Windows | `DotForge IDE-1.2.0-win-x64.zip` | Portable, sin instalación |
-| macOS | `DotForge IDE-1.2.0-arm64.dmg` | Apple Silicon |
-| macOS | `DotForge IDE-1.2.0-x64.dmg` | Intel |
+| Windows | `DotForge IDE-1.3.0-Setup-x64.exe` | Instalador NSIS; permite elegir carpeta |
+| Windows | `DotForge IDE-1.3.0-win-x64.zip` | Portable, sin instalación |
+| macOS | `DotForge IDE-1.3.0-arm64.dmg` | Apple Silicon |
+| macOS | `DotForge IDE-1.3.0-x64.dmg` | Intel |
 
 > Los artefactos no están firmados: Windows mostrará el aviso de SmartScreen y macOS pedirá
 > confirmación en Gatekeeper. Es lo esperado sin certificado de desarrollador.

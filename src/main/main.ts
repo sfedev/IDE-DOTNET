@@ -21,6 +21,7 @@ import {
 import { lspClient } from './lsp/lsp-client.js';
 import * as processRegistry from './services/process-registry.js';
 import * as settingsService from './services/settings-service.js';
+import * as startupService from './services/startup-service.js';
 
 const isDevelopment = process.argv.includes('--dev') || !app.isPackaged;
 
@@ -380,6 +381,22 @@ const UI_ACTIONS: Record<string, string> = {
     "      + ' titlebar bg=' + getComputedStyle(bar).backgroundColor);" +
     "  }, 500);" +
     "}, 400)",
+  // Fase 9: el selector de inicio de la barra superior y la terminal asistida.
+  startup: "document.querySelector('.startup-picker')?.click()",
+  'startup-dialog':
+    "document.querySelector('.startup-picker')?.click();" +
+    "setTimeout(() => [...document.querySelectorAll('.startup-menu-item')]" +
+    ".find((item) => item.textContent?.includes('Configurar'))?.click(), 300)",
+  // Escribe en la terminal como lo haría un usuario y deja el fantasma a la vista.
+  'terminal-suggest':
+    "[...document.querySelectorAll('.panel-tab')].find((tab) => tab.textContent?.includes('Terminal'))?.click();" +
+    "setTimeout(() => {" +
+    "  const input = document.querySelector('.terminal-input-wrap input');" +
+    "  if (!input) return;" +
+    "  input.focus();" +
+    "  input.value = 'git ';" +
+    "  input.dispatchEvent(new Event('input', { bubbles: true }));" +
+    "}, 300)",
   nesting:
     "[...document.querySelectorAll('.tree-row')]" +
     ".find((row) => row.textContent?.includes('appsettings.json'))" +
@@ -509,6 +526,7 @@ app.on('second-instance', () => {
 
 app.whenReady().then(async () => {
   settingsService.initialize(app.getPath('userData'));
+  startupService.initialize(app.getPath('userData'));
   await settingsService.load();
 
   registerIpcHandlers();

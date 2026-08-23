@@ -17,6 +17,8 @@ import type {
   ProjectInfo,
   SolutionInfo,
 } from '../shared/contracts.js';
+import type { RunMode, StartupConfig } from '../shared/startup.js';
+import { launchPlan, runnableProjects, shortProjectName } from '../shared/startup.js';
 import { byId, clear, el } from './dom.js';
 import { installIconGallery } from './icon-gallery.js';
 import { icon, type IconName } from './icons.js';
@@ -29,6 +31,7 @@ import { PanelView } from './views/panel.js';
 import { DebugView } from './views/debug.js';
 import { CommandPalette, type Command } from './views/palette.js';
 import { SettingsView } from './views/settings.js';
+import { StartupBar } from './views/startup-bar.js';
 import { StatusBar } from './views/statusbar.js';
 import { WelcomeView } from './views/welcome.js';
 import { WizardView } from './views/wizard.js';
@@ -45,6 +48,20 @@ class DotForgeApp {
   private lspProviders: MonacoApi.IDisposable | null = null;
   private git: GitStatus | null = null;
   private gitTimer: number | undefined;
+
+  /** Ramas del repositorio, para el autocompletado de la terminal. Se refrescan con el estado. */
+  private branches: string[] = [];
+
+  private readonly startupBar = new StartupBar({
+    start: () => void this.startStartupProfile(),
+    stop: () => void this.stopEverything(),
+    save: (config) => void this.saveStartupConfig(config),
+    isRunning: () => this.panel.hasRunningTasks() || this.debug.getState().status !== 'idle',
+    notify: (message, level) => this.notify(message, level),
+  });
+
+  /** Lista blanca de la terminal; el autocompletado la ofrece como primer nivel. */
+  private allowedCommands: string[] = [];
 
   private readonly debug = new DebugView({
     openLocation: (file, line) => void this.openFile(file, line),
@@ -91,6 +108,12 @@ class DotForgeApp {
     cancelTask: (taskId) => void window.dotforge.dotnet.cancelTask(taskId),
     runCommand: (line) => void this.runTerminalCommand(line),
     renderDebug: (container) => this.debug.render(container, () => this.panel.render()),
+    suggestContext: () => ({
+      branches: this.branches,
+      projects: (this.solution?.projects ?? []).map((project) => project.path),
+      programs: this.allowedCommands,
+    }),
+    openUrl: (url) => void window.dotforge.app.openExternal(url),
   });
 
   private readonly settingsView = new SettingsView({
@@ -139,6 +162,7 @@ class DotForgeApp {
 
     this.renderActivityBar();
     this.renderTitlebarActions();
+    this.startupBar.mount(byId('titlebar-startup'));
     this.registerCommands();
     this.installEventBridges();
     this.installKeyboardShortcuts();
@@ -154,7 +178,10 @@ class DotForgeApp {
     // La lista de programas permitidos se muestra como ayuda en la terminal.
     void window.dotforge.terminal
       .allowed()
-      .then((commands) => this.panel.setAllowedCommands(commands))
+      .then((commands) => {
+        this.allowedCommands = commands;
+        this.panel.setAllowedCommands(commands);
+      })
       .catch(() => undefined);
 
     // Reabre el último workspace: volver al trabajo no debería costar dos clics.
@@ -209,12 +236,15 @@ class DotForgeApp {
     if (isSameSolution) {
       this.explorer.setSolution(solution);
       this.nuget.setSolution(solution);
+      this.startupBar.setSolution(solution);
       this.updateTitle();
       return;
     }
     this.explorer.setSolution(solution);
     this.nuget.setSolution(solution);
+    this.startupBar.setSolution(solution);
     this.updateTitle();
+    void this.loadStartupConfig();
 
     if (solution) {
       this.notify(
@@ -269,11 +299,13 @@ class DotForgeApp {
     return this.solution.path ?? this.solution.projects[0]?.path ?? null;
   }
 
+  /**
+   * Proyecto que usan las tareas sueltas (`dotnet run`, `dotnet watch`) de la paleta.
+   * Es el primero del perfil activo: así la paleta y el botón de Play nunca discrepan.
+   */
   private startupProject(): string | null {
-    if (!this.solution) return null;
-    const web = this.solution.projects.find((project) => project.isWebProject);
-    const exe = this.solution.projects.find((project) => project.outputType === 'Exe' && !project.isTestProject);
-    return (web ?? exe)?.path ?? null;
+    const profile = this.startupBar.activeProfile();
+    return profile?.projects[0] ?? runnableProjects(this.solution)[0]?.path ?? null;
   }
 
   private async runTask(kind: DotnetTaskKind, explicitTarget?: string): Promise<void> {
@@ -314,26 +346,92 @@ class DotForgeApp {
     if (this.panel.currentTab() === 'debug') this.panel.render();
   }
 
-  /** Arranca una sesión de depuración sobre el proyecto de inicio. */
-  private async startDebugging(): Promise<void> {
-    const project = this.startupProject();
-    if (!project) {
-      this.notify('No hay ningún proyecto ejecutable que depurar.', 'warn');
+  // -------------------------------------------------------------------------------------------
+  // Perfiles de inicio
+  // -------------------------------------------------------------------------------------------
+
+  private async loadStartupConfig(): Promise<void> {
+    try {
+      this.startupBar.setConfig(await window.dotforge.startup.get());
+    } catch {
+      // Sin solución abierta no hay perfiles que cargar: no es un error que contarle a nadie.
+    }
+  }
+
+  private async saveStartupConfig(config: StartupConfig): Promise<void> {
+    try {
+      await window.dotforge.startup.save(config);
+    } catch (error) {
+      this.notify(`No se ha podido guardar el perfil de inicio: ${this.messageOf(error)}`, 'warn');
+    }
+  }
+
+  /**
+   * Arranca el perfil activo entero.
+   *
+   * En modo depuración sólo el primer proyecto se engancha al depurador —hay una única sesión de
+   * NetCoreDbg— y el resto arranca sin él; el plan lo decide `launchPlan`, que es lógica pura y
+   * está probada aparte.
+   */
+  private async startStartupProfile(mode?: RunMode): Promise<void> {
+    const runMode = mode ?? this.startupBar.mode();
+    const profile = this.startupBar.activeProfile();
+    const steps = launchPlan(profile, this.solution, runMode);
+
+    if (steps.length === 0) {
+      this.notify(
+        runnableProjects(this.solution).length === 0
+          ? 'La solución no tiene ningún proyecto ejecutable.'
+          : 'Elige qué proyecto arrancar en el selector de la barra superior.',
+        'warn',
+      );
       return;
     }
 
     await this.editor.saveAll();
-    this.panel.show('debug');
+    this.panel.clearFinishedChannels();
 
-    try {
-      await window.dotforge.debug.start({
-        projectPath: project,
-        stopAtEntry: false,
-        breakpoints: this.debug.allBreakpoints(),
-      });
-    } catch (error) {
-      this.notify(this.messageOf(error), 'error');
+    for (const step of steps) {
+      const label = shortProjectName(step.projectName, this.solution?.name ?? null);
+
+      try {
+        if (step.action === 'debug') {
+          this.panel.show('debug');
+          await window.dotforge.debug.start({
+            projectPath: step.projectPath,
+            stopAtEntry: false,
+            breakpoints: this.debug.allBreakpoints(),
+          });
+        } else {
+          await window.dotforge.dotnet.runTask({
+            kind: step.action === 'watch' ? 'watch' : 'run',
+            target: step.projectPath,
+            label,
+          });
+        }
+      } catch (error) {
+        this.notify(`${label}: ${this.messageOf(error)}`, 'error');
+      }
     }
+
+    if (steps.some((step) => step.action !== 'debug')) this.panel.show('output');
+
+    if (steps.length > 1) {
+      const debugged = steps.filter((step) => step.action === 'debug').length;
+      this.notify(
+        `${steps.length} proyectos arrancados${debugged > 0 ? ` (depurando ${steps[0]?.projectName})` : ''}`,
+        'info',
+      );
+    }
+
+    this.startupBar.render();
+  }
+
+  /** Detiene la sesión de depuración y todas las tareas en marcha. */
+  private async stopEverything(): Promise<void> {
+    await window.dotforge.debug.stop().catch(() => undefined);
+    await this.stopTasks();
+    this.startupBar.render();
   }
 
   /** Ejecuta una línea escrita en la terminal integrada. */
@@ -344,7 +442,9 @@ class DotForgeApp {
     }
 
     try {
-      await window.dotforge.terminal.run(line);
+      const started = await window.dotforge.terminal.run(line);
+      // La salida de la terminal va a su propio canal, no al de compilación.
+      this.panel.attachTerminalTask(started.taskId);
     } catch (error) {
       this.panel.append(`${this.messageOf(error)}
 `, 'stderr');
@@ -471,12 +571,7 @@ class DotForgeApp {
 
     actions.append(
       action('hammer', `Compilar solución (${modifier}+Shift+B)`, () => void this.runTask('build')),
-      action('play', 'Iniciar depuración (F5)', () => void this.startDebugging()),
-      action('refresh', `Hot Reload (${modifier}+F5)`, () => void this.runTask('watch')),
-      action('stop', 'Detener (Shift+F5)', () => {
-        void window.dotforge.debug.stop();
-        void this.stopTasks();
-      }),
+      action('flask', `Ejecutar pruebas (${modifier}+Shift+T)`, () => void this.runTask('test')),
     );
   }
 
@@ -569,8 +664,14 @@ class DotForgeApp {
       const changed = status?.branch !== this.git?.branch || status?.dirtyFiles !== this.git?.dirtyFiles;
       this.git = status;
       if (changed) this.renderStatus();
+
+      // Las ramas alimentan el autocompletado de la terminal. El servicio del proceso principal
+      // cachea 15 s, así que este sondeo no lanza un `git branch` cada seis segundos.
+      if (status) this.branches = await window.dotforge.git.branches();
+      else this.branches = [];
     } catch {
       this.git = null;
+      this.branches = [];
     }
   }
 
@@ -670,13 +771,13 @@ class DotForgeApp {
         title: 'Iniciar depuración',
         group: 'Depurar',
         keybinding: 'F5',
-        run: () => void this.startDebugging(),
+        run: () => void this.startStartupProfile('debug'),
       },
       {
         id: 'run.without-debug',
         title: 'Ejecutar sin depurar',
         group: 'Depurar',
-        run: () => void this.runTask('run'),
+        run: () => void this.startStartupProfile('run'),
       },
       {
         id: 'debug.continue',
@@ -923,16 +1024,18 @@ class DotForgeApp {
     window.dotforge.events.onTaskStarted((task) => {
       this.panel.taskStarted(task);
       this.renderStatus();
+      this.startupBar.render();
     });
 
     window.dotforge.events.onTaskOutput((output) => {
-      this.panel.append(output.chunk, output.stream);
+      this.panel.append(output.chunk, output.stream, output.taskId);
     });
 
     window.dotforge.events.onTaskExit((exit) => {
       this.panel.taskFinished(exit);
       this.applyBuildMarkers(exit.diagnostics);
       this.renderStatus();
+      this.startupBar.render();
 
       if (exit.applicationUrl) {
         this.notify(`La aplicación escucha en ${exit.applicationUrl}`, 'ok');

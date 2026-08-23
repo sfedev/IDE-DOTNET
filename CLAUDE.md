@@ -54,8 +54,10 @@ IDE-DOTNET/
 │       ├── file-icons.ts       # Icono/insignia por archivo, carpeta y proyecto + anidamiento
 │       ├── ui-lib.ts           # Bundle sin DOM de esas reglas, para poder probarlas
 │       ├── languages/          # razor.ts (config, snippets, auto-cierre) + razor-tokens.ts (Monarch)
+│       ├── terminal-suggest.ts # Motor de sugerencias de la terminal (git y CLI de .NET), sin DOM
+│       ├── run-output.ts       # Detección de la URL en la que escucha un proceso
 │       ├── views/              # explorer, editor, nuget, panel, palette, statusbar, settings,
-│       │                       # welcome, wizard, debug
+│       │                       # welcome, wizard, debug, startup-bar
 │       └── styles/             # theme.css (tokens), layout.css, components.css
 ├── resources/              # Iconos multirresolución, branding
 ├── scripts/                # Build, generación de iconos, fetch de toolchain, verificación
@@ -140,7 +142,8 @@ npx electron . --smoke-test
 - `--screenshot=<ruta>` — guarda una captura de la ventana, muestrea los píxeles del chrome y sale.
 - `--icons` — sustituye la interfaz por la galería de iconos, a 16 y 24 px.
 - `--ui=<vista>` — abre una vista antes de la captura pulsando los mismos controles que pulsaría
-  un usuario (`wizard`, `settings`, `nuget`, `debug`, `terminal`, `palette`, `light`, `nesting`).
+  un usuario (`wizard`, `settings`, `nuget`, `debug`, `terminal`, `palette`, `light`, `nesting`,
+  `startup`, `startup-dialog`, `terminal-suggest`).
 - `--probe=<expresión>` — evalúa una expresión en el renderer y la imprime. Es la forma de zanjar
   una duda sobre CSS: leer el valor calculado en vez de interpretar una captura.
 - `node scripts/read-pixels.mjs <png> <x,y>…` — decodifica una captura y dice el color exacto de
