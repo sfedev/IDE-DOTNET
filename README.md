@@ -118,6 +118,11 @@ contenedores y Docker Compose** para levantar los servicios de apoyo sin salir d
 - **Un canal de salida por proceso**, con el nombre del proyecto, su insignia de tipo (Web API,
   Blazor, CLI…), el estado (`En ejecución`, `Detenido`, `Error`), el enlace HTTPS y botones para
   **reiniciar o detener sólo ese proceso**, sin tocar los demás del perfil.
+- **El proyecto que se depura es uno más.** En modo depuración sólo el primero del perfil lleva el
+  depurador enganchado (hay una única sesión de NetCoreDbg), y eso se ve donde importa: su pastilla
+  y su canal llevan el icono de depuración y dicen `Depurando`, y el diálogo de perfiles marca cuál
+  es con la insignia `depurado`, justo al lado de las flechas que cambian el orden. Su salida y su
+  puerto van a **su** canal, no al de compilación.
 - **Nivel de salida de la CLI de .NET** configurable en Ajustes (`Minimal`, `Normal`, `Detailed`,
   `Diagnostic`). Se aplica a `build`, `run`, `watch`, `test`, `clean`, `restore` y a la depuración;
   en los niveles altos añade el registro de ASP.NET Core, los errores detallados y la traza de

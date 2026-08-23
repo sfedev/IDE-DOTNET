@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import {
   applySuggestion,
   caretAfterApply,
+  debugChannelTransition,
   detectListeningUrl,
   endsInsideQuotes,
   ghostText,
@@ -358,5 +359,54 @@ describe('npm y node', () => {
     assert.equal(ghostText('docker ps', suggest('docker ps', CLOUD)), null);
     assert.equal(ghostText('docker p', suggest('docker p', CLOUD)), 's');
     assert.equal(applySuggestion('docker logs ', suggest('docker logs ', CLOUD)[0]), 'docker logs acmeshop-sqlserver-1 ');
+  });
+});
+
+/**
+ * Canal del proceso depurado (v1.8.1).
+ *
+ * El fallo que arregla esta regla se veía así: al lanzar un perfil de dos proyectos en modo
+ * depuración, el canal de salida se llamaba "Compilación" y anunciaba el puerto de la aplicación
+ * depurada —"Compilación :5013"—, mientras que el segundo proyecto sí tenía su canal con su
+ * nombre. La causa no era el nombre del canal: era que `debug:start` **empieza parando** la sesión
+ * anterior, ese `stop` emite `idle` antes de arrancar nada, y el canal recién abierto se cerraba
+ * ahí mismo. A partir de ese momento la salida caía otra vez en el canal de compilación.
+ */
+describe('canal del proceso depurado', () => {
+  it('el idle que emite el stop previo no cierra un canal recién abierto', () => {
+    assert.deepEqual(debugChannelTransition(false, 'idle'), { active: false, close: 'none' });
+  });
+
+  it('la descarga de NetCoreDbg no cambia nada todavía', () => {
+    assert.deepEqual(debugChannelTransition(false, 'acquiring'), { active: false, close: 'none' });
+  });
+
+  it('arrancar marca la sesión como viva', () => {
+    for (const status of ['starting', 'running', 'paused']) {
+      assert.deepEqual(debugChannelTransition(false, status), { active: true, close: 'none' }, status);
+    }
+  });
+
+  it('el idle de después de una sesión sí la cierra, y en verde', () => {
+    assert.deepEqual(debugChannelTransition(true, 'idle'), { active: false, close: 'ok' });
+  });
+
+  it('un error cierra el canal siempre: el canal se abre antes de arrancar', () => {
+    assert.deepEqual(debugChannelTransition(false, 'error'), { active: false, close: 'failed' });
+    assert.deepEqual(debugChannelTransition(true, 'error'), { active: false, close: 'failed' });
+  });
+
+  it('la secuencia real de un arranque deja el canal abierto hasta que se para', () => {
+    let active = false;
+    const closes = [];
+
+    for (const status of ['idle', 'acquiring', 'starting', 'running', 'paused', 'running', 'idle']) {
+      const transition = debugChannelTransition(active, status);
+      active = transition.active;
+      if (transition.close !== 'none') closes.push(transition.close);
+    }
+
+    // Un único cierre, y al final: el canal sobrevive a todo el arranque.
+    assert.deepEqual(closes, ['ok']);
   });
 });

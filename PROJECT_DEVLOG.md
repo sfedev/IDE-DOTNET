@@ -255,6 +255,8 @@ por tanto **compila** pero no **ejecuta** los proyectos generados. Se añade el 
 - [x] F14.13 Con Docker apagado el panel sigue enseñando los servicios declarados (ADR-033)
 - [x] F14.14 Modo de diagnóstico `--ui=containers` y entradas en el menú "Datos"
 - [x] F14.15 Pruebas: 31 nuevas (YAML, servicios, puertos, comandos y correspondencia con el motor)
+- [x] F14.16 El proceso depurado tiene canal, pastilla, puerto y parada propios (v1.8.1, ADR-034)
+- [x] F14.17 El indicador de una tarea de larga duración es un punto verde, no un spinner (v1.8.1)
 
 ---
 
@@ -1650,3 +1652,68 @@ acotan a lo que Docker admite antes de entrar en un `argv`.
 
 **Versión:** funcionalidad nueva con cinco canales IPC nuevos, sin romper nada anterior:
 1.7.0 → **1.8.0** (ADR-009).
+
+---
+
+### ADR-034 — El proceso depurado es un proceso más
+**Fecha:** 2026-08-24
+**Contexto:** Un perfil multiproyecto en modo depuración arranca el primero con el depurador y el
+resto como tareas. Los segundos tenían canal propio, pastilla, puerto y botón de parada; el
+primero no tenía nada de eso, porque su salida no venía de una tarea sino de eventos del depurador
+y llegaba sin `taskId`.
+**Decisión:** el proceso depurado abre su canal **antes** de arrancar, como cualquier otro, y su
+salida se dirige explícitamente a él (`appendDebugOutput`). El canal se marca `isDebug`, lo que le
+da su propio botón de parada —que llama a `debug:stop` en vez de cancelar una tarea— y su estado
+propio ("Depurando" en vez de "En ejecución").
+**Consecuencias:** desaparece el canal "Compilación :5013", que era el síntoma más confuso: el
+canal de compilación anunciaba el puerto de una aplicación. Además el proceso depurado gana lo que
+ya tenían los demás: pastilla en la barra superior (con icono de bug), enlace a su URL, reinicio
+—que vuelve a **depurar**, no a ejecutar sin depurador— y parada individual.
+
+---
+
+### Iteración 18 — 2026-08-24 — v1.8.1: el proceso depurado deja de esconderse en "Compilación"
+
+**Reportado por el usuario**, con dos capturas: al lanzar un perfil `Blazor + WebApi` en modo
+depuración, la barra de canales enseñaba `Compilación :5013` y `WebApi :5011`, y a la derecha un
+botón `Detener WebApi` con un spinner girando para siempre. Invirtiendo el orden del perfil, los
+papeles se intercambiaban — que es exactamente la pista que confirmó el diagnóstico: **el que se
+descolocaba era siempre el primero, que es el que se depura** (ADR-012: una sola sesión).
+
+**Causa raíz (1).** `onDebugOutput` llamaba a `panel.append(text, stream)` sin `taskId`, y ese
+camino termina en el canal de compilación. Con él se colaba también la detección de la URL, así que
+el puerto de la aplicación depurada acababa pegado al canal "Compilación".
+
+**Causa raíz (2), descubierta al verificar el arreglo.** Abrir el canal del depurado no bastaba:
+`debug:start` **empieza parando** la sesión anterior, y ese `stop` emite `idle` **antes** de
+arrancar. El manejador cerraba el canal en cualquier `idle`, así que lo mataba recién abierto y la
+salida volvía a "Compilación". La regla correcta —un `idle` sólo cierra si antes hubo sesión, un
+`error` cierra siempre— vive ahora en `debugChannelTransition`, que es pura y tiene seis pruebas.
+
+**Causa raíz (3).** El spinner permanente. La barra de pestañas pintaba un spinner junto a
+"Detener X" para toda tarea viva. Un spinner promete que algo va a terminar; una Web API arrancada
+no va a terminar. Ahora las tareas de larga duración (`run`, `watch`) llevan un punto verde —"esto
+está en marcha"— y el spinner se reserva para lo que sí acaba: compilar, restaurar, probar.
+
+**Cambios:**
+- `Channel.isDebug` y `ServiceInfo.isDebug`: el canal sabe si lo gobierna el depurador.
+- `startDebugChannel` / `appendDebugOutput` / `finishDebugChannel(ok)` en el panel.
+- El paso `debug` del plan de arranque también llama a `registerService`, así que el proceso
+  depurado tiene insignia de tipo y ruta de proyecto desde la primera línea.
+- Botón de parada del canal habilitado para el depurado (llama a `debug:stop`), y botón propio en
+  la barra de pestañas mientras la sesión viva.
+- Reiniciar un proceso depurado vuelve a depurarlo en vez de relanzarlo como tarea suelta.
+- **Por qué uno es distinto, dicho donde se ve:** icono de bug en su pastilla, estado "Depurando"
+  en la cabecera de su canal, e insignia `depurado` sobre el primer proyecto del diálogo de
+  perfiles cuando el modo es depuración — que es donde se decide el orden.
+
+**Verificado sobre la aplicación real** (solución generada con `--ui both`, perfil
+`Blazor + WebApi` en modo depuración):
+- Barra superior: `● 🐞 Blazor` y `● WebApi`.
+- Canales: `Compilación` (limpia, sin puerto), `● Blazor`, `● WebApi`.
+- Cabecera del canal depurado: `Blazor · Blazor · ● 🐞 Depurando · https://localhost:5013`.
+- Barra de pestañas: `● Detener WebApi` y `● Detener Blazor`, los dos con punto verde; ni un
+  spinner. Comprobado además leyendo el píxel del indicador: `rgb(28, 122, 79)`.
+- `npm test` en verde: **893 pruebas**, seis de ellas nuevas para la regla del canal depurado.
+
+**Versión:** corrección de comportamiento visible, sin contratos nuevos: 1.8.0 → **1.8.1**.

@@ -164,6 +164,7 @@ export class StartupBar {
           className: `service-pill ${service.status}`,
           title: [
             `${service.label} · ${presentation.description}`,
+            service.isDebug ? 'Con el depurador enganchado' : null,
             service.url,
             'Clic para ver su salida',
           ]
@@ -172,6 +173,9 @@ export class StartupBar {
           on: { click: () => this.host.focusService(service) },
         },
         el('span', { className: 'service-pill-dot' }),
+        // El proceso depurado lleva su insignia: en un perfil de dos, saber cuál es el depurado
+        // sin abrir nada es justo lo que faltaba.
+        service.isDebug ? icon('bug', { size: 12, className: 'service-pill-debug' }) : null,
         el('span', { className: 'service-pill-name', text: service.label }),
       );
 
@@ -476,6 +480,11 @@ export class StartupBar {
               },
             }),
             el('span', { className: `startup-order${checked ? '' : ' empty'}`, text: checked ? String(index + 1) : '·' }),
+            // El orden no es decorativo: en modo depuración, el primero es el que se depura. Se
+            // dice aquí, que es donde se decide el orden, y no después mirando la salida.
+            checked && index === 0 && this.config.mode === 'debug'
+              ? el('span', { className: 'startup-debug-badge', title: 'Se ejecuta con el depurador enganchado' }, icon('bug', { size: 12 }), el('span', { text: 'depurado' }))
+              : null,
             icon(presentation.icon, { size: 15, className: `tone-${presentation.tone}` }),
             el(
               'span',

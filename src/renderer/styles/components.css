@@ -3949,3 +3949,23 @@ select.input {
   color: var(--text-faint);
   cursor: default;
 }
+
+/* Insignia del proceso depurado: en un perfil de dos, cuál lleva el depurador enganchado. */
+.service-pill-debug {
+  flex: none;
+  opacity: 0.85;
+}
+
+.startup-debug-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 9px;
+  background: var(--accent-softer);
+  color: var(--accent);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}

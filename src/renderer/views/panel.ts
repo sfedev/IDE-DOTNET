@@ -50,6 +50,8 @@ export interface PanelHost {
   openUrl(url: string): void;
   /** Vuelve a lanzar el proceso de un canal (el botón de reinicio de su pestaña). */
   restartService(service: ServiceInfo): void;
+  /** Detiene la sesión de depuración: es la forma de parar un proceso depurado. */
+  stopDebug(): void;
   /**
    * Algo ha cambiado en la lista de procesos: uno ha arrancado, ha muerto o acaba de anunciar su
    * URL. Lo escucha la barra superior, que pinta una pastilla por proceso vivo.
@@ -72,6 +74,8 @@ export interface ServiceInfo {
   taskId: string | null;
   projectPath: string | null;
   projectKind: ProjectKind | null;
+  /** true si lo gobierna el depurador: se para con `debug:stop`, no cancelando una tarea. */
+  isDebug: boolean;
 }
 
 type LineKind = 'plain' | 'error' | 'ok' | 'command';
@@ -108,6 +112,13 @@ interface Channel {
   /** Proyecto del que salió el proceso, para la insignia de tipo y para poder reiniciarlo. */
   projectPath: string | null;
   projectKind: ProjectKind | null;
+  /**
+   * true si el proceso lo gobierna el depurador y no una tarea.
+   *
+   * Importa para los botones: un proceso depurado no tiene `taskId` que cancelar, se para con
+   * `debug:stop`. Sin esta marca, su botón de detener quedaba deshabilitado para siempre.
+   */
+  isDebug: boolean;
 }
 
 /** Texto del estado de un proceso. Es lo que se lee en la cabecera de su canal. */
@@ -132,8 +143,8 @@ export class PanelView {
 
   /** Canales de salida. El de build siempre existe; los de proceso se crean al arrancar. */
   private readonly channels = new Map<string, Channel>([
-    [BUILD_CHANNEL, { id: BUILD_CHANNEL, label: 'Compilación', kind: 'build', lines: [], taskId: null, url: null, status: 'idle', projectPath: null, projectKind: null }],
-    [TERMINAL_CHANNEL, { id: TERMINAL_CHANNEL, label: 'Terminal', kind: 'build', lines: [], taskId: null, url: null, status: 'idle', projectPath: null, projectKind: null }],
+    [BUILD_CHANNEL, { id: BUILD_CHANNEL, label: 'Compilación', kind: 'build', lines: [], taskId: null, url: null, status: 'idle', projectPath: null, projectKind: null, isDebug: false }],
+    [TERMINAL_CHANNEL, { id: TERMINAL_CHANNEL, label: 'Terminal', kind: 'build', lines: [], taskId: null, url: null, status: 'idle', projectPath: null, projectKind: null, isDebug: false }],
   ]);
 
   /**
@@ -146,6 +157,9 @@ export class PanelView {
   private readonly serviceMeta = new Map<string, { projectPath: string; projectKind: ProjectKind }>();
 
   private activeChannel = BUILD_CHANNEL;
+
+  /** Canal del proceso que gobierna el depurador, mientras haya sesión. */
+  private debugChannel: string | null = null;
 
   /** Ruta de cada tarea a su canal. Se rellena al arrancar la tarea. */
   private readonly taskChannel = new Map<string, string>();
@@ -229,6 +243,7 @@ export class PanelView {
       status: 'idle',
       projectPath: null,
       projectKind: null,
+      isDebug: false,
     };
     this.channels.set(id, created);
     return created;
@@ -257,6 +272,55 @@ export class PanelView {
     this.serviceMeta.set(label, meta);
   }
 
+  /**
+   * Abre el canal del proceso que va a depurarse.
+   *
+   * Se llama **antes** de arrancar la sesión, igual que `registerService` con una tarea: así la
+   * pestaña ya sabe de qué proyecto habla desde la primera línea. El canal no tiene `taskId`
+   * —no hay tarea que cancelar— y se marca `isDebug` para que su botón de parada sepa que lo que
+   * hay que detener es la sesión de depuración.
+   */
+  startDebugChannel(label: string, command: string): void {
+    const channel = this.channel(`task:${label}`);
+    const meta = this.serviceMeta.get(label);
+
+    channel.label = label;
+    channel.kind = 'process';
+    channel.taskId = null;
+    channel.isDebug = true;
+    channel.status = 'running';
+    channel.url = null;
+    channel.lines = [];
+    if (meta) {
+      channel.projectPath = meta.projectPath;
+      channel.projectKind = meta.projectKind;
+    }
+
+    this.debugChannel = channel.id;
+    this.activeChannel = channel.id;
+    this.push(channel.id, `❯ ${command}`, 'command');
+    this.host.servicesChanged();
+    this.render();
+  }
+
+  /** Cierra el canal del depurador cuando la sesión termina. */
+  finishDebugChannel(ok = true): void {
+    if (this.debugChannel === null) return;
+
+    const channel = this.channel(this.debugChannel);
+    channel.status = ok ? 'ok' : 'failed';
+    channel.isDebug = false;
+    this.debugChannel = null;
+
+    this.push(
+      channel.id,
+      ok ? '✓ Sesión de depuración terminada' : '✗ La sesión de depuración ha fallado',
+      ok ? 'ok' : 'error',
+    );
+    this.host.servicesChanged();
+    this.render();
+  }
+
   /** Procesos con canal propio, para las pastillas de la barra superior. */
   services(): ServiceInfo[] {
     return [...this.channels.values()]
@@ -269,6 +333,7 @@ export class PanelView {
         taskId: channel.taskId,
         projectPath: channel.projectPath,
         projectKind: channel.projectKind,
+        isDebug: channel.isDebug,
       }));
   }
 
@@ -303,8 +368,22 @@ export class PanelView {
    * de compilación, que es el que se ve por defecto.
    */
   append(text: string, stream: 'stdout' | 'stderr', taskId?: string): void {
-    const channelId = (taskId ? this.taskChannel.get(taskId) : null) ?? BUILD_CHANNEL;
+    this.appendTo((taskId ? this.taskChannel.get(taskId) : null) ?? BUILD_CHANNEL, text, stream);
+  }
 
+  /**
+   * Salida del proceso que gobierna el depurador.
+   *
+   * Va a **su** canal, no al de compilación. Antes acababa ahí porque el depurador no lanza una
+   * tarea y su salida llegaba sin `taskId`: el resultado era que el canal "Compilación" anunciaba
+   * el puerto de la aplicación depurada —"Compilación :5013"— y el proyecto que estabas depurando
+   * no aparecía como proceso por ninguna parte.
+   */
+  appendDebugOutput(text: string, stream: 'stdout' | 'stderr'): void {
+    this.appendTo(this.debugChannel ?? BUILD_CHANNEL, text, stream);
+  }
+
+  private appendTo(channelId: string, text: string, stream: 'stdout' | 'stderr'): void {
     for (const line of text.split(/\r?\n/)) {
       if (line === '') continue;
 
@@ -378,6 +457,7 @@ export class PanelView {
       channel.label = task.label;
       channel.kind = 'process';
       channel.taskId = task.taskId;
+      channel.isDebug = false;
       channel.status = 'running';
       channel.url = null;
       channel.lines = [];
@@ -591,7 +671,12 @@ export class PanelView {
         el('span', {
           className: `channel-dot${channel.status === 'running' ? ' running' : channel.status === 'failed' ? ' failed' : ''}`,
         }),
-        el('span', { text: STATUS_LABEL[channel.status] }),
+        // Un proceso depurado dice que lo está: es la única diferencia real entre los dos
+        // procesos de un perfil, y hasta ahora había que deducirla.
+        channel.isDebug && channel.status === 'running' ? icon('bug', { size: 12 }) : null,
+        el('span', {
+          text: channel.isDebug && channel.status === 'running' ? 'Depurando' : STATUS_LABEL[channel.status],
+        }),
       ),
     );
 
@@ -631,6 +716,7 @@ export class PanelView {
                 taskId: channel.taskId,
                 projectPath: channel.projectPath,
                 projectKind: channel.projectKind,
+                isDebug: channel.isDebug,
               }),
           },
         },
@@ -640,11 +726,13 @@ export class PanelView {
         'button',
         {
           className: 'icon-btn small',
-          title: `Detener sólo ${channel.label}`,
-          disabled: channel.status !== 'running' || channel.taskId === null,
+          title: channel.isDebug ? `Detener la depuración de ${channel.label}` : `Detener sólo ${channel.label}`,
+          // Un proceso depurado no tiene tarea que cancelar: se para la sesión del depurador.
+          disabled: channel.status !== 'running' || (channel.taskId === null && !channel.isDebug),
           on: {
             click: () => {
-              if (channel.taskId) this.host.cancelTask(channel.taskId);
+              if (channel.isDebug) this.host.stopDebug();
+              else if (channel.taskId) this.host.cancelTask(channel.taskId);
             },
           },
         },
@@ -1227,17 +1315,46 @@ export class PanelView {
       el('span', { className: 'spacer', style: { flex: '1' } }),
     );
 
+    /**
+     * Botones de parada de lo que está vivo.
+     *
+     * El indicador **no** es un spinner cuando el proceso es de larga duración. Un spinner dice
+     * "espera, estoy trabajando en algo que va a terminar", y una Web API arrancada no va a
+     * terminar: girar para siempre junto a "Detener WebApi" hacía pensar que seguía arrancando.
+     * Un punto verde dice lo correcto —"esto está en marcha"— y deja el spinner para las tareas
+     * que sí acaban: compilar, restaurar, probar.
+     */
     for (const task of this.runningTasks.values()) {
+      const longRunning = task.kind === 'run' || task.kind === 'watch';
+
       tabs.appendChild(
         el(
           'button',
           {
             className: 'btn ghost small',
-            title: task.command,
+            title: `${task.command}\n${longRunning ? 'En ejecución' : 'Trabajando'} — clic para detener`,
             on: { click: () => this.host.cancelTask(task.taskId) },
           },
-          el('span', { className: 'spinner' }),
+          longRunning ? el('span', { className: 'channel-dot running' }) : el('span', { className: 'spinner' }),
           task.label ? `Detener ${task.label}` : 'Detener',
+        ),
+      );
+    }
+
+    // La sesión de depuración no es una tarea, pero también hay que poder pararla desde aquí.
+    if (this.debugChannel !== null) {
+      const channel = this.channel(this.debugChannel);
+
+      tabs.appendChild(
+        el(
+          'button',
+          {
+            className: 'btn ghost small',
+            title: `Depurando ${channel.label} — clic para detener la sesión`,
+            on: { click: () => this.host.stopDebug() },
+          },
+          el('span', { className: 'channel-dot running' }),
+          `Detener ${channel.label}`,
         ),
       );
     }

@@ -25,7 +25,8 @@ export {
   SUGGESTION_SOURCES,
 } from './terminal-suggest.js';
 export type { Suggestion, SuggestContext, SuggestionKind } from './terminal-suggest.js';
-export { detectListeningUrl, portOf } from './run-output.js';
+export { debugChannelTransition, detectListeningUrl, portOf } from './run-output.js';
+export type { DebugChannelTransition, DebugPhase } from './run-output.js';
 export type { IconName } from './icons.js';
 
 /**

@@ -21,6 +21,7 @@ import type {
 import type { AiContext, AiProviderId, AiStatus, AiTask } from '../shared/ai.js';
 import { buildHttpFile, findEndpoints, httpFileNameFor, requestFor } from '../shared/api-endpoints.js';
 import { isHttpFile, parseHttpFile } from '../shared/http-file.js';
+import { debugChannelTransition } from './run-output.js';
 import type { ArchitectureViolation } from '../shared/architecture-rules.js';
 import { checkSolution, checkUsings } from '../shared/architecture-rules.js';
 import { architectureLabel, buildContext, detectArchitecture } from '../shared/ai-context.js';
@@ -65,6 +66,9 @@ class DotForgeApp {
 
   /** Avisos del linter de arquitectura. Viven aquí porque no los produce ninguna tarea. */
   private architectureIssues: BuildDiagnostic[] = [];
+
+  /** true entre que el depurador arranca de verdad y termina. Ver `onDebugState`. */
+  private debugSessionActive = false;
   private gitTimer: number | undefined;
 
   /** Ramas del repositorio, para el autocompletado de la terminal. Se refrescan con el estado. */
@@ -149,6 +153,7 @@ class DotForgeApp {
     }),
     openUrl: (url) => void window.dotforge.app.openExternal(url),
     restartService: (service) => void this.restartService(service),
+    stopDebug: () => void window.dotforge.debug.stop(),
     servicesChanged: () => this.startupBar.render(),
   });
 
@@ -519,13 +524,17 @@ class DotForgeApp {
 
       // El canal se declara antes de lanzar: así su pestaña ya sabe si esto es una Web API, un
       // Blazor o una consola desde la primera línea de salida, y no a posteriori.
-      if (project && step.action !== 'debug') {
+      //
+      // Se registra **también** el proyecto que se va a depurar. No lanza una tarea, pero es un
+      // proceso como los demás: tiene que tener su canal, su pastilla y su botón de parada, en vez
+      // de escupir su salida —y su puerto— dentro del canal de compilación.
+      if (project) {
         this.panel.registerService(label, { projectPath: project.path, projectKind: project.kind });
       }
 
       try {
         if (step.action === 'debug') {
-          this.panel.show('debug');
+          this.panel.startDebugChannel(label, `dotnet run --project ${step.projectPath} (con depurador)`);
           await window.dotforge.debug.start({
             projectPath: step.projectPath,
             stopAtEntry: false,
@@ -1102,6 +1111,25 @@ class DotForgeApp {
     await this.editor.saveAll();
 
     const label = shortProjectName(project.name, this.solution?.name ?? null);
+
+    // Reiniciar lo que se estaba depurando vuelve a depurarlo. Relanzarlo como una tarea normal
+    // dejaría los breakpoints sin enganchar y el usuario no habría pedido eso.
+    if (service.isDebug) {
+      await window.dotforge.debug.stop().catch(() => undefined);
+      this.panel.registerService(label, { projectPath: project.path, projectKind: project.kind });
+      this.panel.startDebugChannel(label, `dotnet run --project ${project.path} (con depurador)`);
+
+      try {
+        await window.dotforge.debug.start({
+          projectPath: project.path,
+          stopAtEntry: false,
+          breakpoints: this.debug.allBreakpoints(),
+        });
+      } catch (error) {
+        this.notify(`No se ha podido reiniciar la depuración de ${label}: ${this.messageOf(error)}`, 'error');
+      }
+      return;
+    }
     const kind: DotnetTaskKind = this.startupBar.mode() === 'run' && project.isWebProject ? 'watch' : 'run';
 
     this.panel.registerService(label, { projectPath: project.path, projectKind: project.kind });
@@ -1985,8 +2013,15 @@ class DotForgeApp {
     window.dotforge.events.onDebugState((state) => {
       this.debug.setState(state);
       if (state.status !== 'paused') this.editor.setExecutionLine(null, null);
+
+      // El canal del proceso depurado sólo se cierra si la sesión llegó a existir: la regla es
+      // pura y está probada en `debugChannelTransition`.
+      const transition = debugChannelTransition(this.debugSessionActive, state.status);
+      this.debugSessionActive = transition.active;
+      if (transition.close !== 'none') this.panel.finishDebugChannel(transition.close === 'ok');
       if (this.panel.currentTab() === 'debug') this.panel.render();
       this.renderStatus();
+      this.startupBar.render();
     });
 
     window.dotforge.events.onDebugStopped(() => {
@@ -2001,7 +2036,7 @@ class DotForgeApp {
     });
 
     window.dotforge.events.onDebugOutput(({ category, text }) => {
-      this.panel.append(text, category === 'stderr' ? 'stderr' : 'stdout');
+      this.panel.appendDebugOutput(text, category === 'stderr' ? 'stderr' : 'stdout');
     });
 
     // El streaming del asistente lo consume quien lanzó la petición: el chat de la barra lateral

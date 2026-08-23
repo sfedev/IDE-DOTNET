@@ -1,7 +1,7 @@
 {
   "name": "dotforge-ide",
   "productName": "DotForge IDE",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "description": "IDE de escritorio para C#, .NET 9+ y Blazor, con generador de arquitecturas de software (Clean, Hexagonal, DDD).",
   "author": {
     "name": "DotForge",

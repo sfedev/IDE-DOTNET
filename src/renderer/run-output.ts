@@ -47,3 +47,48 @@ export function portOf(url: string): string | null {
   const match = new RegExp(String.raw`:(\d{2,5})(?:/|$)`).exec(url);
   return match?.[1] ?? null;
 }
+
+// ---------------------------------------------------------------------------------------------
+// Ciclo de vida del canal del proceso depurado
+// ---------------------------------------------------------------------------------------------
+
+/** Estados que publica el controlador de depuración. Copia del contrato, para no importarlo. */
+export type DebugPhase = 'idle' | 'acquiring' | 'starting' | 'running' | 'paused' | 'error';
+
+export interface DebugChannelTransition {
+  /** true mientras haya una sesión de verdad viva. */
+  active: boolean;
+  /** Qué hacer con el canal del proceso depurado. */
+  close: 'none' | 'ok' | 'failed';
+}
+
+/**
+ * Qué le pasa al canal del proceso depurado ante un cambio de estado del depurador.
+ *
+ * Existe como función pura por un fallo concreto: `debug:start` **empieza parando** la sesión
+ * anterior, y ese `stop` emite `idle` antes de arrancar nada. Cerrar el canal en cualquier `idle`
+ * lo mataba recién abierto, y a partir de ahí la salida de la aplicación —incluido el puerto en el
+ * que escucha— volvía al canal de compilación: era lo que hacía aparecer "Compilación :5013".
+ *
+ * La regla, por tanto, es: **un `idle` sólo cierra si antes hubo sesión**. Un `error`, en cambio,
+ * cierra siempre: el canal se abre antes de arrancar, así que un fallo al arrancar también tiene
+ * que dejarlo marcado.
+ */
+export function debugChannelTransition(active: boolean, status: DebugPhase): DebugChannelTransition {
+  switch (status) {
+    case 'starting':
+    case 'running':
+    case 'paused':
+      return { active: true, close: 'none' };
+
+    case 'error':
+      return { active: false, close: 'failed' };
+
+    case 'idle':
+      return active ? { active: false, close: 'ok' } : { active: false, close: 'none' };
+
+    // `acquiring` es la descarga de NetCoreDbg: todavía no hay sesión, pero tampoco se ha caído.
+    case 'acquiring':
+      return { active, close: 'none' };
+  }
+}

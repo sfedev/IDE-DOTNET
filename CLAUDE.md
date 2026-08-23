@@ -493,6 +493,16 @@ npm run fetch:toolchain -- --platform win32 --arch x64
   execute because the specified command or file was not found", que no dice qué hacer. Se detecta
   por la **ausencia del bloque JSON**, no buscando esa frase (está traducida), y se añade la orden
   `dotnet tool install --global dotnet-ef`.
+- **El proceso depurado no lanza ninguna tarea.** Su salida llega por `debug:output`, sin
+  `taskId`, así que cualquier camino que use `taskId` para decidir el canal lo manda al de
+  compilación — y con él, el puerto que anuncia. Tiene canal propio (`startDebugChannel`) y se
+  para con `debug:stop`, no cancelando una tarea.
+- **`debug:start` empieza parando la sesión anterior**, y ese `stop` emite `idle` **antes** de
+  arrancar. Reaccionar a cualquier `idle` cierra lo que se acaba de abrir. La regla vive en
+  `debugChannelTransition` y está probada.
+- **Un spinner promete que algo va a terminar.** Junto a "Detener WebApi" mentía: una Web API
+  arrancada no termina. Las tareas largas (`run`, `watch`) llevan punto verde; el spinner queda
+  para `build`, `restore` y `test`.
 - **`[HH:mm:ss {Level:u3}]` no es la plantilla de Serilog.** La hora tiene que ir como marcador
   (`{Timestamp:HH:mm:ss}`); escrita a pelo se imprime literalmente en cada línea y nadie lo nota,
   porque el resto de la línea es correcto. Estuvo así en las seis plantillas desde la v1.1 hasta
