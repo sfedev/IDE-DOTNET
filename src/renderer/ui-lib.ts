@@ -189,3 +189,24 @@ export {
   supportLabel,
 } from '../shared/docker.js';
 export type { ContainerState, DockerContainer, DockerImage, SupportKind } from '../shared/docker.js';
+
+/** Docker Compose: YAML mínimo, servicios declarados y construcción de comandos. */
+export {
+  COMPOSE_FILE_NAMES,
+  composeArgs,
+  containerArgs,
+  isComposeFile,
+  parseCompose,
+  matchComposeState,
+  parseComposePorts,
+  parseYaml,
+  scalar,
+} from '../shared/compose.js';
+export type {
+  ComposeAction,
+  ComposeFile,
+  ComposeService,
+  ComposeState,
+  ContainerAction,
+  ServiceStatus,
+} from '../shared/compose.js';

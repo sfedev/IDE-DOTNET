@@ -27,7 +27,8 @@ desde el primer minuto, con un CRUD funcional de ejemplo. Desde la v1.4.0 lleva 
 control del nivel de detalle de la salida de la CLI de .NET. La v1.6.0 añade el **gestor visual de
 Entity Framework Core** y un **cliente HTTP integrado** para probar la API que estás escribiendo, y
 la v1.7.0 un **visor de registro estructurado**, un **linter de reglas de arquitectura** y
-autocompletado de Docker, Azure y npm en la terminal.
+autocompletado de Docker, Azure y npm en la terminal. La v1.8.0 cierra el círculo con un **panel de
+contenedores y Docker Compose** para levantar los servicios de apoyo sin salir del IDE.
 
 ![DotForge IDE con una solución DDD abierta](docs/screenshot-workspace.png)
 
@@ -42,6 +43,7 @@ autocompletado de Docker, Azure y npm en la terminal.
 - [Cliente HTTP integrado](#cliente-http-integrado)
 - [Registro estructurado](#registro-estructurado)
 - [Linter de reglas de arquitectura](#linter-de-reglas-de-arquitectura)
+- [Contenedores y Docker Compose](#contenedores-y-docker-compose)
 - [Instalación](#instalación)
 - [El generador de arquitecturas](#el-generador-de-arquitecturas)
   - [Clean Architecture](#clean-architecture)
@@ -309,6 +311,30 @@ El autocompletado de la terminal integrada ya no se limita a `git` y `dotnet`:
 - **npm** — subcomandos y, tras `npm run`, **los scripts de tu `package.json`**, no una lista
   inventada.
 
+### Contenedores y Docker Compose
+
+Un panel en la barra de actividad (`Ctrl+Shift+K`) con los servicios de apoyo que necesita el
+proyecto y el botón para levantarlos.
+
+- **La lista sale de tu `docker-compose.yml`**, no de lo que haya corriendo. Eso significa que el
+  panel sirve **con todo apagado**, que es justo cuando hace falta: te dice qué necesita esta
+  solución para arrancar. Se busca en la raíz del workspace y un nivel por debajo (`deploy/`,
+  `docker/`, `infra/`), y si hay varios, se elige cuál manda.
+- **Estado real por servicio**: un punto verde si está arriba, el recuento `3/4 arriba` en la
+  cabecera y los puertos publicados. Los servicios conocidos se enseñan con su nombre de verdad —
+  SQL Server, PostgreSQL, MySQL, MongoDB, Redis, RabbitMQ, Kafka, Elasticsearch, Seq, Azurite,
+  MailHog— en lugar de con el nombre de la imagen.
+- **Acciones donde se necesitan**: *Levantar* y *Bajar* todo el compose, y por servicio arrancar,
+  parar, reiniciar o ver su registro. Todo va al panel de salida, con su botón de cancelar, como
+  cualquier compilación.
+- **El puerto es un enlace** cuando lleva a algo que se abre en un navegador (la interfaz de Seq,
+  la de RabbitMQ, MailHog). Para una base de datos no lo es: `http://localhost:1433` no lleva a
+  ninguna parte.
+- Los contenedores que **no** son de este compose se listan aparte, sin mezclarlos con los tuyos.
+
+> Sin Docker instalado o con el motor parado, el panel no se queda en blanco: sigue enseñando los
+> servicios declarados, con las acciones deshabilitadas y un aviso que dice qué pasa.
+
 ### Paquetes NuGet
 
 - Panel visual: buscar en nuget.org, ver lo instalado, elegir versión, instalar y desinstalar.
@@ -516,6 +542,7 @@ En macOS, `Ctrl` es `Cmd`.
 | **Base de datos y EF Core** | `Ctrl+Shift+D` |
 | **Enviar la petición HTTP del cursor** | `Alt+Enter` |
 | **Registro de la aplicación** | `Ctrl+Shift+L` |
+| **Contenedores y Docker Compose** | `Ctrl+Shift+K` |
 | **Asistente de IA** | `Ctrl+Shift+A` |
 | **Editar con IA la selección** | `Ctrl+I` |
 | Problemas | `Ctrl+Shift+M` |

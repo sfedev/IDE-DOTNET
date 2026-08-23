@@ -36,6 +36,7 @@ import { HTTP_LANGUAGE_ID, registerHttpLanguage } from './languages/http.js';
 import { AiChatView } from './views/ai-chat.js';
 import { InlineAssistant } from './views/ai-inline.js';
 import { EditorView, type OpenTab } from './views/editor.js';
+import { ContainersView } from './views/containers.js';
 import { EfCoreView } from './views/efcore.js';
 import { ExplorerView } from './views/explorer.js';
 import { HttpClientView } from './views/http.js';
@@ -50,7 +51,7 @@ import { StatusBar } from './views/statusbar.js';
 import { WelcomeView } from './views/welcome.js';
 import { WizardView } from './views/wizard.js';
 
-type SidebarView = 'explorer' | 'git' | 'nuget' | 'efcore' | 'settings' | 'ai';
+type SidebarView = 'explorer' | 'git' | 'nuget' | 'efcore' | 'containers' | 'settings' | 'ai';
 
 class DotForgeApp {
   private info: AppInfo | null = null;
@@ -156,6 +157,14 @@ class DotForgeApp {
     notify: (message, level) => this.notify(message, level),
     openFile: (path) => void this.openFile(path),
     showOutput: () => this.panel.show('output'),
+  });
+
+  /** Panel de contenedores y Docker Compose. */
+  private readonly containersView = new ContainersView({
+    notify: (message, level) => this.notify(message, level),
+    showOutput: () => this.panel.show('output'),
+    openUrl: (url) => void window.dotforge.app.openExternal(url),
+    openFile: (path) => void this.openFile(path),
   });
 
   /** Cliente HTTP: vive dentro del panel inferior, como la depuración. */
@@ -348,6 +357,7 @@ class DotForgeApp {
     this.explorer.setSolution(solution);
     this.nuget.setSolution(solution);
     this.efcoreView.setSolution(solution);
+    this.containersView.setSolution(solution);
     this.startupBar.setSolution(solution);
     this.aiChat.setArchitecture(architectureLabel(detectArchitecture(solution)));
     this.updateTitle();
@@ -665,6 +675,7 @@ class DotForgeApp {
       button('Generador de arquitecturas', 'wand', false, () => void this.wizard.open()),
       button('Paquetes NuGet', 'package', this.sidebarView === 'nuget', () => this.showNuGet()),
       button('Base de datos y EF Core', 'database', this.sidebarView === 'efcore', () => this.showEfCore()),
+      button('Contenedores y Docker Compose', 'package', this.sidebarView === 'containers', () => this.showContainers()),
       button('Depuración y pruebas', 'bug', false, () => this.panel.show('debug'), errors > 0),
       this.aiButton(),
       el('div', { className: 'spacer' }),
@@ -728,6 +739,7 @@ class DotForgeApp {
     this.gitView.setVisible(view === 'git');
     this.nuget.setVisible(view === 'nuget');
     this.efcoreView.setVisible(view === 'efcore');
+    this.containersView.setVisible(view === 'containers');
     this.settingsView.setVisible(view === 'settings');
     this.aiChat.setVisible(view === 'ai');
     this.renderActivityBar();
@@ -739,6 +751,10 @@ class DotForgeApp {
 
   private showEfCore(): void {
     this.showSidebar('efcore');
+  }
+
+  private showContainers(): void {
+    this.showSidebar('containers');
   }
 
   private showSettings(): void {
@@ -1290,6 +1306,34 @@ class DotForgeApp {
         group: 'Ver',
         keybinding: `${modifier}+Shift+D`,
         run: () => this.showEfCore(),
+      },
+      {
+        id: 'view.containers',
+        icon: 'package',
+        title: 'Contenedores y Docker Compose',
+        group: 'Ver',
+        keybinding: `${modifier}+Shift+K`,
+        run: () => this.showContainers(),
+      },
+      {
+        id: 'docker.compose-up',
+        icon: 'play',
+        title: 'Docker: levantar los servicios del compose',
+        group: 'Docker',
+        run: () => {
+          this.showContainers();
+          void this.containersView.composeUp();
+        },
+      },
+      {
+        id: 'docker.compose-down',
+        icon: 'stop',
+        title: 'Docker: bajar los servicios del compose',
+        group: 'Docker',
+        run: () => {
+          this.showContainers();
+          void this.containersView.composeDown();
+        },
       },
       {
         id: 'efcore.add-migration',
@@ -1904,8 +1948,9 @@ class DotForgeApp {
 
     window.dotforge.events.onTaskExit((exit) => {
       this.panel.taskFinished(exit);
-      // Si la tarea era una operación de EF Core, el panel de base de datos se relee solo.
+      // Si la tarea era una operación de EF Core o de Docker, su panel se relee solo.
       this.efcoreView.noteTaskExit(exit.taskId, exit.code);
+      this.containersView.noteTaskExit(exit.taskId, exit.code);
       this.applyBuildMarkers(exit.diagnostics);
       this.renderStatus();
       this.startupBar.render();

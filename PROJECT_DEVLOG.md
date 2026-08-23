@@ -239,6 +239,23 @@ por tanto **compila** pero no **ejecuta** los proyectos generados. Se añade el 
 - [x] F13.17 Corrección en las plantillas: el `outputTemplate` de Serilog escribía la hora literal
 - [x] F13.18 Pruebas: 80 nuevas (registro, arquitectura, Docker y sugerencias de terminal)
 
+### Fase 14 — Contenedores y Docker Compose
+- [x] F14.1 Parser propio del subconjunto de YAML de Compose (`src/shared/compose.ts`)
+- [x] F14.2 Modelo de servicio: imagen o `build`, `container_name`, puertos, dependencias y perfiles
+- [x] F14.3 Cruce entre lo declarado y lo que corre (`matchComposeState`), como función pura
+- [x] F14.4 Búsqueda de archivos de Compose en la raíz y un nivel por debajo
+- [x] F14.5 Canales IPC `docker:state`, `docker:compose-files`, `docker:compose-read`, `docker:compose-run`, `docker:container-run`
+- [x] F14.6 Validación de los canales: ruta dentro del workspace, nombre de archivo de Compose y nombres acotados
+- [x] F14.7 Sexta herramienta de la barra de actividad: panel de contenedores
+- [x] F14.8 Cabecera con archivo, recuento `n/m arriba` y botones Levantar / Bajar / Registro
+- [x] F14.9 Fila por servicio con punto de estado, icono por tipo, nombre real y puertos
+- [x] F14.10 Acciones por servicio: arrancar, parar, reiniciar y ver el registro
+- [x] F14.11 Contenedores ajenos al compose en una sección aparte, con arrancar/parar/registro/eliminar
+- [x] F14.12 Puerto como enlace sólo para lo que se abre en un navegador (Seq, RabbitMQ, MailHog)
+- [x] F14.13 Con Docker apagado el panel sigue enseñando los servicios declarados (ADR-033)
+- [x] F14.14 Modo de diagnóstico `--ui=containers` y entradas en el menú "Datos"
+- [x] F14.15 Pruebas: 31 nuevas (YAML, servicios, puertos, comandos y correspondencia con el motor)
+
 ---
 
 ## Decisiones técnicas (ADR corto)
@@ -1539,3 +1556,97 @@ la arquitectura?" y "¿cómo se llamaba ese comando?"— se respondan dentro.
 
 **Versión:** funcionalidad nueva, un canal IPC nuevo y una corrección en las plantillas generadas:
 1.6.0 → **1.7.0** (ADR-009).
+
+---
+
+### ADR-031 — El compose manda, el motor confirma
+**Fecha:** 2026-08-23
+**Contexto:** El panel de contenedores puede construirse de dos formas: listando lo que el motor
+tiene corriendo, o listando lo que el proyecto declara y pegándole el estado real.
+**Decisión:** la lista sale del `docker-compose.yml` del repositorio; el motor sólo aporta el
+estado de cada servicio.
+**Consecuencias:** el panel **sirve con todo apagado**, que es justo cuando hace falta: enseña qué
+necesita este proyecto para arrancar y da el botón para levantarlo. Al revés estaría vacío
+precisamente en ese momento. La correspondencia entre servicio y contenedor se hace por la
+etiqueta `com.docker.compose.service` y, en segundo lugar, por el `container_name` declarado;
+**nunca por parecido del nombre**, porque dos proyectos con un servicio `redis` acabarían
+intercambiándose los botones de parar. Los contenedores que no pertenecen al compose se listan
+aparte, sin mezclarlos: son de otro trabajo. La regla entera vive en una función pura
+(`matchComposeState`) y está probada con los casos que importan.
+
+### ADR-032 — Parser propio de YAML para el subconjunto de Compose
+**Fecha:** 2026-08-23
+**Contexto:** Leer un `docker-compose.yml` exige un parser de YAML.
+**Opciones:** (a) añadir `js-yaml` o `yaml` como dependencia de runtime; (b) escribir el
+subconjunto que usa Compose.
+**Decisión:** (b), con los límites escritos en la cabecera del archivo.
+**Consecuencias:** el proyecto mantiene su regla de dependencias mínimas y auditables, y el
+subconjunto —mapas anidados, listas en bloque y en línea, escalares con comillas y comentarios—
+cabe en un archivo con 31 pruebas. Lo que no se soporta (anclas, bloques literales, documentos
+múltiples) se degrada perdiendo detalle, nunca fallando entero: sin esas piezas la lista de
+servicios sigue saliendo. El caso borde que más costó no es exótico: `- "5672:5672"` lleva dos
+puntos y **no** es un mapa, es un puerto; distinguirlo exige mirar qué viene después de los dos
+puntos, no si los hay.
+
+### ADR-033 — Docker apagado no vacía el panel
+**Fecha:** 2026-08-23
+**Contexto:** Sin Docker instalado o con el motor parado, ¿qué enseña el panel de contenedores?
+**Decisión:** los servicios declarados, con sus acciones deshabilitadas y un aviso arriba que dice
+qué pasa y qué hacer.
+**Consecuencias:** es la misma regla que con el asistente de IA apagado (ADR-023): una herramienta
+que no está disponible se atenúa y se explica, no desaparece. Quien abre el panel con el motor
+parado descubre igualmente qué necesita el proyecto —SQL Server, Redis, RabbitMQ y sus puertos—,
+que es la mitad del valor de la vista.
+
+---
+
+### Iteración 17 — 2026-08-23 — Fase 14: contenedores y Docker Compose
+**Objetivo:** que "levantar la base de datos antes de pulsar F5" sea un botón y no un viaje a otra
+ventana.
+
+**Módulo único — Panel de contenedores.**
+- `src/shared/compose.ts`: parser propio del subconjunto de YAML que usa Compose (ADR-032),
+  modelo de servicio (imagen o `build`, `container_name`, puertos, dependencias, perfiles) y
+  construcción de los comandos de `docker compose` y de contenedor.
+- `matchComposeState`: el cruce entre lo declarado y lo que corre (ADR-031), como función pura.
+- `docker-service.ts`: búsqueda de archivos de Compose en la raíz y un nivel por debajo, lectura
+  del archivo y ejecución transmitida por el canal de tareas, igual que EF Core.
+- `src/renderer/views/containers.ts`: sexta herramienta de la barra de actividad. Cabecera con el
+  archivo, el recuento `n/m arriba` y los botones Levantar / Bajar / Registro; una fila por
+  servicio con su punto de estado, su icono, su nombre real ("SQL Server", no la imagen), sus
+  puertos y las acciones al pasar el ratón (arrancar, parar, reiniciar, registro). Los contenedores
+  ajenos al compose, en una sección aparte.
+- Los puertos de lo que se abre en un navegador (Seq, RabbitMQ, MailHog) son un enlace; los de una
+  base de datos, no: abrir `http://localhost:1433` no lleva a ninguna parte.
+
+**Seguridad.** Los tres canales nuevos validan lo que llega del renderer: la ruta del compose pasa
+por el guardián del workspace **y** tiene que llamarse como un archivo de Compose —sin lo segundo
+sería un lector de archivos arbitrarios disfrazado—, y los nombres de servicio y de contenedor se
+acotan a lo que Docker admite antes de entrar en un `argv`.
+
+**Errores encontrados y solucionados:**
+1. *Síntoma:* los puertos de un servicio salían como `[{ '"5672': '5672"' }]`.
+   *Causa raíz:* el parser trataba `- "5672:5672"` como un mapa porque contenía dos puntos.
+   *Arreglo:* una clave de YAML exige que tras los dos puntos venga un espacio o el fin de línea, y
+   que el elemento no empiece por comilla. Con eso, un puerto vuelve a ser un puerto.
+2. *Síntoma (evitado):* el panel se vaciaba entero al no encontrar Docker.
+   *Causa raíz:* el estado del motor gobernaba todo el pintado.
+   *Arreglo:* ADR-033. El compose se pinta igual; lo que se apaga son los botones.
+3. *Decisión de diseño revisada:* la lógica de correspondencia entre servicios y contenedores
+   estaba dentro de la vista, donde no se podía probar sin un Docker delante. Se sacó a
+   `matchComposeState`, que es pura y tiene ocho pruebas propias — incluida la de los dos proyectos
+   con un servicio `redis` cada uno.
+
+**Verificado sobre la aplicación real:**
+- `--ui=containers` con un `docker-compose.yml` de cuatro servicios y **sin Docker instalado**: el
+  panel enseña el aviso "Docker no está instalado o no está en el PATH", el archivo,
+  `0/4 arriba`, los botones atenuados y las cuatro filas con su nombre real y sus puertos
+  (`sqlserver 1433`, `redis 6379`, `rabbitmq 5672, 15672`, `seq 5341`).
+- En la misma captura siguen funcionando las dos funcionalidades de la iteración anterior: la
+  barra de estado marca `⚠ 1` y la pestaña de problemas la insignia `1` del aviso de arquitectura.
+- `npm test` en verde de punta a punta: **887 pruebas** (733 unit, 41 security, 57 package, 56
+  scaffold), de las cuales 31 son nuevas de esta fase. `prune:dist` y `verify:dist` terminan sin
+  problemas sobre la 1.8.0.
+
+**Versión:** funcionalidad nueva con cinco canales IPC nuevos, sin romper nada anterior:
+1.7.0 → **1.8.0** (ADR-009).

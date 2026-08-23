@@ -72,6 +72,19 @@ export type {
   SchemaTable,
 } from './efcore-schema.js';
 export type {
+  ComposeAction,
+  ComposeFile,
+  ComposeService,
+  ContainerAction,
+} from './compose.js';
+export type {
+  ContainerState,
+  DockerContainer,
+  DockerImage,
+  PortBinding,
+  SupportKind,
+} from './docker.js';
+export type {
   HttpFileDocument,
   HttpHeader,
   HttpRequestBlock,
@@ -81,6 +94,8 @@ export type {
 import type { EfMigrationList, EfDbContext, EfOperation, EfOperationOptions } from './efcore.js';
 import type { DatabaseSchema } from './efcore-schema.js';
 import type { HttpResponseResult, ResolvedHttpRequest } from './http-file.js';
+import type { ComposeAction, ComposeFile, ContainerAction } from './compose.js';
+import type { DockerContainer, DockerImage } from './docker.js';
 import type { ConnectionStringInfo } from './efcore.js';
 
 // ---------------------------------------------------------------------------------------------
@@ -383,6 +398,19 @@ export interface TerminalContext {
   dockerAvailable: boolean;
 }
 
+/**
+ * Estado del motor de Docker.
+ *
+ * Que Docker no esté instalado o no esté arrancado es un estado normal, no un error: se devuelve
+ * `available: false` con el motivo y el panel lo cuenta en una línea.
+ */
+export interface DockerEngineState {
+  available: boolean;
+  reason: string | null;
+  containers: DockerContainer[];
+  images: DockerImage[];
+}
+
 export interface AppInfo {
   name: string;
   version: string;
@@ -489,6 +517,12 @@ export const IPC = {
 
   httpSend: 'http:send',
 
+  dockerState: 'docker:state',
+  dockerComposeFiles: 'docker:compose-files',
+  dockerComposeRead: 'docker:compose-read',
+  dockerComposeRun: 'docker:compose-run',
+  dockerContainerRun: 'docker:container-run',
+
   scaffoldList: 'scaffold:list',
   scaffoldGenerate: 'scaffold:generate',
   scaffoldPickOutputDir: 'scaffold:pick-output-dir',
@@ -563,6 +597,9 @@ export type MenuCommand =
   | 'view.source-control'
   | 'view.nuget'
   | 'view.efcore'
+  | 'view.containers'
+  | 'docker.compose-up'
+  | 'docker.compose-down'
   | 'view.problems'
   | 'view.logs'
   | 'architecture.check'
@@ -695,6 +732,23 @@ export interface DotForgeApi {
   /** Cliente HTTP de los archivos `.http` / `.rest`. */
   http: {
     send(request: ResolvedHttpRequest): Promise<HttpResponseResult>;
+  };
+
+  /**
+   * Contenedores y Docker Compose.
+   *
+   * Las lecturas devuelven estado; las acciones devuelven una tarea, porque `compose up` tarda y
+   * su salida va al panel inferior como la de cualquier compilación.
+   */
+  docker: {
+    state(): Promise<DockerEngineState>;
+    /** Archivos de Compose del workspace: la raíz y un nivel por debajo. */
+    composeFiles(): Promise<string[]>;
+    composeRead(path: string): Promise<ComposeFile>;
+    /** `up`, `down`, `restart`… sobre todo el compose o sobre un servicio concreto. */
+    composeRun(action: ComposeAction, path: string, service?: string | null): Promise<DotnetTaskStarted>;
+    /** Acciones sobre un contenedor suelto, fuera de Compose. */
+    containerRun(action: ContainerAction, container: string): Promise<DotnetTaskStarted>;
   };
 
   scaffold: {

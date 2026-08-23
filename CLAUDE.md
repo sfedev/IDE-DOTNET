@@ -14,6 +14,10 @@ Su módulo estrella es el **Scaffolding Wizard**: un generador de arquitecturas 
 que produce soluciones .NET **compilables y ejecutables** siguiendo Clean Architecture,
 Arquitectura Hexagonal (Ports & Adapters) o Domain-Driven Design + CQRS.
 
+Desde la v1.8.0 incluye un **panel de contenedores y Docker Compose**: los servicios de apoyo del
+proyecto (SQL Server, Redis, RabbitMQ, Seq…) con su estado, sus puertos y los botones para
+levantarlos, bajarlos y ver su registro sin salir del IDE.
+
 Desde la v1.7.0 incluye un **visor de registro estructurado** (Serilog, NLog, la consola de .NET y
 JSON compacto, con filtro por nivel y marcos de pila clicables), un **linter de reglas de
 arquitectura** que avisa de las dependencias prohibidas entre capas, y autocompletado de
@@ -64,6 +68,7 @@ IDE-DOTNET/
 │   │   ├── log-events.ts       # * Parser del registro: Serilog, NLog, consola de .NET y CLEF (puro)
 │   │   ├── architecture-rules.ts # * Linter de capas: dependencias permitidas y paquetes (puro)
 │   │   ├── docker.ts           # * Modelo de Docker: contenedores, puertos y servicios de apoyo (puro)
+│   │   ├── compose.ts          # * YAML mínimo de docker-compose.yml + cruce con el motor (puro)
 │   │   └── dotnet-verbosity.ts # * Nivel de salida de la CLI -> argumentos y variables (puro)
 │   ├── scaffold/           # * MODULO ESTRELLA: generador de arquitecturas (Node puro)
 │   │   ├── engine.ts           # Micro motor de plantillas {{token}}
@@ -104,7 +109,8 @@ IDE-DOTNET/
 │       ├── run-output.ts       # Detección de la URL en la que escucha un proceso
 │       ├── views/              # explorer, editor, nuget, panel, palette, statusbar, settings,
 │       │                       # welcome, wizard, debug, startup-bar, ai-chat, ai-inline, git,
-│       │                       # efcore (panel de base de datos), http (cliente del panel inferior)
+│       │                       # efcore (panel de base de datos), http (cliente del panel inferior),
+│       │                       # containers (contenedores y Docker Compose)
 │       └── styles/             # theme.css (tokens), layout.css, components.css
 ├── resources/              # Iconos multirresolución, branding
 ├── scripts/                # Build, generación de iconos, fetch de toolchain, verificación
@@ -191,7 +197,7 @@ npx electron . --smoke-test
 - `--ui=<vista>` — abre una vista antes de la captura pulsando los mismos controles que pulsaría
   un usuario (`wizard`, `settings`, `nuget`, `debug`, `ai`, `terminal`, `palette`, `light`,
   `nesting`, `startup`, `startup-dialog`, `terminal-suggest`, `git`, `git-diff`, `startup-play`,
-  `startup-run-mode`, `ai-toggle`, `efcore`, `http`, `logs`, `startup-logs`).
+  `startup-run-mode`, `ai-toggle`, `efcore`, `http`, `logs`, `startup-logs`, `containers`).
 - `--ui-wait=<ms>` — cuánto se espera antes de **pulsar** la acción de `--ui=`. Los 3,2 s por
   defecto no bastan si se arranca con una solución abierta: la interfaz todavía está cargando
   Monaco y el control que hay que pulsar aún no existe.
@@ -284,6 +290,22 @@ npx electron . --smoke-test
   tardar minutos, y su salida tiene que ir al panel inferior como la de cualquier `dotnet build`.
 - El nombre de una migración se valida como identificador de C# **antes** de construir los
   argumentos, y el `--context` sólo admite un identificador: los dos llegan del renderer.
+
+### Contenedores y Compose (`src/shared/compose.ts`, `src/main/services/docker-service.ts`)
+
+- **El compose manda, el motor confirma** (ADR-031). La lista de servicios sale del archivo del
+  repositorio; el estado se le pega después. Así el panel sirve con todo apagado, que es cuando
+  hace falta.
+- **La correspondencia servicio ↔ contenedor es por etiqueta** (`com.docker.compose.service`) y, en
+  segundo lugar, por `container_name`. Nunca por parecido del nombre: dos proyectos con un servicio
+  `redis` se intercambiarían los botones de parar.
+- **Parser propio de YAML** (ADR-032), acotado a lo que usa Compose. Cuidado con el caso que ya
+  falló una vez: `- "5672:5672"` lleva dos puntos y **no** es un mapa. Una clave exige espacio o
+  fin de línea tras los dos puntos.
+- **Docker apagado no vacía el panel** (ADR-033): se atenúan las acciones y se explica, como con el
+  asistente de IA.
+- `docker compose up` se lanza **siempre con `-d`**: un compose en primer plano dentro de un panel
+  que no es un terminal deja un proceso que no se puede parar con Ctrl+C.
 
 ### Visor de registro (`src/shared/log-events.ts`)
 

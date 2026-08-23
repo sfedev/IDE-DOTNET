@@ -3719,3 +3719,233 @@ select.input {
   gap: 5px;
   margin-top: 5px;
 }
+
+/* ------------------------------------------------------------------------------------------- */
+/* Contenedores y Docker Compose (barra lateral)                                                 */
+/* ------------------------------------------------------------------------------------------- */
+
+.docker-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+}
+
+.docker-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+}
+
+.docker-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.docker-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  text-align: left;
+}
+
+.docker-file:hover {
+  color: var(--accent);
+}
+
+.docker-file span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docker-count {
+  flex: none;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+.docker-select {
+  width: 100%;
+}
+
+.docker-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.docker-action {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.docker-icon-action {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  padding: 0;
+}
+
+.docker-running {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.docker-list,
+.docker-others {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.docker-section-title {
+  padding: 6px 4px 2px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+
+.docker-hint {
+  padding: 6px 4px;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+.docker-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+}
+
+.docker-row:hover {
+  background: var(--surface-hover);
+}
+
+.docker-row.up {
+  color: var(--text);
+}
+
+.docker-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.docker-dot.running {
+  background: var(--success);
+  box-shadow: 0 0 0 3px var(--success-soft);
+}
+
+.docker-dot.restarting {
+  background: var(--warning);
+}
+
+.docker-dot.dead {
+  background: var(--danger);
+}
+
+.docker-row-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.docker-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docker-image {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.docker-port {
+  flex: none;
+  padding: 1px 6px;
+  border: none;
+  border-radius: 9px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.docker-port.link {
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.docker-port.link:hover {
+  background: var(--accent-softer);
+}
+
+.docker-row-actions {
+  display: none;
+  flex: none;
+  gap: 2px;
+}
+
+.docker-row:hover .docker-row-actions {
+  display: flex;
+}
+
+.docker-row-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.docker-row-action:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.docker-row-action:disabled {
+  color: var(--text-faint);
+  cursor: default;
+}

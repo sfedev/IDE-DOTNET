@@ -9,11 +9,20 @@
  * soluciones .NET no lo usan. Todas las lecturas devuelven un estado con `available: false` y el
  * motivo, y la interfaz lo cuenta en una línea en vez de enseñar un diálogo de error.
  */
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import type { Dirent } from 'node:fs';
+import { readdir, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 
+import type { DotnetTaskStarted } from '../../shared/contracts.js';
+import type { ComposeFile } from '../../shared/compose.js';
+import { isComposeFile, parseCompose } from '../../shared/compose.js';
 import type { DockerContainer, DockerImage } from '../../shared/docker.js';
 import { parseContainers, parseImages } from '../../shared/docker.js';
+import type { DotnetTaskCallbacks } from './dotnet-service.js';
+import * as registry from './process-registry.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -98,6 +107,103 @@ export async function readState(): Promise<DockerState> {
 /** Primera línea del error, que es la que dice algo. El resto suele ser la traza del cliente. */
 function firstLine(text: string): string {
   return text.split(/\r?\n/).find((line) => line.trim() !== '')?.trim() ?? 'Docker no responde.';
+}
+
+// ---------------------------------------------------------------------------------------------
+// Docker Compose
+// ---------------------------------------------------------------------------------------------
+
+/** Directorios que nunca contienen un compose y sí miles de archivos. */
+const SKIPPED = new Set(['node_modules', 'bin', 'obj', '.git', '.vs', 'dist', 'build', 'artifacts']);
+
+/**
+ * Archivos de Compose del workspace.
+ *
+ * Se busca en la raíz y **un nivel por debajo**, que es donde están de verdad: en la raíz del
+ * repositorio o dentro de `deploy/`, `docker/`, `infra/`. Recorrer el árbol entero para encontrar
+ * un archivo que siempre está arriba sería pagar un paseo por `node_modules` en cada apertura.
+ */
+export async function findComposeFiles(root: string): Promise<string[]> {
+  const found: string[] = [];
+
+  const scan = async (directory: string, depth: number): Promise<void> => {
+    let entries: Dirent[];
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (entry.isFile() && isComposeFile(entry.name)) found.push(join(directory, entry.name));
+      else if (entry.isDirectory() && depth > 0 && !SKIPPED.has(entry.name) && !entry.name.startsWith('.')) {
+        await scan(join(directory, entry.name), depth - 1);
+      }
+    }
+  };
+
+  await scan(root, 1);
+  return found.sort();
+}
+
+/** Servicios declarados en un archivo de Compose. */
+export async function readComposeFile(path: string): Promise<ComposeFile> {
+  return parseCompose(await readFile(path, 'utf8'), path);
+}
+
+/**
+ * Ejecuta una acción de Docker y transmite su salida por el canal de tareas.
+ *
+ * Se reutiliza el canal de `dotnet` igual que en EF Core: levantar un compose tarda lo suyo, y el
+ * usuario tiene que poder ver qué está pasando y cancelarlo con los mismos botones de siempre.
+ */
+export function runDocker(
+  args: string[],
+  cwd: string,
+  callbacks: DotnetTaskCallbacks,
+  label = 'Docker',
+): DotnetTaskStarted {
+  const taskId = randomUUID();
+
+  const started: DotnetTaskStarted = {
+    taskId,
+    kind: 'build',
+    command: `docker ${args.join(' ')}`,
+    target: cwd,
+    label,
+  };
+
+  const child = spawn('docker', args, { cwd, env: process.env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
+
+  registry.track(taskId, started.command, child);
+  callbacks.onStarted(started);
+
+  const startedAt = Date.now();
+
+  const forward = (stream: 'stdout' | 'stderr') => (chunk: Buffer) =>
+    callbacks.onOutput({ taskId, stream, chunk: chunk.toString('utf8') });
+
+  child.stdout.on('data', forward('stdout'));
+  child.stderr.on('data', forward('stderr'));
+
+  const finish = (code: number | null): void => {
+    // Cualquier acción de Docker cambia el estado del motor: la caché deja de valer en el acto.
+    invalidate();
+    callbacks.onExit({ taskId, code, durationMs: Date.now() - startedAt, diagnostics: [], applicationUrl: null });
+  };
+
+  child.on('error', (error) => {
+    callbacks.onOutput({
+      taskId,
+      stream: 'stderr',
+      chunk: `No se ha podido ejecutar "docker": ${error.message}\n`,
+    });
+    finish(-1);
+  });
+
+  child.on('close', (code) => finish(code));
+
+  return started;
 }
 
 /** Nombres de contenedor e imágenes, que es lo que necesita el autocompletado de la terminal. */

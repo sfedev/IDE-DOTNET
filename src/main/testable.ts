@@ -40,7 +40,13 @@ export {
 export { coerceRequest, HttpRequestError, isLocalHost, sendRequest } from './services/http-client-service.js';
 
 /** Docker y los scripts de npm: tampoco importan `electron`. */
-export { readNames, readState, invalidate as invalidateDocker } from './services/docker-service.js';
+export {
+  findComposeFiles,
+  readComposeFile,
+  readNames,
+  readState,
+  invalidate as invalidateDocker,
+} from './services/docker-service.js';
 export { readNpmScripts } from './services/node-scripts.js';
 export { describeRecents, firstAvailable, isOpenableWorkspace } from './services/workspace-recents.js';
 export { ALLOWED_COMMANDS, CommandError, tokenize } from './services/command-runner.js';

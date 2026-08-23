@@ -6,7 +6,7 @@
  * cosa desde una página comprometida.
  */
 import { execFile } from 'node:child_process';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 
@@ -30,6 +30,8 @@ import type {
 } from '../../shared/contracts.js';
 import type { GitDiffRequest } from '../../shared/git.js';
 import type { EfOperation, EfOperationOptions } from '../../shared/efcore.js';
+import type { ComposeAction, ContainerAction } from '../../shared/compose.js';
+import { composeArgs, containerArgs, isComposeFile } from '../../shared/compose.js';
 import { EF_OPERATIONS } from '../../shared/efcore.js';
 import { buildDiffRequest } from '../../shared/git.js';
 import { IPC, IPC_EVENTS } from '../../shared/contracts.js';
@@ -502,6 +504,72 @@ export function registerIpcHandlers(): void {
   // --- Cliente HTTP ---------------------------------------------------------------------------
   // La validación entera vive en el servicio: es donde se decide qué se envía y qué no.
   ipcMain.handle(IPC.httpSend, (_event, request: unknown) => httpClient.sendRequest(request));
+
+  // --- Docker y Compose -----------------------------------------------------------------------
+  ipcMain.handle(IPC.dockerState, () => dockerService.readState());
+
+  ipcMain.handle(IPC.dockerComposeFiles, () =>
+    currentSolution ? dockerService.findComposeFiles(currentSolution.directory) : [],
+  );
+
+  /**
+   * Archivo de Compose validado.
+   *
+   * Dos comprobaciones, no una: la ruta tiene que estar dentro del workspace **y** el archivo
+   * tiene que llamarse como un compose. Sin lo segundo, este canal sería un lector de archivos
+   * arbitrarios del workspace disfrazado de lector de YAML.
+   */
+  function composeFile(raw: unknown): string {
+    const path = assertInsideWorkspace(raw);
+    const name = basename(path);
+
+    if (!isComposeFile(name)) throw new Error(`no es un archivo de Docker Compose: ${name}`);
+    return path;
+  }
+
+  ipcMain.handle(IPC.dockerComposeRead, (_event, path: unknown) => dockerService.readComposeFile(composeFile(path)));
+
+  const COMPOSE_ACTIONS: ReadonlySet<string> = new Set<ComposeAction>([
+    'up', 'down', 'restart', 'pull', 'build', 'logs', 'stop', 'start',
+  ]);
+
+  const CONTAINER_ACTIONS: ReadonlySet<string> = new Set<ContainerAction>([
+    'start', 'stop', 'restart', 'remove', 'logs',
+  ]);
+
+  ipcMain.handle(IPC.dockerComposeRun, (_event, action: unknown, path: unknown, service: unknown) => {
+    if (typeof action !== 'string' || !COMPOSE_ACTIONS.has(action)) {
+      throw new Error(`acción de Compose no reconocida: ${String(action)}`);
+    }
+
+    const file = composeFile(path);
+
+    // El nombre del servicio llega del renderer y acaba en un argv: se acota a lo que Compose
+    // admite como nombre, que además no incluye ningún carácter interesante para nadie.
+    const name = typeof service === 'string' && service.trim() !== '' ? service.trim() : null;
+    if (name !== null && !/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(name)) {
+      throw new Error(`nombre de servicio no válido: ${name}`);
+    }
+
+    return dockerService.runDocker(
+      composeArgs(action as ComposeAction, file, name),
+      dirname(file),
+      taskCallbacks,
+      'Docker Compose',
+    );
+  });
+
+  ipcMain.handle(IPC.dockerContainerRun, (_event, action: unknown, container: unknown) => {
+    if (typeof action !== 'string' || !CONTAINER_ACTIONS.has(action)) {
+      throw new Error(`acción de contenedor no reconocida: ${String(action)}`);
+    }
+
+    const name = requireString(container, 'container');
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(name)) throw new Error(`nombre de contenedor no válido: ${name}`);
+
+    const cwd = currentSolution?.directory ?? app.getPath('userData');
+    return dockerService.runDocker(containerArgs(action as ContainerAction, name), cwd, taskCallbacks, 'Docker');
+  });
 
   // --- Scaffolding ---------------------------------------------------------------------------
   ipcMain.handle(IPC.scaffoldList, () => listBlueprints());

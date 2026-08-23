@@ -83,6 +83,7 @@ export function buildApplicationMenu(): Menu {
         item('Control de código fuente', 'view.source-control', 'CmdOrCtrl+Shift+G'),
         item('Paquetes NuGet', 'view.nuget', 'CmdOrCtrl+Shift+U'),
         item('Base de datos y EF Core', 'view.efcore', 'CmdOrCtrl+Shift+D'),
+        item('Contenedores y Docker Compose', 'view.containers', 'CmdOrCtrl+Shift+K'),
         item('Problemas', 'view.problems', 'CmdOrCtrl+Shift+M'),
         item('Registro de la aplicación', 'view.logs', 'CmdOrCtrl+Shift+L'),
         item('Salida y terminal', 'view.terminal', 'CmdOrCtrl+J'),
@@ -116,6 +117,10 @@ export function buildApplicationMenu(): Menu {
         { type: 'separator' },
         item('Enviar la petición HTTP del cursor', 'http.send-request', 'Alt+Enter'),
         item('Generar pruebas HTTP del archivo', 'http.generate-file'),
+        { type: 'separator' },
+        item('Contenedores y Docker Compose', 'view.containers', 'CmdOrCtrl+Shift+K'),
+        item('Levantar los servicios del compose', 'docker.compose-up'),
+        item('Bajar los servicios del compose', 'docker.compose-down'),
       ],
     },
     {

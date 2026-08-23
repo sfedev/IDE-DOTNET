@@ -19,7 +19,7 @@ y un **flujo de trabajo** con criterio de aceptación.
 | 2 | `dotnet-lsp-agent` | Roslyn/OmniSharp LSP, IntelliSense | `src/main/lsp/**` |
 | 3 | `blazor-syntax-specialist` | Razor/Blazor: sintaxis, formateo, tags | `src/renderer/languages/**` |
 | 4 | `cross-platform-build-agent` | esbuild, electron-builder, firma, `/dist` | `scripts/**`, `electron-builder.yml` |
-| 5 | `dotnet-tooling-agent` | .sln/.csproj, NuGet, tareas, hot reload | `src/main/services/**` |
+| 5 | `dotnet-tooling-agent` | .sln/.csproj, NuGet, tareas, EF Core, Docker, hot reload | `src/main/services/**` |
 | 6 | `debug-adapter-agent` | NetCoreDbg + DAP | `src/main/debug/**` |
 | 7 | `ux-branding-agent` | Tema, iconos, layout, accesibilidad | `src/renderer/styles/**`, `resources/**` |
 | 8 | `qa-verification-agent` | Suite de pruebas, regresiones, release gate | `tests/**` |

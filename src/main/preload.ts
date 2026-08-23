@@ -41,6 +41,10 @@ import type {
   DatabaseSchema,
   HttpResponseResult,
   ResolvedHttpRequest,
+  ComposeAction,
+  ComposeFile,
+  ContainerAction,
+  DockerEngineState,
   LspState,
   MenuCommand,
   NuGetSearchResult,
@@ -129,6 +133,16 @@ const api: DotForgeApi = {
 
   http: {
     send: (request: ResolvedHttpRequest) => ipcRenderer.invoke(IPC.httpSend, request) as Promise<HttpResponseResult>,
+  },
+
+  docker: {
+    state: () => ipcRenderer.invoke(IPC.dockerState) as Promise<DockerEngineState>,
+    composeFiles: () => ipcRenderer.invoke(IPC.dockerComposeFiles) as Promise<string[]>,
+    composeRead: (path: string) => ipcRenderer.invoke(IPC.dockerComposeRead, path) as Promise<ComposeFile>,
+    composeRun: (action: ComposeAction, path: string, service?: string | null) =>
+      ipcRenderer.invoke(IPC.dockerComposeRun, action, path, service ?? null) as Promise<DotnetTaskStarted>,
+    containerRun: (action: ContainerAction, container: string) =>
+      ipcRenderer.invoke(IPC.dockerContainerRun, action, container) as Promise<DotnetTaskStarted>,
   },
 
   scaffold: {

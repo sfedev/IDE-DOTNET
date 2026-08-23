@@ -382,15 +382,16 @@ const uiAction = (() => {
 
 const UI_ACTIONS: Record<string, string> = {
   // La barra de actividad, en orden: solución, control de código fuente, generador, NuGet,
-  // base de datos, depuración, IA, [spacer], ajustes. Los índices son posicionales: si se añade
-  // una herramienta, hay que moverlos aquí, y por eso el orden está escrito arriba.
+  // base de datos, contenedores, depuración, IA, [spacer], ajustes. Los índices son posicionales:
+  // si se añade una herramienta, hay que moverlos aquí, y por eso el orden está escrito arriba.
   git: "document.querySelectorAll('.activity-item')[1]?.click()",
   wizard: "document.querySelectorAll('.activity-item')[2]?.click()",
   nuget: "document.querySelectorAll('.activity-item')[3]?.click()",
   efcore: "document.querySelectorAll('.activity-item')[4]?.click()",
-  debug: "document.querySelectorAll('.activity-item')[5]?.click()",
-  ai: "document.querySelectorAll('.activity-item')[6]?.click()",
-  settings: "document.querySelectorAll('.activity-item')[7]?.click()",
+  containers: "document.querySelectorAll('.activity-item')[5]?.click()",
+  debug: "document.querySelectorAll('.activity-item')[6]?.click()",
+  ai: "document.querySelectorAll('.activity-item')[7]?.click()",
+  settings: "document.querySelectorAll('.activity-item')[8]?.click()",
   // Cliente HTTP y visor de registro: pestañas del panel inferior.
   http: "[...document.querySelectorAll('.panel-tab')].find((tab) => tab.textContent?.includes('HTTP'))?.click()",
   logs: "[...document.querySelectorAll('.panel-tab')].find((tab) => tab.textContent?.includes('Registro'))?.click()",
@@ -399,12 +400,12 @@ const UI_ACTIONS: Record<string, string> = {
   // Dos pasos: abrir ajustes y pulsar "Claro". Se encadenan con un retardo porque la vista se
   // repinta entre uno y otro.
   light:
-    "document.querySelectorAll('.activity-item')[7]?.click();" +
+    "document.querySelectorAll('.activity-item')[8]?.click();" +
     "setTimeout(() => [...document.querySelectorAll('.segmented button')]" +
     ".find((button) => button.textContent?.includes('Claro'))?.click(), 400)",
   // Despliega el grupo de archivos satélite de appsettings.json.
   'probe-theme':
-    "document.querySelectorAll('.activity-item')[7]?.click();" +
+    "document.querySelectorAll('.activity-item')[8]?.click();" +
     "setTimeout(() => {" +
     "  [...document.querySelectorAll('.segmented button')].find((b) => b.textContent?.includes('Claro'))?.click();" +
     "  setTimeout(() => {" +
@@ -446,7 +447,7 @@ const UI_ACTIONS: Record<string, string> = {
   // Fase 11: conmuta "Activar el asistente" en Ajustes. Sirve para revisar a ojo el icono
   // atenuado de la barra de actividad; ejecutarlo dos veces deja la preferencia como estaba.
   'ai-toggle':
-    "document.querySelectorAll('.activity-item')[7]?.click();" +
+    "document.querySelectorAll('.activity-item')[8]?.click();" +
     'setTimeout(() => {' +
     "  const row = [...document.querySelectorAll('.settings-toggle')]" +
     "    .find((label) => label.textContent?.includes('Activar el asistente'));" +
