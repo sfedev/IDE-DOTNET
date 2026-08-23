@@ -53,6 +53,36 @@ export type {
 import type { GitDiffRequest, GitRepositoryStatus } from './git.js';
 export type { DotnetVerbosity } from './dotnet-verbosity.js';
 
+// El gestor de EF Core y el cliente HTTP tienen su propio módulo de modelo (parseo de la salida
+// de `dotnet ef`, esquema deducido de las migraciones, formato `.http`), pero su superficie IPC
+// es parte del contrato: se reexporta para importar de un único sitio.
+export type {
+  ConnectionStringInfo,
+  EfDbContext,
+  EfMigration,
+  EfMigrationList,
+  EfOperation,
+  EfOperationOptions,
+  EfTarget,
+} from './efcore.js';
+export type {
+  DatabaseSchema,
+  SchemaColumn,
+  SchemaIndex,
+  SchemaTable,
+} from './efcore-schema.js';
+export type {
+  HttpFileDocument,
+  HttpHeader,
+  HttpRequestBlock,
+  HttpResponseResult,
+  ResolvedHttpRequest,
+} from './http-file.js';
+import type { EfMigrationList, EfDbContext, EfOperation, EfOperationOptions } from './efcore.js';
+import type { DatabaseSchema } from './efcore-schema.js';
+import type { HttpResponseResult, ResolvedHttpRequest } from './http-file.js';
+import type { ConnectionStringInfo } from './efcore.js';
+
 // ---------------------------------------------------------------------------------------------
 // Modelos compartidos
 // ---------------------------------------------------------------------------------------------
@@ -313,6 +343,27 @@ export interface GitFileDiff {
   absolutePath: string;
 }
 
+/**
+ * Resultado de una lectura de `dotnet ef`.
+ *
+ * Igual que en git, un fallo de la CLI no es una excepción del IDE: que falten las herramientas
+ * o que la base de datos esté apagada son respuestas normales, y el panel las enseña tal cual.
+ */
+export interface EfReadResult<T> {
+  ok: boolean;
+  value: T;
+  /** Salida cruda de la CLI, para el canal de salida. */
+  detail: string;
+  error: string | null;
+}
+
+/** Cadenas de conexión encontradas en un `appsettings*.json` del proyecto. */
+export interface ConnectionStringFileInfo {
+  path: string;
+  name: string;
+  connections: ConnectionStringInfo[];
+}
+
 export interface AppInfo {
   name: string;
   version: string;
@@ -411,6 +462,14 @@ export const IPC = {
   startupGet: 'startup:get',
   startupSave: 'startup:save',
 
+  efcoreMigrations: 'efcore:migrations',
+  efcoreContexts: 'efcore:contexts',
+  efcoreRun: 'efcore:run',
+  efcoreSchema: 'efcore:schema',
+  efcoreConnections: 'efcore:connections',
+
+  httpSend: 'http:send',
+
   scaffoldList: 'scaffold:list',
   scaffoldGenerate: 'scaffold:generate',
   scaffoldPickOutputDir: 'scaffold:pick-output-dir',
@@ -483,6 +542,7 @@ export type MenuCommand =
   | 'view.explorer'
   | 'view.source-control'
   | 'view.nuget'
+  | 'view.efcore'
   | 'view.problems'
   | 'view.terminal'
   | 'view.toggle-theme'
@@ -505,6 +565,10 @@ export type MenuCommand =
   | 'git.push'
   | 'git.pull'
   | 'git.sync'
+  | 'efcore.add-migration'
+  | 'efcore.update-database'
+  | 'http.send-request'
+  | 'http.generate-file'
   | 'scaffold.wizard'
   | 'ai.chat'
   | 'ai.inline'
@@ -590,6 +654,27 @@ export interface DotForgeApi {
     get(): Promise<StartupConfig>;
     save(config: StartupConfig): Promise<StartupConfig>;
   };
+  /**
+   * Gestor de Entity Framework Core.
+   *
+   * Las lecturas devuelven `EfReadResult`; las escrituras devuelven una tarea, porque su salida
+   * va al panel como la de cualquier `dotnet build` y hay que poder cancelarla.
+   */
+  efcore: {
+    migrations(options: EfOperationOptions): Promise<EfReadResult<EfMigrationList>>;
+    contexts(options: EfOperationOptions): Promise<EfReadResult<EfDbContext[]>>;
+    run(operation: EfOperation, options: EfOperationOptions): Promise<DotnetTaskStarted>;
+    /** Esquema deducido de los archivos de migración del proyecto. No toca la base de datos. */
+    schema(projectPath: string): Promise<DatabaseSchema>;
+    /** Cadenas de conexión de los `appsettings*.json` del proyecto, con la contraseña oculta. */
+    connections(projectPath: string): Promise<ConnectionStringFileInfo[]>;
+  };
+
+  /** Cliente HTTP de los archivos `.http` / `.rest`. */
+  http: {
+    send(request: ResolvedHttpRequest): Promise<HttpResponseResult>;
+  };
+
   scaffold: {
     list(): Promise<BlueprintInfo[]>;
     generate(options: ScaffoldOptions): Promise<ScaffoldResult>;

@@ -24,7 +24,8 @@ Clean Architecture, Hexagonal o DDD + CQRS — que **compilan, pasan sus pruebas
 desde el primer minuto, con un CRUD funcional de ejemplo. Desde la v1.4.0 lleva además un
 **asistente de IA que conoce esa arquitectura** y ayuda sin romperla, y desde la v1.5.0 un
 **panel visual de control de código fuente**, pastillas de estado de los procesos en marcha y un
-control del nivel de detalle de la salida de la CLI de .NET.
+control del nivel de detalle de la salida de la CLI de .NET. La v1.6.0 añade el **gestor visual de
+Entity Framework Core** y un **cliente HTTP integrado** para probar la API que estás escribiendo.
 
 ![DotForge IDE con una solución DDD abierta](docs/screenshot-workspace.png)
 
@@ -35,6 +36,8 @@ control del nivel de detalle de la salida de la CLI de .NET.
 - [Características](#características)
 - [Control de código fuente](#control-de-código-fuente)
 - [Asistente de IA](#asistente-de-ia)
+- [Base de datos y Entity Framework Core](#base-de-datos-y-entity-framework-core)
+- [Cliente HTTP integrado](#cliente-http-integrado)
 - [Instalación](#instalación)
 - [El generador de arquitecturas](#el-generador-de-arquitecturas)
   - [Clean Architecture](#clean-architecture)
@@ -188,6 +191,69 @@ proyecto de dominio, te dice por qué no y dónde va.
 > **Privacidad.** Con el proveedor local no sale nada del equipo. Con Anthropic u OpenAI, el
 > contexto marcado en Ajustes viaja a su API en cada mensaje: si trabajas bajo NDA, revisa esos
 > cuatro interruptores o usa Ollama.
+
+### Base de datos y Entity Framework Core
+
+Un panel en la barra de actividad (`Ctrl+Shift+D`) que responde a la pregunta de siempre: *¿en qué
+estado está la base de datos?*
+
+- **Migraciones**: la lista completa con su fecha, marcando cuáles están aplicadas y cuáles
+  pendientes. Un clic abre el archivo de la migración en el editor.
+- **Crear y aplicar**: escribe el nombre, pulsa `+` y se ejecuta `dotnet ef migrations add`; el
+  botón "Actualizar la base de datos" lanza `dotnet ef database update` y lleva la cuenta de
+  cuántas migraciones pendientes hay. La salida va al panel inferior, como la de un `build`, y se
+  puede cancelar. Quitar la última migración avisa antes si ya estaba aplicada.
+- **Esquema deducido**: tablas, columnas, tipos, nulabilidad, claves e índices, leídos de los
+  archivos de migración del repositorio. El IDE **no se conecta a la base de datos**: no hace falta
+  tenerla levantada ni dar credenciales, y a cambio lo que ves es el esquema según el código. Una
+  migración que ejecuta SQL directo se marca como tal, porque su efecto no se puede deducir.
+- **Cadenas de conexión**: las de todos los `appsettings*.json` del proyecto, con el proveedor
+  detectado (SQL Server, PostgreSQL, SQLite, MySQL), el servidor y la base de datos separados, y la
+  **contraseña tapada**. Un clic abre el archivo.
+
+El proyecto con las migraciones y el proyecto de arranque se eligen arriba: el panel propone el que
+referencia EF Core y la Web API, que es lo que quieres el 95% de las veces.
+
+> Necesita las herramientas de EF Core. Si no están, el panel lo dice con la orden exacta:
+> `dotnet tool install --global dotnet-ef`.
+
+### Cliente HTTP integrado
+
+Probar un endpoint sin salir del IDE ni abrir otra aplicación.
+
+- **Archivos `.http` y `.rest`** con resaltado propio: separadores `###`, verbo, URL, cabeceras,
+  variables y cuerpo JSON, cada uno con su color.
+- **"Enviar petición"** aparece como lente de código sobre cada bloque. La respuesta se abre en la
+  pestaña **HTTP** del panel inferior: estado con su color, tiempo, tamaño, cuerpo reindentado,
+  cabeceras y el historial de las últimas veinte peticiones para comparar.
+- **Variables**: `@host = https://localhost:7001` en la cabecera del archivo y `{{host}}` donde
+  haga falta, incluidas las variables que se refieren a otras. También `{{$guid}}`, `{{$timestamp}}`
+  y `{{$randomInt}}`. Una variable que no existe se deja a la vista, para que se sepa qué falta.
+- **Genera las pruebas por ti**: sobre cada endpoint de C# —Minimal API con `MapGet`/`MapGroup` o
+  un controlador con `[Route("api/[controller]")]`— aparece una lente `Probar GET /api/products`
+  que **añade** esa petición al `.http` del proyecto, con los parámetros de ruta rellenos y un
+  cuerpo de ejemplo si el verbo lo lleva. Si hay un proceso corriendo, usa su puerto real.
+
+```http
+@host = https://localhost:7001
+
+### Listar productos
+GET {{host}}/api/products
+Accept: application/json
+
+### Crear producto
+POST {{host}}/api/products
+Content-Type: application/json
+
+{
+  "nombre": "Teclado mecánico",
+  "precio": 89.9
+}
+```
+
+> El certificado de desarrollo de ASP.NET Core es autofirmado. El cliente lo acepta **sólo** cuando
+> el destino es `localhost`, `127.0.0.1` o `::1`; contra un host remoto, un certificado inválido
+> sigue siendo un error.
 
 ### Paquetes NuGet
 
@@ -393,6 +459,8 @@ En macOS, `Ctrl` es `Cmd`.
 | **Control de código fuente** | `Ctrl+Shift+G` |
 | Confirmar el commit (con el foco en el mensaje) | `Ctrl+Enter` |
 | Paquetes NuGet | `Ctrl+Shift+U` |
+| **Base de datos y EF Core** | `Ctrl+Shift+D` |
+| **Enviar la petición HTTP del cursor** | `Alt+Enter` |
 | **Asistente de IA** | `Ctrl+Shift+A` |
 | **Editar con IA la selección** | `Ctrl+I` |
 | Problemas | `Ctrl+Shift+M` |

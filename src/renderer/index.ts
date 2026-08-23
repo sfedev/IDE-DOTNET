@@ -19,6 +19,8 @@ import type {
   SolutionInfo,
 } from '../shared/contracts.js';
 import type { AiContext, AiProviderId, AiStatus, AiTask } from '../shared/ai.js';
+import { buildHttpFile, findEndpoints, httpFileNameFor, requestFor } from '../shared/api-endpoints.js';
+import { isHttpFile, parseHttpFile } from '../shared/http-file.js';
 import { architectureLabel, buildContext, detectArchitecture } from '../shared/ai-context.js';
 import type { RunMode, StartupConfig } from '../shared/startup.js';
 import { launchPlan, runnableProjects, shortProjectName } from '../shared/startup.js';
@@ -28,10 +30,13 @@ import { installIconGallery } from './icon-gallery.js';
 import { icon, type IconName } from './icons.js';
 import { applyPublishDiagnostics, reopenAll } from './lsp-bridge.js';
 import { defineThemes, getMonaco, loadMonaco } from './monaco-setup.js';
+import { HTTP_LANGUAGE_ID, registerHttpLanguage } from './languages/http.js';
 import { AiChatView } from './views/ai-chat.js';
 import { InlineAssistant } from './views/ai-inline.js';
 import { EditorView, type OpenTab } from './views/editor.js';
+import { EfCoreView } from './views/efcore.js';
 import { ExplorerView } from './views/explorer.js';
+import { HttpClientView } from './views/http.js';
 import { GitView } from './views/git.js';
 import { NuGetView } from './views/nuget.js';
 import { PanelView, type ServiceInfo } from './views/panel.js';
@@ -43,7 +48,7 @@ import { StatusBar } from './views/statusbar.js';
 import { WelcomeView } from './views/welcome.js';
 import { WizardView } from './views/wizard.js';
 
-type SidebarView = 'explorer' | 'git' | 'nuget' | 'settings' | 'ai';
+type SidebarView = 'explorer' | 'git' | 'nuget' | 'efcore' | 'settings' | 'ai';
 
 class DotForgeApp {
   private info: AppInfo | null = null;
@@ -119,6 +124,7 @@ class DotForgeApp {
     cancelTask: (taskId) => void window.dotforge.dotnet.cancelTask(taskId),
     runCommand: (line) => void this.runTerminalCommand(line),
     renderDebug: (container) => this.debug.render(container, () => this.panel.render()),
+    renderHttp: (container) => this.httpClient.render(container),
     suggestContext: () => ({
       branches: this.branches,
       projects: (this.solution?.projects ?? []).map((project) => project.path),
@@ -127,6 +133,22 @@ class DotForgeApp {
     openUrl: (url) => void window.dotforge.app.openExternal(url),
     restartService: (service) => void this.restartService(service),
     servicesChanged: () => this.startupBar.render(),
+  });
+
+  /** Gestor de EF Core: migraciones, esquema y cadenas de conexión. */
+  private readonly efcoreView = new EfCoreView({
+    notify: (message, level) => this.notify(message, level),
+    openFile: (path) => void this.openFile(path),
+    showOutput: () => this.panel.show('output'),
+  });
+
+  /** Cliente HTTP: vive dentro del panel inferior, como la depuración. */
+  private readonly httpClient = new HttpClientView({
+    notify: (message, level) => this.notify(message, level),
+    showPanel: () => this.panel.show('http'),
+    refresh: () => {
+      if (this.panel.currentTab() === 'http') this.panel.render();
+    },
   });
 
   /** Panel de control de código fuente. Comparte contenedor con el resto de la barra lateral. */
@@ -210,6 +232,7 @@ class DotForgeApp {
     this.editor.mount(this.settings);
     this.attachLspProviders();
     this.registerEditorAiActions();
+    this.registerHttpFeatures();
 
     this.renderActivityBar();
     this.renderTitlebarActions();
@@ -313,6 +336,7 @@ class DotForgeApp {
     }
     this.explorer.setSolution(solution);
     this.nuget.setSolution(solution);
+    this.efcoreView.setSolution(solution);
     this.startupBar.setSolution(solution);
     this.aiChat.setArchitecture(architectureLabel(detectArchitecture(solution)));
     this.updateTitle();
@@ -626,6 +650,7 @@ class DotForgeApp {
       this.sourceControlButton(changes),
       button('Generador de arquitecturas', 'wand', false, () => void this.wizard.open()),
       button('Paquetes NuGet', 'package', this.sidebarView === 'nuget', () => this.showNuGet()),
+      button('Base de datos y EF Core', 'database', this.sidebarView === 'efcore', () => this.showEfCore()),
       button('Depuración y pruebas', 'bug', false, () => this.panel.show('debug'), errors > 0),
       this.aiButton(),
       el('div', { className: 'spacer' }),
@@ -688,6 +713,7 @@ class DotForgeApp {
     this.explorer.setVisible(view === 'explorer');
     this.gitView.setVisible(view === 'git');
     this.nuget.setVisible(view === 'nuget');
+    this.efcoreView.setVisible(view === 'efcore');
     this.settingsView.setVisible(view === 'settings');
     this.aiChat.setVisible(view === 'ai');
     this.renderActivityBar();
@@ -695,6 +721,10 @@ class DotForgeApp {
 
   private showGit(): void {
     this.showSidebar('git');
+  }
+
+  private showEfCore(): void {
+    this.showSidebar('efcore');
   }
 
   private showSettings(): void {
@@ -1218,6 +1248,49 @@ class DotForgeApp {
         run: () => this.showNuGet(),
       },
       {
+        id: 'view.efcore',
+        icon: 'database',
+        title: 'Base de datos y migraciones de EF Core',
+        group: 'Ver',
+        keybinding: `${modifier}+Shift+D`,
+        run: () => this.showEfCore(),
+      },
+      {
+        id: 'efcore.add-migration',
+        icon: 'plus',
+        title: 'EF Core: añadir migración…',
+        group: 'Base de datos',
+        run: () => {
+          this.showEfCore();
+          this.efcoreView.focusMigrationName();
+        },
+      },
+      {
+        id: 'efcore.update-database',
+        icon: 'database',
+        title: 'EF Core: actualizar la base de datos',
+        group: 'Base de datos',
+        run: () => {
+          this.showEfCore();
+          this.efcoreView.updateDatabase();
+        },
+      },
+      {
+        id: 'http.send-request',
+        icon: 'send',
+        title: 'HTTP: enviar la petición del cursor',
+        group: 'HTTP',
+        keybinding: 'Alt+Enter',
+        run: () => void this.sendHttpRequestAtCursor(),
+      },
+      {
+        id: 'http.generate-file',
+        icon: 'code',
+        title: 'HTTP: generar pruebas del archivo actual',
+        group: 'HTTP',
+        run: () => void this.generateHttpFile(),
+      },
+      {
         id: 'view.problems',
         icon: 'alert-circle',
         title: 'Problemas',
@@ -1461,6 +1534,229 @@ class DotForgeApp {
   }
 
   // -------------------------------------------------------------------------------------------
+  // Cliente HTTP y lentes de código
+  // -------------------------------------------------------------------------------------------
+
+  /**
+   * Registra el lenguaje `.http` y las dos lentes de código.
+   *
+   * Los comandos se registran en el editor (`addCommand`) en vez de en un registro global porque
+   * es la única forma que ofrece el editor autónomo de Monaco: `registerCommand` no está expuesto
+   * en el paquete de distribución, y un `MarkerProvider` no puede ejecutar acciones.
+   */
+  private registerHttpFeatures(): void {
+    const monaco = getMonaco();
+    registerHttpLanguage(monaco);
+
+    const editor = this.editor.getEditor();
+    if (!editor) return;
+
+    const sendCommand = editor.addCommand(0, (_context, index: unknown) => {
+      void this.sendHttpRequest(Number(index));
+    });
+
+    const generateCommand = editor.addCommand(0, (_context, line: unknown) => {
+      void this.generateHttpRequest(Number(line));
+    });
+
+    monaco.languages.registerCodeLensProvider(HTTP_LANGUAGE_ID, {
+      provideCodeLenses: (model) => {
+        const document = parseHttpFile(model.getValue());
+
+        return {
+          lenses: document.requests.map((request) => ({
+            id: `http-send-${request.index}`,
+            range: {
+              startLineNumber: request.requestLine,
+              startColumn: 1,
+              endLineNumber: request.requestLine,
+              endColumn: 1,
+            },
+            ...(sendCommand === null
+              ? {}
+              : { command: { id: sendCommand, title: 'Enviar petición', arguments: [request.index] } }),
+          })),
+          dispose: () => undefined,
+        };
+      },
+    });
+
+    monaco.languages.registerCodeLensProvider('csharp', {
+      provideCodeLenses: (model) => {
+        const endpoints = findEndpoints(model.getValue());
+
+        return {
+          lenses: endpoints.map((endpoint, position) => ({
+            id: `endpoint-${position}`,
+            range: {
+              startLineNumber: endpoint.line,
+              startColumn: 1,
+              endLineNumber: endpoint.line,
+              endColumn: 1,
+            },
+            ...(generateCommand === null
+              ? {}
+              : {
+                  command: {
+                    id: generateCommand,
+                    title: `Probar ${endpoint.method} ${endpoint.route}`,
+                    arguments: [endpoint.line],
+                  },
+                }),
+          })),
+          dispose: () => undefined,
+        };
+      },
+    });
+  }
+
+  /** Envía la petición número `index` del archivo `.http` abierto. */
+  private async sendHttpRequest(index: number): Promise<void> {
+    const tab = this.editor.activeTab();
+    if (!tab) return;
+
+    const document = parseHttpFile(tab.model.getValue());
+    const request = document.requests.find((candidate) => candidate.index === index) ?? document.requests[0];
+
+    if (!request) {
+      this.notify('No hay ninguna petición en este archivo.', 'warn');
+      return;
+    }
+
+    await this.httpClient.send(request, document.variables);
+  }
+
+  /** Envía la petición donde está el cursor. Es el camino del atajo y de la paleta. */
+  private async sendHttpRequestAtCursor(): Promise<void> {
+    const tab = this.editor.activeTab();
+    if (!tab || !isHttpFile(tab.path)) {
+      this.notify('Abre un archivo .http o .rest para enviar una petición.', 'warn');
+      return;
+    }
+
+    const document = parseHttpFile(tab.model.getValue());
+    const line = this.cursor?.line ?? 1;
+    const request =
+      document.requests.find((candidate) => line >= candidate.startLine && line <= candidate.endLine) ??
+      document.requests[0];
+
+    if (!request) {
+      this.notify('No hay ninguna petición en este archivo.', 'warn');
+      return;
+    }
+
+    await this.httpClient.send(request, document.variables);
+  }
+
+  /** Proyecto de la solución que contiene un archivo, por el prefijo más largo de su ruta. */
+  private projectFor(path: string): ProjectInfo | null {
+    const normalized = path.replace(/\\/g, '/').toLowerCase();
+
+    let best: ProjectInfo | null = null;
+    for (const project of this.solution?.projects ?? []) {
+      const directory = `${project.directory.replace(/\\/g, '/').toLowerCase()}/`;
+      if (!normalized.startsWith(directory)) continue;
+      if (best === null || project.directory.length > best.directory.length) best = project;
+    }
+
+    return best;
+  }
+
+  /**
+   * URL base de las pruebas generadas.
+   *
+   * Si hay un proceso arrancado que ya ha anunciado su puerto, se usa el suyo: generar una prueba
+   * contra `https://localhost:7001` cuando la aplicación escucha en el 5183 es garantizar que la
+   * primera ejecución falle.
+   */
+  private baseUrlForTests(): string {
+    return this.panel.services().find((service) => service.url !== null)?.url ?? 'https://localhost:7001';
+  }
+
+  /** Añade al `.http` del proyecto la petición del endpoint que hay en esa línea. */
+  private async generateHttpRequest(line: number): Promise<void> {
+    const tab = this.editor.activeTab();
+    if (!tab) return;
+
+    const endpoint = findEndpoints(tab.model.getValue()).find((candidate) => candidate.line === line);
+    if (!endpoint) return;
+
+    await this.appendToHttpFile(tab.path, requestFor(endpoint));
+  }
+
+  /** Genera el archivo `.http` completo del archivo C# abierto. */
+  private async generateHttpFile(): Promise<void> {
+    const tab = this.editor.activeTab();
+    if (!tab || !/\.cs$/i.test(tab.path)) {
+      this.notify('Abre un archivo .cs con endpoints para generar sus pruebas HTTP.', 'warn');
+      return;
+    }
+
+    const endpoints = findEndpoints(tab.model.getValue());
+    if (endpoints.length === 0) {
+      this.notify('No se han encontrado endpoints en este archivo.', 'warn');
+      return;
+    }
+
+    const project = this.projectFor(tab.path);
+    const body = buildHttpFile(endpoints, {
+      baseUrl: this.baseUrlForTests(),
+      title: `Peticiones de ${project?.name ?? 'la API'}`,
+    });
+
+    await this.writeHttpFile(tab.path, body);
+    this.notify(`${endpoints.length} petición(es) generadas.`, 'ok');
+  }
+
+  /** Ruta del `.http` de un archivo: junto al `.csproj` de su proyecto. */
+  private httpFilePathFor(sourcePath: string): string | null {
+    const project = this.projectFor(sourcePath);
+    if (!project) return null;
+
+    return `${project.directory.replace(/\\/g, '/')}/${httpFileNameFor(project.name)}`;
+  }
+
+  private async writeHttpFile(sourcePath: string, content: string): Promise<void> {
+    const target = this.httpFilePathFor(sourcePath);
+    if (target === null) {
+      this.notify('No se ha podido determinar el proyecto de este archivo.', 'warn');
+      return;
+    }
+
+    try {
+      await window.dotforge.fs.writeFile(target, content);
+      await this.openFile(target);
+    } catch (error) {
+      this.notify(`No se ha podido escribir ${target}: ${this.messageOf(error)}`, 'error');
+    }
+  }
+
+  /**
+   * Añade una petición al final del `.http` del proyecto, creándolo si no existe.
+   *
+   * Se **añade**, nunca se sobrescribe: el archivo suele tener ya peticiones ajustadas a mano con
+   * cuerpos y tokens de verdad, y perderlas por pulsar una lente sería imperdonable.
+   */
+  private async appendToHttpFile(sourcePath: string, request: string): Promise<void> {
+    const target = this.httpFilePathFor(sourcePath);
+    if (target === null) {
+      this.notify('No se ha podido determinar el proyecto de este archivo.', 'warn');
+      return;
+    }
+
+    let existing = '';
+    try {
+      existing = (await window.dotforge.fs.readFile(target)).content;
+    } catch {
+      // No existe todavía: se crea con su cabecera de variables.
+      existing = buildHttpFile([], { baseUrl: this.baseUrlForTests() });
+    }
+
+    const separator = existing.trim() === '' ? '' : '\n\n';
+    await this.writeHttpFile(sourcePath, `${existing.replace(/\s+$/, '')}${separator}${request}\n`);
+  }
+
+  // -------------------------------------------------------------------------------------------
   // Puentes de eventos
   // -------------------------------------------------------------------------------------------
 
@@ -1481,6 +1777,8 @@ class DotForgeApp {
 
     window.dotforge.events.onTaskExit((exit) => {
       this.panel.taskFinished(exit);
+      // Si la tarea era una operación de EF Core, el panel de base de datos se relee solo.
+      this.efcoreView.noteTaskExit(exit.taskId, exit.code);
       this.applyBuildMarkers(exit.diagnostics);
       this.renderStatus();
       this.startupBar.render();

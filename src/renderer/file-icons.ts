@@ -72,6 +72,9 @@ const BY_EXTENSION: Record<string, IconSpec> = {
   '.htm': { name: 'code', tone: 'markup' },
   '.css': { name: 'hash', tone: 'style' },
   '.scss': { name: 'hash', tone: 'style' },
+  // Archivos del cliente HTTP integrado: se reconocen de un vistazo entre los de configuración.
+  '.http': { name: 'send', tone: 'razor' },
+  '.rest': { name: 'send', tone: 'razor' },
   '.md': { name: 'markdown', tone: 'docs' },
   '.markdown': { name: 'markdown', tone: 'docs' },
   '.txt': { name: 'file', tone: 'muted' },

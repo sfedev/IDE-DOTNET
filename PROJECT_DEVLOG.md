@@ -201,6 +201,24 @@ por tanto **compila** pero no **ejecuta** los proyectos generados. Se añade el 
 - [x] F11.17 Modos de diagnóstico `--ui=git`, `--ui=git-diff`, `--ui=startup-play`, `--ui=ai-toggle`, `--wait=`, `--ui-wait=`
 - [x] F11.18 Pruebas: 98 nuevas (parseo de git, diff de Monaco, verbosidad, conmutador de IA y servicio de git real)
 
+### Fase 12 — Gestor de EF Core y cliente HTTP integrado
+- [x] F12.1 Modelo puro de EF Core (`src/shared/efcore.ts`): bloque JSON de la CLI, migraciones, contextos y argumentos
+- [x] F12.2 Esquema deducido de las migraciones (`src/shared/efcore-schema.ts`): tablas, columnas, claves e índices
+- [x] F12.3 Cadenas de conexión de los `appsettings*.json`, con proveedor detectado y contraseña tapada
+- [x] F12.4 Servicio `efcore-service.ts`: lectura con `execFile` y escritura transmitida por el canal de tareas
+- [x] F12.5 Contratos IPC `efcore:migrations`, `efcore:contexts`, `efcore:run`, `efcore:schema`, `efcore:connections`
+- [x] F12.6 Quinto icono de la barra de actividad y panel "Base de datos" con tres secciones colapsables
+- [x] F12.7 Añadir migración, actualizar base de datos y quitar la última, con confirmación si ya está aplicada
+- [x] F12.8 Modelo puro del formato `.http` / `.rest` (`src/shared/http-file.ts`): bloques, variables y resolución
+- [x] F12.9 Gramática Monarch del lenguaje `http` y su registro en Monaco
+- [x] F12.10 Lente de código "Enviar petición" sobre cada bloque de un archivo `.http`
+- [x] F12.11 Cliente HTTP en el proceso principal (`http-client-service.ts`) con redirecciones y tiempos
+- [x] F12.12 Pestaña "HTTP" del panel inferior: estado, tiempo, tamaño, cuerpo, cabeceras e historial
+- [x] F12.13 Detección de endpoints Minimal API y de controladores (`src/shared/api-endpoints.ts`)
+- [x] F12.14 Lente "Probar «verbo ruta»" sobre cada endpoint de C#, que genera la petición en el `.http` del proyecto
+- [x] F12.15 Menú nativo "Datos" y comandos de paleta para EF Core y HTTP
+- [x] F12.16 Pruebas: 82 nuevas (EF Core, esquema, formato `.http`, envío real contra un servidor y endpoints)
+
 ---
 
 ## Decisiones técnicas (ADR corto)
@@ -1274,3 +1292,116 @@ algo en la interfaz.
 
 **Versión:** funcionalidad nueva, con contratos IPC nuevos y sin romper nada de lo anterior:
 1.4.0 → **1.5.0** (ADR-009).
+
+---
+
+### ADR-025 — El esquema se deduce de las migraciones; el IDE no se conecta a la base de datos
+**Fecha:** 2026-08-23
+**Contexto:** El panel de datos tiene que enseñar tablas y columnas. La forma obvia es conectarse
+a la base de datos y leer su catálogo.
+**Opciones:** (a) conectar de verdad, con un driver por motor (SQL Server, PostgreSQL, MySQL,
+SQLite); (b) pedírselo a `dotnet ef dbcontext info`, que sólo da el proveedor y la cadena;
+(c) leer los archivos de migración del repositorio y aplicar sus operaciones en orden.
+**Decisión:** (c), y decirlo en el propio panel: el rótulo es "Esquema deducido".
+**Consecuencias:** cero dependencias nativas (la regla del proyecto), cero credenciales pedidas al
+usuario y funciona con la base de datos apagada, que es el estado normal a media mañana. A cambio,
+lo que se ve es el esquema **según el repositorio**, no según el servidor, y una migración que
+ejecuta `migrationBuilder.Sql(...)` es opaca: se cuenta aparte y el panel avisa de cuántas hay.
+Es un análisis de texto de C# generado por herramientas, no de C# escrito a mano, así que la
+gramática que hay que cubrir es pequeña y estable.
+
+### ADR-026 — El cliente HTTP usa `node:http`, y el certificado autofirmado sólo vale en localhost
+**Fecha:** 2026-08-23
+**Contexto:** Enviar la petición de un archivo `.http` contra una API en desarrollo. `fetch` está
+disponible en el proceso principal y sería lo natural.
+**Decisión:** `node:http` / `node:https`, con `rejectUnauthorized: false` **únicamente** cuando el
+host es `localhost`, `127.0.0.1` o `::1`.
+**Consecuencias:** el certificado de desarrollo de ASP.NET Core es autofirmado y `fetch` lo rechaza
+sin que el usuario pueda hacer nada desde el IDE; probar la propia API acabaría siendo imposible.
+Al acotar la excepción a la máquina local, un certificado inválido en un host remoto sigue siendo
+un error —que es lo correcto— y la excepción no se puede ampliar desde el renderer, porque la
+decisión se toma en el proceso principal a partir de la URL ya parseada. De propina se ganan los
+redireccionamientos seguidos a mano con tope y aviso de la URL final, y un tiempo medido que
+distingue "no ha respondido" de "ha respondido un 500".
+
+### ADR-027 — Las lentes de código de endpoints se calculan por texto, no por el LSP
+**Fecha:** 2026-08-23
+**Contexto:** Para pintar "Probar GET /api/products" sobre un endpoint hay que saber dónde están
+los endpoints. Roslyn lo sabe con exactitud.
+**Decisión:** análisis de texto acotado (`src/shared/api-endpoints.ts`), no una consulta al LSP.
+**Consecuencias:** la lente aparece mientras se escribe, con el servidor de lenguaje arrancando,
+degradado o apagado, y en archivos que todavía no compilan — que es justo cuando se está
+escribiendo un endpoint. El precio es equivocarse de vez en cuando, y se elige equivocarse **de la
+forma barata**: ofrecer una prueba de más nunca rompe nada, mientras que no ofrecer ninguna hace
+invisible la funcionalidad. Se cubren las dos formas que existen hoy (Minimal API con `MapGroup` y
+controladores con `[Route("api/[controller]")]`), y cada una tiene sus pruebas.
+
+---
+
+### Iteración 15 — 2026-08-23 — Fase 12: EF Core visual y cliente HTTP
+**Objetivo:** quitar las dos razones que quedaban para abrir una terminal o un Postman: gestionar
+migraciones y probar un endpoint.
+
+**Módulo 1 — Gestor de Entity Framework Core.**
+- `src/shared/efcore.ts`: modelo puro. Extracción del bloque `//BEGIN … //END` que las herramientas
+  de EF envuelven alrededor de su JSON, migraciones con su estado y su fecha, contextos,
+  construcción de argumentos por operación y lectura de cadenas de conexión de un `appsettings.json`
+  con comentarios y comas colgantes (que los tiene, siempre).
+- `src/shared/efcore-schema.ts`: tablas y columnas deducidas de las migraciones (ADR-025), con un
+  lector de paréntesis equilibrados que respeta las cadenas de C#, claves primarias simples y
+  compuestas, índices, y `AddColumn`/`DropColumn`/`RenameTable` aplicados en orden.
+- `src/main/services/efcore-service.ts`: lectura con `execFile` (el panel necesita el resultado) y
+  escritura con `spawn` por el canal de tareas (el panel necesita ver qué pasa durante dos minutos).
+- `src/renderer/views/efcore.ts`: panel con selector de proyecto y de proyecto de arranque, lista de
+  migraciones aplicadas/pendientes, esquema navegable y cadenas de conexión con la contraseña tapada.
+
+**Módulo 2 — Cliente HTTP integrado.**
+- `src/shared/http-file.ts`: parser del formato `.http`/`.rest` con separadores `###`, variables
+  `@nombre = valor`, variables dinámicas y resolución con dobles llaves.
+- `src/renderer/languages/http.ts`: gramática Monarch del lenguaje `http`.
+- Lente "Enviar petición" sobre cada bloque y pestaña "HTTP" en el panel inferior con estado,
+  tiempo, tamaño, cuerpo reindentado, cabeceras e historial de las últimas 20.
+- `src/shared/api-endpoints.ts` + lente sobre cada endpoint de C# que genera —**añadiendo**, nunca
+  sobrescribiendo— la petición en el `.http` del proyecto, con la URL base tomada del proceso que
+  esté corriendo si lo hay.
+
+**Errores encontrados y solucionados:**
+1. *Síntoma (evitado a tiempo):* la primera versión de la gramática entraba en un estado `url` tras
+   el verbo y lo cerraba con una regla de fin de línea.
+   *Causa raíz:* los estados de Monarch **sobreviven al salto de línea**; una regla de longitud cero
+   al final de la línea no llega a evaluarse, así que el estado no se cerraba nunca y todas las
+   cabeceras siguientes se pintaban como URL.
+   *Arreglo:* una sola regla por línea de petición, con grupos de captura. Sin estados, sin fuga.
+2. *Síntoma:* el panel enseñaba "Could not execute because the specified command or file was not
+   found." sin decir qué hacer.
+   *Causa raíz:* es el mensaje de `dotnet` cuando la herramienta `dotnet-ef` no está instalada, y se
+   estaba propagando tal cual.
+   *Arreglo:* si la CLI falla **y no ha llegado a emitir su bloque JSON**, se añade la orden de
+   instalación. Es una decisión de estado, no una regex sobre un mensaje traducido (misma lección
+   que el `nothing to commit` de la iteración anterior).
+3. *Síntoma:* `el bundle del renderer no incrusta Monaco` se puso en rojo al añadir dos vistas.
+   *Causa raíz:* la prueba usaba un tope absoluto de 400 KB como proxy de "Monaco no está dentro";
+   el renderer creció legítimamente hasta 415 KB.
+   *Arreglo:* la prueba ahora comprueba lo que dice comprobar — que el bundle es un orden de
+   magnitud más pequeño que la carpeta `vendor/monaco` que dice no incrustar — y deja un tope
+   absoluto de cordura muy por encima.
+4. *Síntoma:* los botones del panel enseñaban "Actualizar ...", "Quitar la ú...".
+   *Causa raíz:* la barra lateral mide 240 px y tres botones con rótulo no caben.
+   *Arreglo:* un botón con rótulo corto y dos de icono con la frase entera en el `title`.
+
+**Verificado sobre la aplicación real** (solución `Acme.Shop` generada al vuelo con `--db sqlite`):
+- `--ui=efcore`: el panel elige solo `Acme.Shop.Infrastructure` como proyecto con migraciones y
+  `Acme.Shop.WebApi` como proyecto de arranque, y lista las tres secciones. Sin `dotnet-ef`
+  instalado en esta máquina, el aviso incluye la orden de instalación, que es el comportamiento
+  buscado.
+- `--ui=http` sobre un `.http` real: resaltado correcto de separador, verbo, URL, cabeceras y cuerpo
+  JSON; lente "Enviar petición" sobre cada bloque; pestaña HTTP en el panel; el archivo aparece en
+  el explorador con su icono propio y la barra de estado dice `http`.
+- El envío de verdad se comprueba en la suite: cinco pruebas contra un servidor levantado en el
+  propio test (cuerpo, cabeceras, redirección 301, 404 y puerto cerrado).
+- `npm test` en verde de punta a punta: **776 pruebas** (622 unit, 41 security, 57 package, 56
+  scaffold), de las cuales 82 son nuevas de esta fase. `prune:dist` liberó los 279,0 MB de la 1.5.0
+  y `verify:dist` termina sin problemas.
+
+**Versión:** funcionalidad nueva con contratos IPC nuevos, sin romper nada anterior:
+1.5.0 → **1.6.0** (ADR-009).

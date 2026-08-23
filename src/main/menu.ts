@@ -82,6 +82,7 @@ export function buildApplicationMenu(): Menu {
         item('Explorador de soluciones', 'view.explorer', 'CmdOrCtrl+Shift+E'),
         item('Control de código fuente', 'view.source-control', 'CmdOrCtrl+Shift+G'),
         item('Paquetes NuGet', 'view.nuget', 'CmdOrCtrl+Shift+U'),
+        item('Base de datos y EF Core', 'view.efcore', 'CmdOrCtrl+Shift+D'),
         item('Problemas', 'view.problems', 'CmdOrCtrl+Shift+M'),
         item('Salida y terminal', 'view.terminal', 'CmdOrCtrl+J'),
         { type: 'separator' },
@@ -103,6 +104,17 @@ export function buildApplicationMenu(): Menu {
         { type: 'separator' },
         item('Explicar el código', 'ai.explain'),
         item('Generar pruebas xUnit', 'ai.tests'),
+      ],
+    },
+    {
+      label: 'Datos',
+      submenu: [
+        item('Migraciones y esquema de EF Core', 'view.efcore', 'CmdOrCtrl+Shift+D'),
+        item('Añadir migración…', 'efcore.add-migration'),
+        item('Actualizar la base de datos', 'efcore.update-database'),
+        { type: 'separator' },
+        item('Enviar la petición HTTP del cursor', 'http.send-request', 'Alt+Enter'),
+        item('Generar pruebas HTTP del archivo', 'http.generate-file'),
       ],
     },
     {

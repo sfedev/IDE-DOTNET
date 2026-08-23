@@ -67,3 +67,75 @@ export {
   syncSummary,
 } from '../shared/git.js';
 export type { GitDiffRequest, GitFileChange, GitRepositoryStatus } from '../shared/git.js';
+
+/**
+ * Gestor de Entity Framework Core.
+ *
+ * Parseo de la salida de `dotnet ef`, construcción de argumentos, cadenas de conexión y esquema
+ * deducido de las migraciones: todo son funciones puras con muchos casos borde reales, así que se
+ * prueban con Node pelado en vez de a ojo sobre un proyecto de verdad.
+ */
+export {
+  describeConnection,
+  detectProvider,
+  efArgs,
+  EF_OPERATIONS,
+  EF_TOOL_MISSING_HINT,
+  extractJsonBlock,
+  isValidMigrationName,
+  maskConnectionString,
+  migrationName,
+  migrationTimestamp,
+  parseConnectionStrings,
+  parseDbContexts,
+  parseMigrations,
+  stripJsonComments,
+} from '../shared/efcore.js';
+export type { ConnectionStringInfo, EfMigration, EfMigrationList, EfOperation } from '../shared/efcore.js';
+
+export {
+  buildSchema,
+  describeColumn,
+  EMPTY_SCHEMA,
+  namedArguments,
+  parseMigrationOperations,
+  readBalanced,
+  splitArguments,
+  stringList,
+  stringLiteral,
+  upMethodBody,
+} from '../shared/efcore-schema.js';
+export type { DatabaseSchema, SchemaColumn, SchemaTable } from '../shared/efcore-schema.js';
+
+/** Cliente HTTP: formato `.http`, resolución de variables y presentación de la respuesta. */
+export {
+  formatBytes as formatHttpBytes,
+  formatDuration,
+  HTTP_METHODS,
+  isHttpFile,
+  languageForContentType,
+  parseHttpFile,
+  prettyBody,
+  requestAtLine,
+  resolveRequest,
+  resolveVariables,
+  statusTone,
+} from '../shared/http-file.js';
+export type { HttpFileDocument, HttpRequestBlock, ResolvedHttpRequest } from '../shared/http-file.js';
+
+/** Detección de endpoints en C# y generación de pruebas `.http`. */
+export {
+  buildHttpFile,
+  collectGroups,
+  controllerName,
+  expandRouteTokens,
+  fillRouteParameters,
+  findControllerEndpoints,
+  findEndpoints,
+  findMinimalApiEndpoints,
+  httpFileNameFor,
+  joinRoutes,
+  requestFor,
+  sampleForParameter,
+} from '../shared/api-endpoints.js';
+export type { ApiEndpoint } from '../shared/api-endpoints.js';

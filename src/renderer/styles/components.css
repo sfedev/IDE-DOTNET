@@ -3104,3 +3104,439 @@ select.input {
 .service-pill-port:hover {
   text-decoration: underline;
 }
+
+/* ------------------------------------------------------------------------------------------- */
+/* Gestor de EF Core (barra lateral)                                                             */
+/* ------------------------------------------------------------------------------------------- */
+
+.ef-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+}
+
+.ef-targets {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ef-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ef-field-label {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+
+.ef-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+}
+
+.ef-add {
+  display: flex;
+  gap: 6px;
+}
+
+.ef-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.ef-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.ef-action {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ef-icon-action {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  padding: 0;
+}
+
+.ef-action span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ef-badge {
+  flex: none;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--text-xs);
+  line-height: 17px;
+  text-align: center;
+}
+
+.ef-running {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.ef-error {
+  align-items: flex-start;
+}
+
+.ef-section {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 6px;
+}
+
+.ef-section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 2px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  text-align: left;
+}
+
+.ef-section-header:hover {
+  color: var(--text);
+}
+
+.ef-section-title {
+  flex: 1;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+
+.ef-section-count {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+.ef-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 0;
+}
+
+.ef-hint {
+  padding: 6px 4px;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.ef-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.ef-row:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.ef-row.pending {
+  color: var(--text);
+}
+
+.ef-row-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ef-row-date,
+.ef-table-count {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+.ef-state {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 9px;
+  font-size: var(--text-xs);
+}
+
+.ef-state.applied {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.ef-state.pending {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.ef-table-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 26px;
+  padding: 0 6px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.ef-table-head:hover {
+  background: var(--surface-hover);
+}
+
+.ef-table-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ef-column {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 22px;
+  padding: 0 6px 0 28px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.ef-column.ef-index {
+  color: var(--text-faint);
+}
+
+.ef-key {
+  flex: none;
+  width: 18px;
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
+.ef-key.on {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.ef-column-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ef-column-type {
+  color: var(--text-faint);
+}
+
+.ef-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: var(--text-xs);
+  text-align: left;
+}
+
+.ef-file:hover {
+  color: var(--accent);
+}
+
+.ef-connection {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  padding: 0 6px 0 22px;
+  font-size: var(--text-xs);
+}
+
+.ef-provider {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 9px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 10px;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+
+.ef-connection-name {
+  color: var(--text);
+}
+
+.ef-connection-target {
+  flex: 1;
+  overflow: hidden;
+  color: var(--text-faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------------------------------- */
+/* Cliente HTTP (panel inferior)                                                                 */
+/* ------------------------------------------------------------------------------------------- */
+
+.http-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.http-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.http-method {
+  padding: 1px 7px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-softer);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+
+.http-url {
+  flex: 1;
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.http-status {
+  padding: 1px 7px;
+  border-radius: 9px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.http-status.ok {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.http-status.info {
+  background: var(--info-soft);
+  color: var(--info);
+}
+
+.http-status.warn {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.http-status.error {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.http-meta {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+.http-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.http-history {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+  overflow-x: auto;
+}
+
+.http-body {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.http-headers {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 14px;
+  align-content: start;
+  flex: 1;
+  min-height: 0;
+  padding: 10px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.http-header-name {
+  color: var(--syntax-attribute);
+}
+
+.http-header-value {
+  color: var(--text-muted);
+  word-break: break-all;
+}

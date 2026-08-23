@@ -33,6 +33,9 @@ const LANGUAGE_BY_EXTENSION: Record<string, string> = {
   '.xaml': 'xml',
   '.json': 'json',
   '.jsonc': 'json',
+  // Archivos del cliente HTTP integrado: tienen gramática propia en el editor.
+  '.http': 'http',
+  '.rest': 'http',
   '.md': 'markdown',
   '.markdown': 'markdown',
   '.yml': 'yaml',

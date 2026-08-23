@@ -27,11 +27,20 @@ import type {
   DotnetTaskOutput,
   DotnetTaskRequest,
   DotnetTaskStarted,
+  ConnectionStringFileInfo,
+  EfDbContext,
+  EfMigrationList,
+  EfOperation,
+  EfOperationOptions,
+  EfReadResult,
   EditorDocument,
   FileNode,
   GitCommandResult,
   GitFileDiff,
   GitStatus,
+  DatabaseSchema,
+  HttpResponseResult,
+  ResolvedHttpRequest,
   LspState,
   MenuCommand,
   NuGetSearchResult,
@@ -103,6 +112,22 @@ const api: DotForgeApi = {
   startup: {
     get: () => ipcRenderer.invoke(IPC.startupGet) as Promise<StartupConfig>,
     save: (config: StartupConfig) => ipcRenderer.invoke(IPC.startupSave, config) as Promise<StartupConfig>,
+  },
+
+  efcore: {
+    migrations: (options: EfOperationOptions) =>
+      ipcRenderer.invoke(IPC.efcoreMigrations, options) as Promise<EfReadResult<EfMigrationList>>,
+    contexts: (options: EfOperationOptions) =>
+      ipcRenderer.invoke(IPC.efcoreContexts, options) as Promise<EfReadResult<EfDbContext[]>>,
+    run: (operation: EfOperation, options: EfOperationOptions) =>
+      ipcRenderer.invoke(IPC.efcoreRun, operation, options) as Promise<DotnetTaskStarted>,
+    schema: (projectPath: string) => ipcRenderer.invoke(IPC.efcoreSchema, projectPath) as Promise<DatabaseSchema>,
+    connections: (projectPath: string) =>
+      ipcRenderer.invoke(IPC.efcoreConnections, projectPath) as Promise<ConnectionStringFileInfo[]>,
+  },
+
+  http: {
+    send: (request: ResolvedHttpRequest) => ipcRenderer.invoke(IPC.httpSend, request) as Promise<HttpResponseResult>,
   },
 
   scaffold: {

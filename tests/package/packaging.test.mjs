@@ -7,13 +7,23 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { isStaleArtifact, selectStaleArtifacts } from '../../scripts/lib/dist-artifacts.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+/** Tamaño total de un directorio, en bytes. */
+function directorySize(directory) {
+  let total = 0;
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const full = join(directory, entry.name);
+    total += entry.isDirectory() ? directorySize(full) : statSync(full).size;
+  }
+  return total;
+}
 const buildDir = join(root, 'build');
 const iconsDir = join(root, 'resources', 'icons');
 
@@ -138,7 +148,22 @@ describe('salida de la compilación', () => {
 
   it('el bundle del renderer no incrusta Monaco', () => {
     const renderer = readFileSync(join(buildDir, 'renderer.js'), 'utf8');
-    assert.ok(renderer.length < 400 * 1024, `el bundle del renderer pesa ${renderer.length} bytes`);
+    const vendor = join(buildDir, 'vendor/monaco/vs');
+
+    // La comprobación de verdad es de proporción, no de tamaño absoluto: el renderer crece con
+    // cada vista nueva, pero Monaco pesa megas y se sirve como archivos del vendor. Si algún día
+    // acabara dentro del bundle, éste dejaría de ser un orden de magnitud más pequeño que la
+    // carpeta que dice no incrustar, y esto se pondría en rojo.
+    if (existsSync(vendor)) {
+      const vendorSize = directorySize(vendor);
+      assert.ok(
+        renderer.length * 4 < vendorSize,
+        `el renderer pesa ${renderer.length} bytes frente a los ${vendorSize} de Monaco: parece incrustado`,
+      );
+    }
+
+    // Tope absoluto de cordura, por si el vendor no está presente en este árbol de build.
+    assert.ok(renderer.length < 1024 * 1024, `el bundle del renderer pesa ${renderer.length} bytes`);
   });
 
   it('el CLI empieza por el shebang, y sólo una vez', () => {

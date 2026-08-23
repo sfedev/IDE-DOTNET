@@ -110,6 +110,14 @@ function buildTheme(base: 'vs' | 'vs-dark'): MonacoApi.editor.IStandaloneThemeDa
       { token: 'metatag.html', foreground: token('--syntax-comment') },
 
       { token: 'operator.cs', foreground: token('--syntax-control') },
+
+      // Archivos .http del cliente integrado: verbo, URL, cabecera, variable y separador.
+      { token: 'keyword.http', foreground: token('--syntax-keyword'), fontStyle: 'bold' },
+      { token: 'string.link.http', foreground: token('--syntax-string') },
+      { token: 'attribute.name.http', foreground: token('--syntax-attribute') },
+      { token: 'variable.http', foreground: token('--syntax-variable') },
+      { token: 'variable.predefined.http', foreground: token('--syntax-razor') },
+      { token: 'metatag.http', foreground: token('--syntax-component'), fontStyle: 'bold' },
     ],
     colors: themeColors(),
   };

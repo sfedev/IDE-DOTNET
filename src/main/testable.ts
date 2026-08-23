@@ -26,6 +26,18 @@ export * as gitService from './services/git-service.js';
 export { toRepositoryPaths } from './services/git-service.js';
 export { findSolutionFile, loadSolution, readProject, IGNORED_DIRECTORIES } from './services/solution-service.js';
 export { languageIdFor } from './services/file-service.js';
+
+/**
+ * Gestor de EF Core y cliente HTTP: ninguno importa `electron`, así que las pruebas pueden
+ * ejercitarlos de verdad —leyendo migraciones de un directorio temporal y hablando con un
+ * servidor HTTP de mentira— en vez de comprobar sólo el parser.
+ */
+export {
+  readConnectionStrings,
+  readMigrationSources,
+  readSchema,
+} from './services/efcore-service.js';
+export { coerceRequest, HttpRequestError, isLocalHost, sendRequest } from './services/http-client-service.js';
 export { describeRecents, firstAvailable, isOpenableWorkspace } from './services/workspace-recents.js';
 export { ALLOWED_COMMANDS, CommandError, tokenize } from './services/command-runner.js';
 export {

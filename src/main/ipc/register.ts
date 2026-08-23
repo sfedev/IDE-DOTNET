@@ -28,6 +28,8 @@ import type {
   SolutionInfo,
 } from '../../shared/contracts.js';
 import type { GitDiffRequest } from '../../shared/git.js';
+import type { EfOperation, EfOperationOptions } from '../../shared/efcore.js';
+import { EF_OPERATIONS } from '../../shared/efcore.js';
 import { buildDiffRequest } from '../../shared/git.js';
 import { IPC, IPC_EVENTS } from '../../shared/contracts.js';
 import { AI_PROVIDER_IDS } from '../../shared/ai.js';
@@ -44,7 +46,9 @@ import * as aiSecrets from '../services/ai/secret-store.js';
 import { AiRequestError, coerceChatRequest } from '../services/ai/validate.js';
 import * as commandRunner from '../services/command-runner.js';
 import * as dotnetService from '../services/dotnet-service.js';
+import * as efcoreService from '../services/efcore-service.js';
 import * as fileService from '../services/file-service.js';
+import * as httpClient from '../services/http-client-service.js';
 import * as gitService from '../services/git-service.js';
 import * as nugetService from '../services/nuget-service.js';
 import * as settingsService from '../services/settings-service.js';
@@ -428,6 +432,73 @@ export function registerIpcHandlers(): void {
     if (!currentSolution) throw new Error('abre una solución antes de guardar perfiles de inicio');
     return startupService.save(currentSolution.directory, config);
   });
+
+  // --- Entity Framework Core ------------------------------------------------------------------
+  /**
+   * Objetivo de una operación de EF Core, ya validado.
+   *
+   * Los tres caminos —proyecto, proyecto de arranque y contexto— llegan del renderer, así que las
+   * rutas pasan por el guardián del workspace y el nombre del contexto se acota a un identificador
+   * de C#: es lo único que puede ser, y así no hay forma de colar un argumento suelto a la CLI.
+   */
+  function efTarget(raw: unknown): EfOperationOptions {
+    if (typeof raw !== 'object' || raw === null) throw new Error('faltan los datos del proyecto de EF Core');
+    const options = raw as Partial<EfOperationOptions>;
+
+    const project = assertInsideWorkspace(options.project);
+    const startupProject =
+      typeof options.startupProject === 'string' && options.startupProject.trim() !== ''
+        ? assertInsideWorkspace(options.startupProject)
+        : null;
+
+    const context =
+      typeof options.context === 'string' && options.context.trim() !== '' ? options.context.trim() : null;
+
+    if (context !== null && !/^[A-Za-z_][A-Za-z0-9_.]*$/.test(context)) {
+      throw new Error(`nombre de DbContext no válido: ${context}`);
+    }
+
+    const targetMigration =
+      typeof options.targetMigration === 'string' && options.targetMigration.trim() !== ''
+        ? options.targetMigration.trim()
+        : null;
+
+    if (targetMigration !== null && !/^[A-Za-z0-9_]+$/.test(targetMigration)) {
+      throw new Error(`nombre de migración no válido: ${targetMigration}`);
+    }
+
+    return {
+      project,
+      startupProject,
+      context,
+      targetMigration,
+      ...(typeof options.name === 'string' ? { name: options.name } : {}),
+      ...(options.force === true ? { force: true } : {}),
+    };
+  }
+
+  ipcMain.handle(IPC.efcoreMigrations, (_event, options: unknown) => efcoreService.listMigrations(efTarget(options)));
+
+  ipcMain.handle(IPC.efcoreContexts, (_event, options: unknown) => efcoreService.listContexts(efTarget(options)));
+
+  ipcMain.handle(IPC.efcoreSchema, (_event, projectPath: unknown) =>
+    efcoreService.readSchema(assertInsideWorkspace(projectPath)),
+  );
+
+  ipcMain.handle(IPC.efcoreConnections, (_event, projectPath: unknown) =>
+    efcoreService.readConnectionStrings(assertInsideWorkspace(projectPath)),
+  );
+
+  ipcMain.handle(IPC.efcoreRun, (_event, operation: unknown, options: unknown) => {
+    if (typeof operation !== 'string' || !EF_OPERATIONS.includes(operation as EfOperation)) {
+      throw new Error(`operación de EF Core no reconocida: ${String(operation)}`);
+    }
+    return efcoreService.runEfTask(operation as EfOperation, efTarget(options), taskCallbacks);
+  });
+
+  // --- Cliente HTTP ---------------------------------------------------------------------------
+  // La validación entera vive en el servicio: es donde se decide qué se envía y qué no.
+  ipcMain.handle(IPC.httpSend, (_event, request: unknown) => httpClient.sendRequest(request));
 
   // --- Scaffolding ---------------------------------------------------------------------------
   ipcMain.handle(IPC.scaffoldList, () => listBlueprints());

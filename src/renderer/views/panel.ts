@@ -31,13 +31,15 @@ const MAX_OUTPUT_LINES = 5000;
 /** Cuántas sugerencias se listan en el menú. Más que esto ya no se lee: se ojea. */
 const MAX_SUGGESTIONS = 8;
 
-export type PanelTab = 'output' | 'terminal' | 'problems' | 'debug';
+export type PanelTab = 'output' | 'terminal' | 'problems' | 'debug' | 'http';
 
 export interface PanelHost {
   openDiagnostic(diagnostic: BuildDiagnostic): void;
   cancelTask(taskId: string): void;
   runCommand(line: string): void;
   renderDebug(container: HTMLElement): void;
+  /** Pinta el cliente HTTP dentro del panel. Misma idea que `renderDebug`. */
+  renderHttp(container: HTMLElement): void;
   /** Contexto para el autocompletado: ramas de git y proyectos de la solución. */
   suggestContext(): SuggestContext;
   /** Abre una URL en el navegador del sistema. */
@@ -435,6 +437,13 @@ export class PanelView {
       case 'debug': {
         const host = el('div', { style: { height: '100%', display: 'flex', flexDirection: 'column' } });
         this.host.renderDebug(host);
+        content.appendChild(host);
+        return;
+      }
+
+      case 'http': {
+        const host = el('div', { className: 'http-panel' });
+        this.host.renderHttp(host);
         content.appendChild(host);
         return;
       }
@@ -950,6 +959,7 @@ export class PanelView {
           : null,
       ),
       makeTab('debug', 'bug', 'Depuración'),
+      makeTab('http', 'send', 'HTTP'),
       el('span', { className: 'spacer', style: { flex: '1' } }),
     );
 

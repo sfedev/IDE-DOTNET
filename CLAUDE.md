@@ -14,6 +14,12 @@ Su módulo estrella es el **Scaffolding Wizard**: un generador de arquitecturas 
 que produce soluciones .NET **compilables y ejecutables** siguiendo Clean Architecture,
 Arquitectura Hexagonal (Ports & Adapters) o Domain-Driven Design + CQRS.
 
+Desde la v1.6.0 incluye un **gestor visual de Entity Framework Core** (migraciones aplicadas y
+pendientes, `Add-Migration` y `Update-Database` con interfaz, esquema deducido de las migraciones y
+cadenas de conexión de los `appsettings*.json`) y un **cliente HTTP integrado**: archivos `.http` /
+`.rest` con resaltado propio y una lente "Enviar petición" sobre cada bloque, y otra lente sobre
+cada endpoint de Minimal API o de controlador que genera su prueba.
+
 Desde la v1.5.0 incluye un **panel visual de control de código fuente** (secciones de preparados y
 cambios, editor de diferencias lado a lado, commit/push/pull/sync y selector de rama), pastillas de
 estado por proceso en la barra superior y un ajuste de **verbosidad de la CLI de .NET** que gobierna
@@ -46,6 +52,10 @@ IDE-DOTNET/
 │   │   ├── ai-context.ts       # Contexto RAG y prompt de sistema con las reglas de arquitectura
 │   │   ├── ai-diff.ts          # Extracción de código y diferencias del asistente en línea
 │   │   ├── git.ts              # * Modelo del control de fuentes: parseo de status y diffs (puro)
+│   │   ├── efcore.ts           # * Modelo de EF Core: salida de la CLI, migraciones, conexiones (puro)
+│   │   ├── efcore-schema.ts    # * Esquema deducido de los archivos de migración (puro)
+│   │   ├── http-file.ts        # * Formato .http/.rest: bloques, variables y resolución (puro)
+│   │   ├── api-endpoints.ts    # * Endpoints de Minimal API y controladores + generación .http (puro)
 │   │   └── dotnet-verbosity.ts # * Nivel de salida de la CLI -> argumentos y variables (puro)
 │   ├── scaffold/           # * MODULO ESTRELLA: generador de arquitecturas (Node puro)
 │   │   ├── engine.ts           # Micro motor de plantillas {{token}}
@@ -61,7 +71,9 @@ IDE-DOTNET/
 │   │   ├── testable.ts         # Bundle sin Electron: rutas, .sln/.csproj, MSBuild (tests)
 │   │   ├── ipc/register.ts     # ÚNICA superficie expuesta al renderer
 │   │   ├── services/           # Solución, NuGet, tareas dotnet, terminal, rutas, ZIP, settings,
-│   │   │                       # git-service.ts (estado y operaciones de control de fuentes)
+│   │   │                       # git-service.ts (estado y operaciones de control de fuentes),
+│   │   │                       # efcore-service.ts (dotnet ef + migraciones del disco),
+│   │   │                       # http-client-service.ts (envío real de las peticiones .http)
 │   │   │   └── ai/             # * Asistente de IA: proveedores, streaming y claves cifradas
 │   │   │       ├── request-builder.ts  # Petición HTTP por proveedor (puro)
 │   │   │       ├── stream-parser.ts    # SSE/NDJSON -> deltas (puro)
@@ -78,10 +90,12 @@ IDE-DOTNET/
 │       ├── file-icons.ts       # Icono/insignia por archivo, carpeta y proyecto + anidamiento
 │       ├── ui-lib.ts           # Bundle sin DOM de esas reglas, para poder probarlas
 │       ├── languages/          # razor.ts (config, snippets, auto-cierre) + razor-tokens.ts (Monarch)
+│       │                       # http.ts (gramática Monarch de los archivos .http / .rest)
 │       ├── terminal-suggest.ts # Motor de sugerencias de la terminal (git y CLI de .NET), sin DOM
 │       ├── run-output.ts       # Detección de la URL en la que escucha un proceso
 │       ├── views/              # explorer, editor, nuget, panel, palette, statusbar, settings,
-│       │                       # welcome, wizard, debug, startup-bar, ai-chat, ai-inline, git
+│       │                       # welcome, wizard, debug, startup-bar, ai-chat, ai-inline, git,
+│       │                       # efcore (panel de base de datos), http (cliente del panel inferior)
 │       └── styles/             # theme.css (tokens), layout.css, components.css
 ├── resources/              # Iconos multirresolución, branding
 ├── scripts/                # Build, generación de iconos, fetch de toolchain, verificación
@@ -168,7 +182,7 @@ npx electron . --smoke-test
 - `--ui=<vista>` — abre una vista antes de la captura pulsando los mismos controles que pulsaría
   un usuario (`wizard`, `settings`, `nuget`, `debug`, `ai`, `terminal`, `palette`, `light`,
   `nesting`, `startup`, `startup-dialog`, `terminal-suggest`, `git`, `git-diff`, `startup-play`,
-  `startup-run-mode`, `ai-toggle`).
+  `startup-run-mode`, `ai-toggle`, `efcore`, `http`).
 - `--ui-wait=<ms>` — cuánto se espera antes de **pulsar** la acción de `--ui=`. Los 3,2 s por
   defecto no bastan si se arranca con una solución abierta: la interfaz todavía está cargando
   Monaco y el control que hay que pulsar aún no existe.
@@ -248,6 +262,31 @@ npx electron . --smoke-test
   (`toRepositoryPaths`) **y** contra el workspace (`assertInsideWorkspace`).
 - El editor de diferencias usa modelos `dotforge-diff:` de sólo lectura (ADR-021): nunca el modelo
   `file:` del archivo abierto.
+
+### Entity Framework Core (`src/main/services/efcore-service.ts`, `src/shared/efcore*.ts`)
+
+- **Se lee el bloque JSON, no el texto.** Las herramientas de EF envuelven su salida `--json` entre
+  `//BEGIN` y `//END` para separarla de la del build. Cualquier decisión tomada sobre el texto plano
+  (`(Pending)`) es un parche que se romperá: existe como camino de respaldo y se marca `degraded`.
+- **El IDE no se conecta a la base de datos** (ADR-025). Las tablas y columnas salen de los archivos
+  de migración del repositorio, aplicando sus operaciones en orden. El panel lo dice: "Esquema
+  deducido". Una migración con `migrationBuilder.Sql(...)` es opaca y se cuenta aparte.
+- **Lo que se lee usa `execFile`; lo que escribe usa el canal de tareas.** `database update` puede
+  tardar minutos, y su salida tiene que ir al panel inferior como la de cualquier `dotnet build`.
+- El nombre de una migración se valida como identificador de C# **antes** de construir los
+  argumentos, y el `--context` sólo admite un identificador: los dos llegan del renderer.
+
+### Cliente HTTP (`src/main/services/http-client-service.ts`, `src/shared/http-file.ts`)
+
+- **`node:http` / `node:https`, no `fetch`** (ADR-026), y `rejectUnauthorized: false` **sólo** para
+  `localhost`, `127.0.0.1` y `::1`: es la única forma de probar una API con el certificado de
+  desarrollo de ASP.NET Core sin abrir la puerta a un certificado inválido en un host remoto.
+- **Las variables se resuelven en el renderer**, con el modelo puro. Lo que cruza el IPC es una
+  petición concreta; el proceso principal no conoce el formato `.http`.
+- Un fallo de red **no lanza**: se devuelve como resultado con `error`, igual que en git. Que la API
+  no esté levantada todavía es el estado normal de un desarrollo.
+- Una variable que no existe se deja tal cual (`{{baseUrl}}`) en vez de sustituirse por vacío: una
+  URL a medias no dice qué falta.
 
 ### Salida de la CLI de .NET (`src/shared/dotnet-verbosity.ts`)
 
@@ -393,6 +432,19 @@ npm run fetch:toolchain -- --platform win32 --arch x64
 - **`--ui=` pulsa a los 3,2 s**, que no bastan si se arranca con una solución abierta (Monaco y el
   parseo de la solución tardan más). El síntoma es que la acción "no hace nada", sin ningún error:
   se resuelve con `--ui-wait=<ms>`.
+- **Los estados de Monarch sobreviven al salto de línea.** Un estado al que se entra a mitad de
+  línea (por ejemplo, "esto es una URL" tras el verbo de un `.http`) **no** se cierra solo al
+  terminar la línea: una regla de longitud cero al final ni siquiera llega a evaluarse. El estado
+  se cuela en la línea siguiente y tiñe lo que venga. Cuando la regla es "de aquí al final de la
+  línea", se escribe una sola regla con grupos de captura, no un estado.
+- **`dotnet ef` no está instalado por defecto.** El mensaje de `dotnet` en ese caso es "Could not
+  execute because the specified command or file was not found", que no dice qué hacer. Se detecta
+  por la **ausencia del bloque JSON**, no buscando esa frase (está traducida), y se añade la orden
+  `dotnet tool install --global dotnet-ef`.
+- **Una prueba de tamaño no es una prueba de contenido.** El tope de 400 KB del bundle del renderer
+  quería decir "Monaco no está dentro" y lo que decía era "el renderer no ha crecido": se puso en
+  rojo al añadir dos vistas legítimas. Ahora compara el bundle con la carpeta `vendor/monaco` que
+  dice no incrustar, que es la propiedad de verdad.
 - **`dotnet watch` no tiene `--verbosity`.** Tiene `--verbose`, y va antes del subcomando; todo lo
   que va detrás se lo pasa a la aplicación hija, así que la bandera equivocada llega como argumento
   de la aplicación en vez de fallar.
