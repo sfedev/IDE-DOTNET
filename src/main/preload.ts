@@ -8,6 +8,12 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 import type {
+  AiChatRequest,
+  AiProbeResult,
+  AiProviderId,
+  AiStatus,
+  AiStreamDelta,
+  AiStreamEnd,
   AppInfo,
   AppSettings,
   DebugAction,
@@ -132,6 +138,15 @@ const api: DotForgeApi = {
     evaluate: (expression, frameId) => ipcRenderer.invoke(IPC.debugEvaluate, expression, frameId) as Promise<string>,
   },
 
+  ai: {
+    status: () => ipcRenderer.invoke(IPC.aiStatus) as Promise<AiStatus>,
+    setKey: (provider: AiProviderId, apiKey: string | null) =>
+      ipcRenderer.invoke(IPC.aiSetKey, provider, apiKey) as Promise<AiStatus>,
+    probe: (provider: AiProviderId) => ipcRenderer.invoke(IPC.aiProbe, provider) as Promise<AiProbeResult>,
+    send: (request: AiChatRequest) => ipcRenderer.invoke(IPC.aiSend, request) as Promise<{ requestId: string }>,
+    cancel: (requestId) => ipcRenderer.invoke(IPC.aiCancel, requestId) as Promise<void>,
+  },
+
   events: {
     onTaskStarted: (handler) => subscribe<DotnetTaskStarted>(IPC_EVENTS.taskStarted, handler),
     onTaskOutput: (handler) => subscribe<DotnetTaskOutput>(IPC_EVENTS.taskOutput, handler),
@@ -147,6 +162,8 @@ const api: DotForgeApi = {
     onDebugStopped: (handler) =>
       subscribe<{ reason: string; threadId: number | null }>(IPC_EVENTS.debugStopped, handler),
     onDebugOutput: (handler) => subscribe<{ category: string; text: string }>(IPC_EVENTS.debugOutput, handler),
+    onAiDelta: (handler) => subscribe<AiStreamDelta>(IPC_EVENTS.aiDelta, handler),
+    onAiEnd: (handler) => subscribe<AiStreamEnd>(IPC_EVENTS.aiEnd, handler),
   },
 };
 

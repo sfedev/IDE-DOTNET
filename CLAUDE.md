@@ -14,6 +14,11 @@ Su módulo estrella es el **Scaffolding Wizard**: un generador de arquitecturas 
 que produce soluciones .NET **compilables y ejecutables** siguiendo Clean Architecture,
 Arquitectura Hexagonal (Ports & Adapters) o Domain-Driven Design + CQRS.
 
+Desde la v1.4.0 incluye el **DotForge AI Assistant**: un asistente que conoce la arquitectura de la
+solución abierta y responde respetando sus reglas (chat con contexto, `Ctrl+I` sobre la selección
+con vista previa de diferencias, y acciones en el menú contextual). Funciona con Anthropic, OpenAI
+o un modelo local vía Ollama, y las claves se guardan cifradas con el llavero del sistema.
+
 100% componentes open-source. Sin dependencias del VS Code Marketplace (se usa **Open VSX**),
 sin binarios propietarios del C# Dev Kit.
 
@@ -32,6 +37,9 @@ IDE-DOTNET/
 ├── tsconfig.json           # TS estricto para todo el código fuente
 ├── src/
 │   ├── shared/             # Tipos y contratos compartidos main <-> renderer <-> cli
+│   │   ├── ai.ts               # Catálogo de proveedores/modelos y preferencias del asistente
+│   │   ├── ai-context.ts       # Contexto RAG y prompt de sistema con las reglas de arquitectura
+│   │   └── ai-diff.ts          # Extracción de código y diferencias del asistente en línea
 │   ├── scaffold/           # * MODULO ESTRELLA: generador de arquitecturas (Node puro)
 │   │   ├── engine.ts           # Micro motor de plantillas {{token}}
 │   │   ├── generator.ts        # Motor de render + escritura en disco
@@ -46,6 +54,13 @@ IDE-DOTNET/
 │   │   ├── testable.ts         # Bundle sin Electron: rutas, .sln/.csproj, MSBuild (tests)
 │   │   ├── ipc/register.ts     # ÚNICA superficie expuesta al renderer
 │   │   ├── services/           # Solución, NuGet, tareas dotnet, terminal, rutas, ZIP, settings
+│   │   │   └── ai/             # * Asistente de IA: proveedores, streaming y claves cifradas
+│   │   │       ├── request-builder.ts  # Petición HTTP por proveedor (puro)
+│   │   │       ├── stream-parser.ts    # SSE/NDJSON -> deltas (puro)
+│   │   │       ├── validate.ts         # Saneado de lo que llega del renderer (puro)
+│   │   │       ├── preferences.ts      # Validación de preferencias del asistente (puro)
+│   │   │       ├── secret-store.ts     # Claves cifradas con safeStorage (Electron)
+│   │   │       └── ai-service.ts       # Streaming, cancelación y estado
 │   │   ├── lsp/                # Adquisición y cliente del servidor de lenguaje
 │   │   └── debug/              # NetCoreDbg + bridge DAP + controlador de sesión
 │   └── renderer/           # UI (Monaco, explorador, paneles, wizard, depuración)
@@ -57,7 +72,7 @@ IDE-DOTNET/
 │       ├── terminal-suggest.ts # Motor de sugerencias de la terminal (git y CLI de .NET), sin DOM
 │       ├── run-output.ts       # Detección de la URL en la que escucha un proceso
 │       ├── views/              # explorer, editor, nuget, panel, palette, statusbar, settings,
-│       │                       # welcome, wizard, debug, startup-bar
+│       │                       # welcome, wizard, debug, startup-bar, ai-chat, ai-inline
 │       └── styles/             # theme.css (tokens), layout.css, components.css
 ├── resources/              # Iconos multirresolución, branding
 ├── scripts/                # Build, generación de iconos, fetch de toolchain, verificación
@@ -142,8 +157,8 @@ npx electron . --smoke-test
 - `--screenshot=<ruta>` — guarda una captura de la ventana, muestrea los píxeles del chrome y sale.
 - `--icons` — sustituye la interfaz por la galería de iconos, a 16 y 24 px.
 - `--ui=<vista>` — abre una vista antes de la captura pulsando los mismos controles que pulsaría
-  un usuario (`wizard`, `settings`, `nuget`, `debug`, `terminal`, `palette`, `light`, `nesting`,
-  `startup`, `startup-dialog`, `terminal-suggest`).
+  un usuario (`wizard`, `settings`, `nuget`, `debug`, `ai`, `terminal`, `palette`, `light`,
+  `nesting`, `startup`, `startup-dialog`, `terminal-suggest`).
 - `--probe=<expresión>` — evalúa una expresión en el renderer y la imprime. Es la forma de zanjar
   una duda sobre CSS: leer el valor calculado en vez de interpretar una captura.
 - `node scripts/read-pixels.mjs <png> <x,y>…` — decodifica una captura y dice el color exacto de
@@ -201,6 +216,23 @@ npx electron . --smoke-test
 - **El renderer nunca inyecta marcado**: ni `innerHTML` para HTML ni para SVG. Los iconos se
   construyen con `createElementNS`.
 - **Densidad:** filas de árbol de 26 px, sangría de 15 px, rejilla base de 8 px.
+
+### Asistente de IA (`src/main/services/ai/`, `src/shared/ai*.ts`)
+
+- **El prompt de sistema lo compone el proceso principal**, no el renderer (ADR-016). El renderer
+  manda contexto y mensajes; la arquitectura y el mapa de proyectos se **rederivan** en
+  `register.ts` a partir de la solución realmente abierta. Añadir una regla de arquitectura es
+  tocar `ARCHITECTURE_RULES` en `src/shared/ai-context.ts`, y hay una prueba por regla.
+- **Nada de SDK de proveedor** (ADR-017): `request-builder.ts` construye la petición y
+  `stream-parser.ts` la parsea. Los dos son funciones puras y se prueban sin red ni claves.
+- **Un flag por modelo, no un `if` por versión.** Lo que un modelo admite se declara en el catálogo
+  (`supportsEffort`). A un modelo que no lo admite no se le manda `output_config` ni `thinking`, y
+  a **ninguno** se le manda `temperature` ni `budget_tokens`: la generación actual los rechaza con
+  un 400.
+- **La clave nunca cruza al renderer.** Hay canal para escribirla y para borrarla; no hay canal
+  para leerla. `AiStatus` sólo dice qué proveedores tienen credencial.
+- Toda petición nueva pasa por `validate.ts`: roles, tamaños y tope de turnos. Un `system` enviado
+  desde el renderer se descarta.
 
 ### C# generado
 
@@ -291,6 +323,19 @@ npm run fetch:toolchain -- --platform win32 --arch x64
   tema y enseñar oscuro lo que en el archivo es claro. Hay dos formas de medirlo de verdad:
   `--probe=` para leer `getComputedStyle` en el renderer, y `scripts/read-pixels.mjs` para leer los
   bytes del PNG. Las dos coincidieron en el tema claro; la captura vista a ojo, no.
+- **Los trozos de un stream no respetan los límites de línea.** `data: {"type":"content_bl` es una
+  lectura perfectamente normal. Cualquier parser de SSE o NDJSON tiene que guardar su propio búfer
+  y procesar sólo líneas terminadas; si no, se come tokens de forma intermitente y el fallo no se
+  reproduce. Se prueba troceando la respuesta de uno en uno.
+- **Un servidor HTTP de prueba con una respuesta sin cerrar bloquea `node --test` cinco minutos.**
+  `server.close()` espera al `requestTimeout` (300 s por defecto). Hay que llamar antes a
+  `server.closeAllConnections()`. La suite pasaba en verde y tardaba 302 s en salir.
+- **Los aceleradores del menú nativo llegan antes que el renderer.** Registrar el mismo atajo en el
+  menú y en `window` ejecuta la acción dos veces; y `Ctrl+Shift+I` está cogido por el inspector de
+  Electron, así que no se puede usar para nada propio.
+- **Recortar un archivo por líneas no recorta nada si el archivo es una sola línea.** Un `.razor`
+  minificado o un JSON en una línea se cuelan enteros en el prompt: hace falta un tope duro sobre
+  el resultado, no sólo una ventana por líneas.
 - **Eventos hacia un renderer que aún no existe:** el renderer tarda en estar listo (carga Monaco),
   así que un evento emitido en `did-finish-load` se pierde. Para esos casos se usa una **consulta**
   desde el renderer (`workspace:pending-file`), no un evento.

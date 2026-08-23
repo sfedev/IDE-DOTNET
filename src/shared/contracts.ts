@@ -7,6 +7,31 @@
  * Convención de nombres: `dominio:acción`. Los canales `invoke` devuelven una promesa; los
  * canales `event` son notificaciones del main hacia el renderer.
  */
+import type {
+  AiChatRequest,
+  AiProbeResult,
+  AiProviderId,
+  AiSettings,
+  AiStatus,
+  AiStreamDelta,
+  AiStreamEnd,
+} from './ai.js';
+import { DEFAULT_AI_SETTINGS } from './ai.js';
+
+// El asistente tiene su propio módulo de modelo, pero su superficie IPC es parte del contrato:
+// se reexporta para que preload y los handlers importen de un único sitio.
+export type {
+  AiChatRequest,
+  AiContext,
+  AiMessage,
+  AiProbeResult,
+  AiProviderId,
+  AiSettings,
+  AiStatus,
+  AiStreamDelta,
+  AiStreamEnd,
+  AiTask,
+} from './ai.js';
 import type { ArchitectureId, BlueprintInfo, ScaffoldOptions, ScaffoldResult } from './scaffold-types.js';
 import type { RunMode, StartupConfig } from './startup.js';
 
@@ -269,6 +294,8 @@ export interface AppSettings {
   autoSaveDelayMs: number;
   recentWorkspaces: string[];
   lspEnabled: boolean;
+  /** Preferencias del asistente de IA. Las claves de API NO viven aquí: ver `secret-store.ts`. */
+  ai: AiSettings;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -283,6 +310,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoSaveDelayMs: 1000,
   recentWorkspaces: [],
   lspEnabled: true,
+  ai: DEFAULT_AI_SETTINGS,
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -351,6 +379,12 @@ export const IPC = {
   debugVariables: 'debug:variables',
   debugSetBreakpoints: 'debug:set-breakpoints',
   debugEvaluate: 'debug:evaluate',
+
+  aiStatus: 'ai:status',
+  aiSetKey: 'ai:set-key',
+  aiProbe: 'ai:probe',
+  aiSend: 'ai:send',
+  aiCancel: 'ai:cancel',
 } as const;
 
 /** Canales de notificación (main -> renderer). */
@@ -366,6 +400,8 @@ export const IPC_EVENTS = {
   debugStateChanged: 'event:debug-state',
   debugStopped: 'event:debug-stopped',
   debugOutput: 'event:debug-output',
+  aiDelta: 'event:ai-delta',
+  aiEnd: 'event:ai-end',
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];
@@ -402,6 +438,10 @@ export type MenuCommand =
   | 'debug.step-out'
   | 'view.output'
   | 'scaffold.wizard'
+  | 'ai.chat'
+  | 'ai.inline'
+  | 'ai.explain'
+  | 'ai.tests'
   | 'help.about';
 
 /**
@@ -500,6 +540,24 @@ export interface DotForgeApi {
     evaluate(expression: string, frameId?: number): Promise<string>;
   };
 
+  ai: {
+    /** Proveedor activo, modelo y si hay credencial. La clave nunca se devuelve. */
+    status(): Promise<AiStatus>;
+    /**
+     * Guarda o borra (con `null`) la clave de un proveedor. Devuelve el estado resultante.
+     * Es un canal de escritura: no existe ningún canal que lea una clave hacia el renderer.
+     */
+    setKey(provider: AiProviderId, apiKey: string | null): Promise<AiStatus>;
+    /** Comprueba que el proveedor responde con la configuración actual. */
+    probe(provider: AiProviderId): Promise<AiProbeResult>;
+    /**
+     * Lanza una conversación en streaming. El texto llega por `onAiDelta` y el cierre por
+     * `onAiEnd`, los dos etiquetados con el `requestId` de la petición.
+     */
+    send(request: AiChatRequest): Promise<{ requestId: string }>;
+    cancel(requestId: string): Promise<void>;
+  };
+
   events: {
     onTaskStarted(handler: (payload: DotnetTaskStarted) => void): () => void;
     onTaskOutput(handler: (payload: DotnetTaskOutput) => void): () => void;
@@ -512,6 +570,8 @@ export interface DotForgeApi {
     onDebugState(handler: (state: DebugState) => void): () => void;
     onDebugStopped(handler: (payload: { reason: string; threadId: number | null }) => void): () => void;
     onDebugOutput(handler: (payload: { category: string; text: string }) => void): () => void;
+    onAiDelta(handler: (payload: AiStreamDelta) => void): () => void;
+    onAiEnd(handler: (payload: AiStreamEnd) => void): () => void;
   };
 }
 

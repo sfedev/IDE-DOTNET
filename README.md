@@ -21,7 +21,8 @@ NuGet sin salir de la ventana.
 
 Su módulo diferencial es el **asistente de arquitecturas**: genera soluciones .NET completas —
 Clean Architecture, Hexagonal o DDD + CQRS — que **compilan, pasan sus pruebas y se ejecutan**
-desde el primer minuto, con un CRUD funcional de ejemplo.
+desde el primer minuto, con un CRUD funcional de ejemplo. Desde la v1.4.0 lleva además un
+**asistente de IA que conoce esa arquitectura** y ayuda sin romperla.
 
 ![DotForge IDE con una solución DDD abierta](docs/screenshot-workspace.png)
 
@@ -30,6 +31,7 @@ desde el primer minuto, con un CRUD funcional de ejemplo.
 ## Índice
 
 - [Características](#características)
+- [Asistente de IA](#asistente-de-ia)
 - [Instalación](#instalación)
 - [El generador de arquitecturas](#el-generador-de-arquitecturas)
   - [Clean Architecture](#clean-architecture)
@@ -115,6 +117,41 @@ desde el primer minuto, con un CRUD funcional de ejemplo.
 - Breakpoints en el margen del editor, pila de llamadas, variables expandibles, evaluación de
   expresiones y controles de paso (F5 / F9 / F10 / F11).
 
+### Asistente de IA
+
+El **DotForge AI Assistant** no es un chat genérico pegado a un editor: sabe qué arquitectura tiene
+la solución abierta y responde respetando sus reglas. Si le pides meter un `DbContext` en el
+proyecto de dominio, te dice por qué no y dónde va.
+
+- **Panel de chat** (sexto icono de la barra de actividad, `Ctrl+Shift+A`) con respuesta en tiempo
+  real, token a token. Los bloques de código traen botones de **Copiar** y **Aplicar**.
+- **Contexto automático** en cada mensaje: el archivo abierto, la selección si la hay, la
+  arquitectura detectada de la solución (por el manifiesto `dotforge.json` o por la forma de sus
+  proyectos) y los errores de compilación activos. Cada pieza se puede desactivar en Ajustes.
+- **Asistente en línea** con `Ctrl+I` sobre el código seleccionado: describes el cambio en
+  castellano ("mueve esto a un Value Object", "conviértelo a LINQ", "hazlo asíncrono") y el IDE
+  enseña **una vista previa de las diferencias** dentro del propio editor, con lo nuevo resaltado y
+  lo que desaparece listado. `Enter` acepta, `Esc` descarta, `Ctrl+Z` deshace.
+- **Acciones rápidas** en el menú contextual del editor y del árbol de archivos: *Explicar el código
+  con IA*, *Generar pruebas xUnit* y *Corregir violación de arquitectura*.
+- **Tres proveedores**, elegibles en Ajustes:
+
+  | Proveedor | Modelos | Notas |
+  |---|---|---|
+  | Anthropic | Claude Opus 5, Sonnet 5, Haiku 4.5 (+ 3.7 Sonnet y 3.5 Haiku) | Requiere clave de API |
+  | OpenAI | GPT-4o, o3-mini | Requiere clave de API |
+  | Local (Ollama) | `deepseek-coder`, `llama3.2`, `qwen2.5-coder`… | Nada sale del equipo |
+
+- **Las claves se guardan cifradas** con el llavero del sistema operativo (DPAPI en Windows,
+  Keychain en macOS). Si el sistema no ofrece cifrado, la clave se queda en memoria durante la
+  sesión y **no se escribe en disco**: el IDE lo avisa en vez de dejar un secreto en claro.
+- El botón **Probar conexión** comprueba clave y endpoint antes de la primera pregunta, y con
+  Ollama lista los modelos que tienes instalados.
+
+> **Privacidad.** Con el proveedor local no sale nada del equipo. Con Anthropic u OpenAI, el
+> contexto marcado en Ajustes viaja a su API en cada mensaje: si trabajas bajo NDA, revisa esos
+> cuatro interruptores o usa Ollama.
+
 ### Paquetes NuGet
 
 - Panel visual: buscar en nuget.org, ver lo instalado, elegir versión, instalar y desinstalar.
@@ -128,7 +165,7 @@ desde el primer minuto, con un CRUD funcional de ejemplo.
 - **61 iconos vectoriales propios** en una sola rejilla, incluidas las marcas del ecosistema (C#,
   Razor, solución, proyecto) y de las carpetas con significado: `Controllers`, `Models`,
   `Services`, `Pages`, `Components`, `Domain`, `Ports`, `wwwroot`…
-- Barra de actividad reducida a cinco herramientas y barra de estado con lo imprescindible: SDK
+- Barra de actividad reducida a seis herramientas y barra de estado con lo imprescindible: SDK
   activo, estado del servidor de lenguaje, rama de Git y errores.
 - **Ajustes** en la barra lateral, con efecto inmediato: tema, tamaño de fuente, tabulación,
   minimapa, ajuste de línea, formateo al guardar e IntelliSense.
@@ -317,6 +354,8 @@ En macOS, `Ctrl` es `Cmd`.
 | Paleta de comandos | `Ctrl+Shift+P` |
 | Explorador de soluciones | `Ctrl+Shift+E` |
 | Paquetes NuGet | `Ctrl+Shift+U` |
+| **Asistente de IA** | `Ctrl+Shift+A` |
+| **Editar con IA la selección** | `Ctrl+I` |
 | Problemas | `Ctrl+Shift+M` |
 | Terminal | `Ctrl+J` |
 | **Compilar solución** | `Ctrl+Shift+B` |
@@ -340,6 +379,7 @@ En macOS, `Ctrl` es `Cmd`.
 ```
 src/
 ├── shared/        Contratos IPC y tipos compartidos (sin dependencias de Node ni Electron)
+│   └── ai*.ts         Catálogo de proveedores, contexto RAG y diferencias del asistente
 ├── scaffold/      ★ Generador de arquitecturas — Node puro, sin Electron
 │   ├── engine.ts      Motor de plantillas estricto: {{token}}, {{#if}}, {{else}}
 │   ├── generator.ts   Recorrido, render y escritura
@@ -349,11 +389,12 @@ src/
 ├── main/          Proceso principal de Electron
 │   ├── ipc/           Única superficie expuesta al renderer
 │   ├── services/      .sln/.csproj, NuGet, tareas MSBuild, terminal, rutas, ZIP
+│   │   └── ai/        ★ Asistente: proveedores, streaming, claves cifradas
 │   ├── lsp/           Adquisición y cliente del servidor de lenguaje
 │   └── debug/         Adquisición de NetCoreDbg y bridge DAP
 └── renderer/      UI
     ├── languages/     Gramática Razor y auto-cierre de etiquetas
-    ├── views/         Explorador, editor, NuGet, panel, wizard, paleta, depuración
+    ├── views/         Explorador, editor, NuGet, panel, wizard, paleta, depuración, chat de IA
     └── styles/        Tokens de tema y componentes
 ```
 
@@ -368,6 +409,10 @@ src/
 - **Cero dependencias nativas.** No hay `node-pty` ni módulos que requieran recompilación: el
   empaquetado es reproducible y no hay paso de rebuild en la máquina del usuario. El precio es que
   la terminal no tiene pseudoterminal.
+- **El asistente de IA habla HTTP, sin SDK de proveedor.** Un constructor de peticiones y un parser
+  de streaming por formato, los dos funciones puras: se prueban sin red y sin claves. Y el prompt
+  de sistema con las reglas de arquitectura lo compone el **proceso principal**, no el renderer, así
+  que no es un parámetro de la interfaz.
 - **El renderer es territorio hostil.** `contextIsolation` activado, sin `nodeIntegration`, sin
   `ipcRenderer` expuesto, CSP sin `eval` ni orígenes remotos, y toda ruta que llega del renderer se
   valida contra el workspace abierto.
@@ -420,11 +465,11 @@ No hay certificados en el repositorio. Para firmar:
 npm test
 ```
 
-**359 pruebas** en cuatro grupos:
+**596 pruebas** en cuatro grupos:
 
 | Grupo | Qué verifica |
 |---|---|
-| `unit` | Motor de plantillas, nombres y pluralización, invariantes de los blueprints, emisor de `.sln`, parseo de `.sln`/`.csproj`, diagnósticos de MSBuild, auto-cierre de etiquetas, reglas del árbol (anidamiento, iconos, insignias) y geometría de los iconos |
+| `unit` | Motor de plantillas, nombres y pluralización, invariantes de los blueprints, emisor de `.sln`, parseo de `.sln`/`.csproj`, diagnósticos de MSBuild, auto-cierre de etiquetas, reglas del árbol (anidamiento, iconos, insignias), geometría de los iconos y el módulo de IA: petición por proveedor, parseo del streaming troceado, contexto RAG, reglas de arquitectura del prompt, diferencias, y una conversación completa contra un servidor de mentira |
 | `security` | Path traversal, superficie del preload, configuración de Electron, CSP, ausencia de `shell:true`, troceado de comandos de la terminal |
 | `package` | Configuración de empaquetado, árbol de `build/`, validez real de `.ico` y `.icns`, arranque de Electron y tokenización de Razor dentro del renderer |
 | `scaffold` | Genera 6 combinaciones de arquitectura y opciones, ejecuta **`dotnet build` de verdad** exigiendo 0 errores y 0 advertencias, ejecuta `dotnet test`, arranca la Web API generada y ejercita el CRUD por HTTP, y depura un programa real parando en un breakpoint |

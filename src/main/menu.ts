@@ -95,6 +95,16 @@ export function buildApplicationMenu(): Menu {
       ],
     },
     {
+      label: 'IA',
+      submenu: [
+        item('Abrir DotForge AI Assistant', 'ai.chat', 'CmdOrCtrl+Shift+A'),
+        item('Editar el código seleccionado…', 'ai.inline', 'CmdOrCtrl+I'),
+        { type: 'separator' },
+        item('Explicar el código', 'ai.explain'),
+        item('Generar pruebas xUnit', 'ai.tests'),
+      ],
+    },
+    {
       label: 'Compilar',
       submenu: [
         item('Compilar solución', 'build.build', 'CmdOrCtrl+Shift+B'),

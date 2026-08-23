@@ -27,3 +27,22 @@ export {
 export type { Suggestion, SuggestContext, SuggestionKind } from './terminal-suggest.js';
 export { detectListeningUrl, portOf } from './run-output.js';
 export type { IconName } from './icons.js';
+
+/**
+ * Extracción de código y diferencias del asistente de IA.
+ *
+ * Vive aquí porque lo consume el renderer (el widget de Ctrl+I) y porque son reglas con muchos
+ * casos borde —vallas anidadas, respuestas cortadas, reindentación— que merecen pruebas y no una
+ * inspección visual.
+ */
+export {
+  CODE_LANGUAGES,
+  commonIndent,
+  diffLines,
+  extractCodeBlocks,
+  formatUnifiedDiff,
+  proposedCode,
+  reindent,
+  summarizeDiff,
+} from '../shared/ai-diff.js';
+export type { CodeBlock, DiffKind, DiffLine, DiffSummary } from '../shared/ai-diff.js';

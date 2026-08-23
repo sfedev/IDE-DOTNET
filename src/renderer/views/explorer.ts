@@ -28,7 +28,12 @@ export interface ExplorerHost {
   runProjectTask(kind: 'build' | 'run' | 'watch' | 'test', projectPath: string): void;
   showPackagesFor(project: ProjectInfo): void;
   refresh(): void;
+  /** Acciones del asistente sobre un archivo concreto del árbol. */
+  askAi(action: 'explain' | 'tests' | 'fix', path: string): void;
 }
+
+/** Entrada de un menú contextual: una acción con icono, o un separador. */
+type MenuEntry = { icon: IconName; label: string; run: () => void } | 'separator';
 
 /** Sub-secciones plegables dentro de un proyecto. */
 type ProjectSection = 'references' | 'packages';
@@ -570,10 +575,7 @@ export class ExplorerView {
                 this.render();
               }
             : undefined,
-          onContextMenu: (event) => {
-            event.preventDefault();
-            this.host.revealInFolder(node.path);
-          },
+          onContextMenu: (event) => this.showFileMenu(event, node.path),
         }),
       );
 
@@ -663,7 +665,7 @@ export class ExplorerView {
 
     const runnable = project.kind !== 'library' && project.kind !== 'razor-library';
 
-    const entries: Array<{ icon: IconName; label: string; run: () => void } | 'separator'> = [
+    const entries: MenuEntry[] = [
       { icon: 'hammer', label: 'Compilar proyecto', run: () => this.host.runProjectTask('build', project.path) },
       ...(runnable && project.kind !== 'tests'
         ? ([
@@ -680,6 +682,35 @@ export class ExplorerView {
       { icon: 'external-link', label: 'Mostrar en el explorador', run: () => this.host.revealInFolder(project.path) },
     ];
 
+    this.showMenu(event, entries);
+  }
+
+  /**
+   * Menú contextual de un archivo.
+   *
+   * Antes, el botón derecho sobre un archivo hacía una única cosa (mostrarlo en el explorador del
+   * sistema) sin decirlo. Ahora es un menú de verdad, que es donde tienen sentido las acciones del
+   * asistente: se piden sobre el archivo que se está señalando, no sobre el que esté abierto.
+   */
+  private showFileMenu(event: MouseEvent, path: string): void {
+    event.preventDefault();
+    this.selectedPath = path;
+
+    const entries: MenuEntry[] = [
+      { icon: 'code', label: 'Abrir', run: () => this.host.openFile(path) },
+      'separator',
+      { icon: 'sparkles', label: 'Explicar el código con IA', run: () => this.host.askAi('explain', path) },
+      { icon: 'flask', label: 'Generar pruebas xUnit', run: () => this.host.askAi('tests', path) },
+      { icon: 'tool', label: 'Corregir violación de arquitectura', run: () => this.host.askAi('fix', path) },
+      'separator',
+      { icon: 'external-link', label: 'Mostrar en el explorador', run: () => this.host.revealInFolder(path) },
+    ];
+
+    this.showMenu(event, entries);
+  }
+
+  /** Pinta un menú contextual y lo reposiciona si se sale de la ventana. */
+  private showMenu(event: MouseEvent, entries: MenuEntry[]): void {
     const menu = el('div', {
       className: 'context-menu',
       style: { left: `${event.clientX}px`, top: `${event.clientY}px` },

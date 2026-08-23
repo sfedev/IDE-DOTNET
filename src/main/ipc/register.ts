@@ -11,6 +11,9 @@ import { promisify } from 'node:util';
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 
 import type {
+  AiProbeResult,
+  AiProviderId,
+  AiStatus,
   AppInfo,
   AppSettings,
   DebugAction,
@@ -23,6 +26,8 @@ import type {
   SolutionInfo,
 } from '../../shared/contracts.js';
 import { IPC, IPC_EVENTS } from '../../shared/contracts.js';
+import { AI_PROVIDER_IDS } from '../../shared/ai.js';
+import { detectArchitecture, projectContexts } from '../../shared/ai-context.js';
 import type { ScaffoldOptions } from '../../shared/scaffold-types.js';
 import { DEFAULT_STARTUP_CONFIG } from '../../shared/startup.js';
 import { listBlueprints } from '../../scaffold/blueprints/index.js';
@@ -30,6 +35,9 @@ import { generateSolution } from '../../scaffold/generator.js';
 import { debugController, resolveDebugTarget } from '../debug/debug-controller.js';
 import { acquireLanguageServer } from '../lsp/acquire.js';
 import { lspClient } from '../lsp/lsp-client.js';
+import * as aiService from '../services/ai/ai-service.js';
+import * as aiSecrets from '../services/ai/secret-store.js';
+import { AiRequestError, coerceChatRequest } from '../services/ai/validate.js';
 import * as commandRunner from '../services/command-runner.js';
 import * as dotnetService from '../services/dotnet-service.js';
 import * as fileService from '../services/file-service.js';
@@ -497,6 +505,74 @@ export function registerIpcHandlers(): void {
     if (!lspClient.isRunning()) return;
     lspClient.notify(requireString(method, 'method'), params);
   });
+
+  // --- Asistente de IA ---------------------------------------------------------------------------
+  ipcMain.handle(IPC.aiStatus, (): AiStatus => aiService.status(settingsService.current().ai));
+
+  ipcMain.handle(IPC.aiSetKey, async (_event, provider: unknown, apiKey: unknown): Promise<AiStatus> => {
+    const id = requireProvider(provider);
+    if (apiKey !== null && typeof apiKey !== 'string') {
+      throw new Error('la clave de API debe ser una cadena o null');
+    }
+
+    const persisted = await aiSecrets.set(id, apiKey);
+    const status = aiService.status(settingsService.current().ai);
+
+    return persisted
+      ? status
+      : {
+          ...status,
+          message:
+            'Este sistema no ofrece cifrado seguro, así que la clave sólo vale para esta sesión ' +
+            'y no se ha guardado en disco.',
+        };
+  });
+
+  ipcMain.handle(IPC.aiProbe, (_event, provider: unknown): Promise<AiProbeResult> =>
+    aiService.probe(settingsService.current().ai, requireProvider(provider)),
+  );
+
+  ipcMain.handle(IPC.aiSend, (_event, request: unknown): { requestId: string } => {
+    let chatRequest;
+    try {
+      chatRequest = coerceChatRequest(request);
+    } catch (error) {
+      throw error instanceof AiRequestError ? new Error(`petición al asistente inválida: ${error.message}`) : error;
+    }
+
+    // La arquitectura y el mapa de proyectos NO se toman de lo que diga el renderer: se derivan
+    // aquí de la solución realmente abierta, o se dejan vacíos si el usuario ha desactivado esa
+    // pieza del contexto. Las dos decisiones —qué reglas se imponen y qué se envía— son del
+    // proceso principal, que es quien conoce la solución y quien guarda las preferencias.
+    const settings = settingsService.current().ai;
+
+    const context = settings.includeArchitecture
+      ? {
+          ...chatRequest.context,
+          architecture: detectArchitecture(currentSolution),
+          solutionName: currentSolution?.name ?? null,
+          projects: projectContexts(currentSolution?.projects ?? []),
+        }
+      : { ...chatRequest.context, architecture: 'unknown' as const, solutionName: null, projects: [] };
+
+    void aiService.chat({ ...chatRequest, context }, settings, {
+      onDelta: (payload) => broadcast(IPC_EVENTS.aiDelta, payload),
+      onEnd: (payload) => broadcast(IPC_EVENTS.aiEnd, payload),
+    });
+
+    return { requestId: chatRequest.requestId };
+  });
+
+  ipcMain.handle(IPC.aiCancel, (_event, requestId: unknown): void => {
+    aiService.cancel(requireString(requestId, 'requestId'));
+  });
+}
+
+function requireProvider(value: unknown): AiProviderId {
+  if (typeof value !== 'string' || !(AI_PROVIDER_IDS as readonly string[]).includes(value)) {
+    throw new Error(`proveedor de IA desconocido: ${String(value)}`);
+  }
+  return value as AiProviderId;
 }
 
 /**

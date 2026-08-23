@@ -17,6 +17,8 @@ import type {
   ProjectInfo,
   SolutionInfo,
 } from '../shared/contracts.js';
+import type { AiContext, AiProviderId, AiStatus, AiTask } from '../shared/ai.js';
+import { architectureLabel, buildContext, detectArchitecture } from '../shared/ai-context.js';
 import type { RunMode, StartupConfig } from '../shared/startup.js';
 import { launchPlan, runnableProjects, shortProjectName } from '../shared/startup.js';
 import { byId, clear, el } from './dom.js';
@@ -24,6 +26,8 @@ import { installIconGallery } from './icon-gallery.js';
 import { icon, type IconName } from './icons.js';
 import { applyPublishDiagnostics, reopenAll } from './lsp-bridge.js';
 import { defineThemes, getMonaco, loadMonaco } from './monaco-setup.js';
+import { AiChatView } from './views/ai-chat.js';
+import { InlineAssistant } from './views/ai-inline.js';
 import { EditorView, type OpenTab } from './views/editor.js';
 import { ExplorerView } from './views/explorer.js';
 import { NuGetView } from './views/nuget.js';
@@ -36,7 +40,7 @@ import { StatusBar } from './views/statusbar.js';
 import { WelcomeView } from './views/welcome.js';
 import { WizardView } from './views/wizard.js';
 
-type SidebarView = 'explorer' | 'nuget' | 'settings';
+type SidebarView = 'explorer' | 'nuget' | 'settings' | 'ai';
 
 class DotForgeApp {
   private info: AppInfo | null = null;
@@ -96,6 +100,7 @@ class DotForgeApp {
     runProjectTask: (kind, projectPath) => void this.runTask(kind, projectPath),
     showPackagesFor: (project) => this.showNuGet(project),
     refresh: () => void this.openFolderDialog(),
+    askAi: (action, path) => void this.askAiAboutFile(action, path),
   });
 
   private readonly nuget = new NuGetView({
@@ -118,6 +123,34 @@ class DotForgeApp {
 
   private readonly settingsView = new SettingsView({
     apply: (patch) => void this.applySettings(patch),
+    aiStatus: () => this.aiStatus,
+    setAiKey: async (provider, apiKey) => {
+      await this.setAiKey(provider, apiKey);
+    },
+    probeAi: (provider) => window.dotforge.ai.probe(provider),
+    openExternal: (url) => void window.dotforge.app.openExternal(url),
+  });
+
+  /** Estado del asistente: proveedor, modelo y si hay credencial. Nunca contiene la clave. */
+  private aiStatus: AiStatus | null = null;
+
+  private readonly aiChat = new AiChatView({
+    buildContext: () => this.buildAiContext(),
+    notify: (message, level) => this.notify(message, level),
+    openSettings: () => this.showSettings(),
+    applyToEditor: (code) => {
+      this.editor.replaceSelection(code);
+      this.notify('Código aplicado en el editor. Ctrl+Z lo deshace.', 'ok');
+    },
+    hasEditor: () => this.editor.activeTab() !== null,
+  });
+
+  private readonly aiInline = new InlineAssistant({
+    getEditor: () => this.editor.getEditor(),
+    buildContext: () => this.buildAiContext(),
+    notify: (message, level) => this.notify(message, level),
+    openSettings: () => this.showSettings(),
+    isReady: () => this.aiStatus?.ready === true,
   });
 
   private readonly palette = new CommandPalette();
@@ -159,6 +192,7 @@ class DotForgeApp {
     await loadMonaco();
     this.editor.mount(this.settings);
     this.attachLspProviders();
+    this.registerEditorAiActions();
 
     this.renderActivityBar();
     this.renderTitlebarActions();
@@ -174,6 +208,9 @@ class DotForgeApp {
     this.panel.render();
     this.updateTitle();
     this.renderStatus();
+
+    // Estado del asistente: proveedor, modelo y si hay credencial guardada.
+    void this.refreshAiStatus();
 
     // La lista de programas permitidos se muestra como ayuda en la terminal.
     void window.dotforge.terminal
@@ -260,6 +297,7 @@ class DotForgeApp {
     this.explorer.setSolution(solution);
     this.nuget.setSolution(solution);
     this.startupBar.setSolution(solution);
+    this.aiChat.setArchitecture(architectureLabel(detectArchitecture(solution)));
     this.updateTitle();
     void this.loadStartupConfig();
 
@@ -526,9 +564,10 @@ class DotForgeApp {
 /**
    * Barra de actividad.
    *
-   * Cinco herramientas y nada más: solución, generador, NuGet, depuración y ajustes. Antes había
-   * también atajos de tema y paleta que ya viven en la barra de estado y en el teclado; tener la
-   * misma acción en tres sitios no la hace más accesible, sólo hace la barra más ruidosa.
+   * Seis herramientas y nada más: solución, generador, NuGet, depuración, asistente y ajustes.
+   * Antes había también atajos de tema y paleta que ya viven en la barra de estado y en el
+   * teclado; tener la misma acción en tres sitios no la hace más accesible, sólo hace la barra
+   * más ruidosa.
    */
   private renderActivityBar(): void {
     const bar = byId('activitybar');
@@ -560,17 +599,29 @@ class DotForgeApp {
       button('Generador de arquitecturas', 'wand', false, () => void this.wizard.open()),
       button('Paquetes NuGet', 'package', this.sidebarView === 'nuget', () => this.showNuGet()),
       button('Depuración y pruebas', 'bug', false, () => this.panel.show('debug'), errors > 0),
+      button('DotForge AI Assistant', 'sparkles', this.sidebarView === 'ai', () => this.showAi()),
       el('div', { className: 'spacer' }),
       button('Ajustes', 'settings', this.sidebarView === 'settings', () => this.showSettings()),
     );
   }
 
-  private showSettings(): void {
-    this.sidebarView = 'settings';
-    this.explorer.setVisible(false);
-    this.nuget.setVisible(false);
-    this.settingsView.setVisible(true);
+  /** Deja visible una sola vista de la barra lateral: comparten contenedor. */
+  private showSidebar(view: SidebarView): void {
+    this.sidebarView = view;
+    this.explorer.setVisible(view === 'explorer');
+    this.nuget.setVisible(view === 'nuget');
+    this.settingsView.setVisible(view === 'settings');
+    this.aiChat.setVisible(view === 'ai');
     this.renderActivityBar();
+  }
+
+  private showSettings(): void {
+    this.showSidebar('settings');
+  }
+
+  private showAi(): void {
+    this.aiChat.setArchitecture(architectureLabel(detectArchitecture(this.solution)));
+    this.showSidebar('ai');
   }
 
   private renderTitlebarActions(): void {
@@ -593,19 +644,11 @@ class DotForgeApp {
   }
 
   private showExplorer(): void {
-    this.sidebarView = 'explorer';
-    this.nuget.setVisible(false);
-    this.settingsView.setVisible(false);
-    this.explorer.setVisible(true);
-    this.renderActivityBar();
+    this.showSidebar('explorer');
   }
 
   private showNuGet(project?: ProjectInfo): void {
-    this.sidebarView = 'nuget';
-    this.explorer.setVisible(false);
-    this.settingsView.setVisible(false);
-    this.nuget.setVisible(true);
-    this.renderActivityBar();
+    this.showSidebar('nuget');
     if (project) this.nuget.focusProject(project);
   }
 
@@ -672,6 +715,140 @@ class DotForgeApp {
       if (patch.lspEnabled) void this.restartLsp();
       else void window.dotforge.lsp.stop();
     }
+
+    // Cambiar de proveedor o de modelo cambia si el asistente está listo: hay que releerlo.
+    if (patch.ai !== undefined) void this.refreshAiStatus();
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // Asistente de IA
+  // -------------------------------------------------------------------------------------------
+
+  private async refreshAiStatus(): Promise<void> {
+    try {
+      this.aiStatus = await window.dotforge.ai.status();
+      this.aiChat.setStatus(this.aiStatus);
+      this.settingsView.render();
+    } catch {
+      // Sin estado del asistente el IDE sigue siendo un IDE: no se rompe nada.
+    }
+  }
+
+  private async setAiKey(provider: AiProviderId, apiKey: string | null): Promise<void> {
+    try {
+      this.aiStatus = await window.dotforge.ai.setKey(provider, apiKey);
+      this.aiChat.setStatus(this.aiStatus);
+
+      if (apiKey === null) this.notify(`Clave de ${provider} borrada.`, 'ok');
+      else if (this.aiStatus.message) this.notify(this.aiStatus.message, 'warn');
+      else this.notify(`Clave de ${provider} guardada y cifrada.`, 'ok');
+    } catch (error) {
+      this.notify(`No se ha podido guardar la clave: ${this.messageOf(error)}`, 'error');
+    }
+  }
+
+  /**
+   * Contexto RAG del momento.
+   *
+   * Se compone con la misma función pura que usan las pruebas: archivo activo, selección,
+   * arquitectura de la solución y diagnósticos del panel de problemas. Qué piezas se incluyen lo
+   * deciden las preferencias, y el recorte por tamaño lo hace `buildContext`.
+   */
+  private buildAiContext(): AiContext {
+    const tab = this.editor.activeTab();
+    const ai = this.settings?.ai;
+
+    return buildContext({
+      solution: this.solution,
+      file: tab ? { path: tab.path, languageId: tab.languageId, text: tab.model.getValue() } : null,
+      selection: this.editor.currentSelection(),
+      diagnostics: this.panel.getDiagnostics(),
+      include: {
+        activeFile: ai?.includeActiveFile ?? true,
+        selection: ai?.includeSelection ?? true,
+        architecture: ai?.includeArchitecture ?? true,
+        diagnostics: ai?.includeDiagnostics ?? true,
+      },
+    });
+  }
+
+  /** Acciones del menú contextual del árbol: se abre el archivo y se pregunta sobre él. */
+  private async askAiAboutFile(action: 'explain' | 'tests' | 'fix', path: string): Promise<void> {
+    await this.openFile(path);
+    this.askAi(action);
+  }
+
+  /**
+   * Lanza una de las acciones rápidas sobre lo que hay delante.
+   *
+   * El prompt cambia según haya selección o no: pedir "explica el archivo" cuando el usuario tenía
+   * un método marcado sería ignorar lo único que había dicho.
+   */
+  private askAi(action: 'explain' | 'tests' | 'fix'): void {
+    const tab = this.editor.activeTab();
+    if (!tab) {
+      this.notify('Abre un archivo antes de preguntarle al asistente.', 'warn');
+      return;
+    }
+
+    const scope = this.editor.currentSelection() ? 'el código seleccionado' : `el archivo ${tab.name}`;
+    const errors = this.panel
+      .getDiagnostics()
+      .filter((diagnostic) => diagnostic.severity === 'error' && diagnostic.file === tab.path);
+
+    const prompts: Record<typeof action, { text: string; task: AiTask }> = {
+      explain: { text: `Explica ${scope}.`, task: 'explain' },
+      tests: { text: `Genera las pruebas xUnit de ${scope}.`, task: 'tests' },
+      fix: {
+        text:
+          errors.length > 0
+            ? `Corrige los errores de compilación de ${scope} respetando la arquitectura del proyecto.`
+            : `Revisa ${scope}: dime si viola alguna regla de la arquitectura y corrígelo.`,
+        task: 'fix',
+      },
+    };
+
+    this.showAi();
+    void this.aiChat.send(prompts[action].text, prompts[action].task);
+  }
+
+  /** Acciones del asistente en el menú contextual del editor. */
+  private registerEditorAiActions(): void {
+    const modifier = this.info?.primaryModifier ?? 'Ctrl';
+    const monaco = getMonaco();
+
+    this.editor.addAction({
+      id: 'dotforge.ai.inline',
+      label: `Editar con IA (${modifier}+I)`,
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyI],
+      contextMenuGroupId: 'dotforge-ai',
+      order: 1,
+      run: () => this.aiInline.open(),
+    });
+
+    this.editor.addAction({
+      id: 'dotforge.ai.explain',
+      label: 'Explicar el código con IA',
+      contextMenuGroupId: 'dotforge-ai',
+      order: 2,
+      run: () => this.askAi('explain'),
+    });
+
+    this.editor.addAction({
+      id: 'dotforge.ai.tests',
+      label: 'Generar pruebas xUnit',
+      contextMenuGroupId: 'dotforge-ai',
+      order: 3,
+      run: () => this.askAi('tests'),
+    });
+
+    this.editor.addAction({
+      id: 'dotforge.ai.fix',
+      label: 'Corregir violación de arquitectura',
+      contextMenuGroupId: 'dotforge-ai',
+      order: 4,
+      run: () => this.askAi('fix'),
+    });
   }
 
   /** Refresca el estado de Git y repinta la barra si ha cambiado. */
@@ -932,6 +1109,49 @@ class DotForgeApp {
       },
       { id: 'lsp.restart', title: 'Reiniciar el servidor de lenguaje de C#', group: 'C#', run: () => void this.restartLsp() },
       {
+        id: 'ai.chat',
+        icon: 'sparkles',
+        title: 'DotForge AI: abrir el asistente',
+        group: 'IA',
+        // Ctrl+Shift+I lo tiene cogido el inspector de Electron: aquí sería una trampa.
+        keybinding: `${modifier}+Shift+A`,
+        run: () => this.showAi(),
+      },
+      {
+        id: 'ai.inline',
+        icon: 'wand',
+        title: 'DotForge AI: editar el código seleccionado',
+        group: 'IA',
+        keybinding: `${modifier}+I`,
+        run: () => this.aiInline.open(),
+      },
+      {
+        id: 'ai.explain',
+        title: 'DotForge AI: explicar el código',
+        group: 'IA',
+        run: () => this.askAi('explain'),
+      },
+      {
+        id: 'ai.tests',
+        icon: 'flask',
+        title: 'DotForge AI: generar pruebas xUnit',
+        group: 'IA',
+        run: () => this.askAi('tests'),
+      },
+      {
+        id: 'ai.fix',
+        icon: 'tool',
+        title: 'DotForge AI: corregir violación de arquitectura',
+        group: 'IA',
+        run: () => this.askAi('fix'),
+      },
+      {
+        id: 'ai.reset',
+        title: 'DotForge AI: empezar una conversación nueva',
+        group: 'IA',
+        run: () => this.aiChat.reset(),
+      },
+      {
         id: 'help.about',
         icon: 'info',
         title: 'Acerca de DotForge IDE',
@@ -1103,6 +1323,18 @@ class DotForgeApp {
       this.panel.append(text, category === 'stderr' ? 'stderr' : 'stdout');
     });
 
+    // El streaming del asistente lo consume quien lanzó la petición: el chat de la barra lateral
+    // o el widget en línea. El `requestId` decide, así que los dos pueden convivir.
+    window.dotforge.events.onAiDelta(({ requestId, text }) => {
+      if (this.aiChat.ownsRequest(requestId)) this.aiChat.appendDelta(requestId, text);
+      else if (this.aiInline.ownsRequest(requestId)) this.aiInline.appendDelta(requestId, text);
+    });
+
+    window.dotforge.events.onAiEnd(({ requestId, reason, message }) => {
+      if (this.aiChat.ownsRequest(requestId)) this.aiChat.finish(requestId, reason, message);
+      else if (this.aiInline.ownsRequest(requestId)) this.aiInline.finish(requestId, reason, message);
+    });
+
     // Avisar de cambios sin guardar antes de cerrar la ventana.
     window.addEventListener('beforeunload', (event) => {
       if (this.editor.hasDirtyTabs()) {
@@ -1149,6 +1381,17 @@ class DotForgeApp {
         event.preventDefault();
         this.palette.show();
         return;
+      }
+
+      // Ctrl/Cmd+I no se atiende aquí: el acelerador del menú nativo llega antes que el renderer,
+      // así que registrarlo también en `window` sólo conseguiría abrir el widget dos veces.
+
+      // Con la vista previa abierta, Enter acepta y Escape descarta.
+      if ((event.key === 'Enter' || event.key === 'Escape') && this.aiInline.isOpen()) {
+        if (this.aiInline.handleKey(event.key)) {
+          event.preventDefault();
+          return;
+        }
       }
 
       if (event.key === 'Escape' && this.palette.isOpen()) {

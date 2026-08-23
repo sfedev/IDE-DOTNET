@@ -28,6 +28,67 @@ export {
   selectProfile,
 } from './services/launch-settings.js';
 
+// --- Asistente de IA -----------------------------------------------------------------------
+// Sólo las piezas puras. `secret-store.ts` y `ai-service.ts` quedan fuera a propósito: el primero
+// importa `safeStorage` de Electron y el segundo abre sockets, y este bundle debe correr con Node
+// pelado.
+export {
+  buildChatRequest,
+  buildProbeRequest,
+  supportsEffort,
+} from './services/ai/request-builder.js';
+export type { AiHttpRequest, ChatRequestInput } from './services/ai/request-builder.js';
+
+export {
+  createStreamParser,
+  describeApiError,
+  describeHttpStatus,
+} from './services/ai/stream-parser.js';
+export type { AiStreamEvent, StreamParser } from './services/ai/stream-parser.js';
+
+// El cliente de streaming entero: sin dependencia de Electron gracias a la inyección de la
+// fuente de credenciales, así que se puede ejercitar contra un servidor de mentira.
+export {
+  cancel as cancelAiRequest,
+  cancelAll as cancelAllAiRequests,
+  chat as aiChat,
+  probe as aiProbe,
+  setCredentialSource,
+  status as aiStatus,
+} from './services/ai/ai-service.js';
+export type { AiCallbacks, CredentialSource } from './services/ai/ai-service.js';
+
+export { coerceAiSettings, coerceBaseUrl, MAX_MAX_TOKENS, MIN_MAX_TOKENS } from './services/ai/preferences.js';
+export { AiRequestError, coerceChatRequest, MAX_MESSAGES, MAX_MESSAGE_CHARS } from './services/ai/validate.js';
+
+export {
+  architectureLabel,
+  architectureRules,
+  buildContext,
+  composeUserMessage,
+  detectArchitecture,
+  layerOf,
+  projectContexts,
+  relativeTo,
+  renderContextBlock,
+  systemPrompt,
+  windowAround,
+  MAX_DIAGNOSTICS,
+  MAX_FILE_CHARS,
+  MAX_SELECTION_CHARS,
+} from '../shared/ai-context.js';
+
+export {
+  AI_PROVIDER_IDS,
+  AI_PROVIDERS,
+  DEFAULT_AI_SETTINGS,
+  modelInfo,
+  providerInfo,
+  resolveBaseUrl,
+  resolveModel,
+} from '../shared/ai.js';
+export type { AiContext, AiProviderId, AiSettings, AiTask } from '../shared/ai.js';
+
 export {
   availableProfiles,
   coerceStartupConfig,

@@ -287,6 +287,30 @@ const ICONS = {
   command: [{ p: 'M15 6a3 3 0 1 1 3 3h-3Zm0 0v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12' }],
   sun: [{ c: [12, 12, 4.2] }, { p: 'M12 2.6v2.2' }, { p: 'M12 19.2v2.2' }, { p: 'm5.3 5.3 1.6 1.6' }, { p: 'm17.1 17.1 1.6 1.6' }, { p: 'M2.6 12h2.2' }, { p: 'M19.2 12h2.2' }, { p: 'm5.3 18.7 1.6-1.6' }, { p: 'm17.1 6.9 1.6-1.6' }],
   moon: [{ p: 'M20.5 14.4A8.8 8.8 0 0 1 9.6 3.5a8.8 8.8 0 1 0 10.9 10.9Z' }],
+
+  // ---------------------------------------------------------------------------------------
+  // Asistente de IA
+  // ---------------------------------------------------------------------------------------
+
+  /**
+   * Dos destellos: la marca del asistente. Se elige el destello y no una cara de robot porque
+   * a 16 px una cara es una mancha, y porque lo que se ofrece es asistencia, no un personaje.
+   */
+  sparkles: [
+    { p: 'M10.4 3.4 12.1 7.8 16.5 9.5 12.1 11.2 10.4 15.6 8.7 11.2 4.3 9.5 8.7 7.8Z' },
+    { p: 'M18 14.2 18.8 16.3 20.9 17.1 18.8 17.9 18 20 17.2 17.9 15.1 17.1 17.2 16.3Z' },
+  ],
+
+  /** Enviar el mensaje del chat. */
+  send: [{ p: 'M20.8 3.2 3.6 10.3l7 2.9 2.9 7Z' }, { p: 'm10.6 13.2 4.9-4.9' }],
+
+  /** Clave de API guardada. */
+  key: [
+    { c: [7.6, 15.4, 3.6] },
+    { p: 'm10.3 12.9 8.3-8.3' },
+    { p: 'm15.6 7.6 2.2 2.2' },
+    { p: 'm18.6 4.6 2.2 2.2' },
+  ],
 } satisfies Record<string, Shape[]>;
 
 export interface IconOptions {

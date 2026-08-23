@@ -4,7 +4,7 @@ Bitácora viva de desarrollo. Se actualiza **en cada iteración** del bucle de t
 
 - **Proyecto:** DotForge IDE — distribución de IDE para C# / .NET 9+ / Blazor
 - **Inicio:** 2026-08-23
-- **Estado global:** 🟢 Completado — v1.3.1 empaquetada y verificada
+- **Estado global:** 🟢 Completado — v1.4.0 empaquetada y verificada
 
 Leyenda: `[ ]` pendiente · `[~]` en curso · `[x]` completado y **verificado con un comando**
 
@@ -164,6 +164,21 @@ por tanto **compila** pero no **ejecuta** los proyectos generados. Se añade el 
 - [x] F9.10 Texto fantasma en línea y menú, aceptables con Tab o flecha derecha
 - [x] F9.11 Modos de diagnóstico `--ui=startup`, `--ui=startup-dialog`, `--ui=terminal-suggest`
 - [x] F9.12 Pruebas: 22 del modelo de perfiles y 38 del motor de sugerencias
+
+### Fase 10 — ★ DotForge AI Assistant
+- [x] F10.1 Modelo compartido del asistente (`src/shared/ai.ts`): proveedores, catálogo de modelos y preferencias
+- [x] F10.2 Servicio de IA en el proceso principal (`src/main/services/ai/`) con streaming y cancelación
+- [x] F10.3 Tres proveedores: Anthropic, OpenAI y local (Ollama), con endpoint configurable
+- [x] F10.4 Almacén de claves cifrado con `safeStorage` (DPAPI / Keychain), sin caída a texto plano
+- [x] F10.5 Contratos IPC `ai:status`, `ai:set-key`, `ai:probe`, `ai:send`, `ai:cancel` y eventos de streaming
+- [x] F10.6 Sexto icono en la barra de actividad y panel de chat con respuesta token a token
+- [x] F10.7 Inyección de contexto RAG: archivo activo, selección, arquitectura y diagnósticos de compilación
+- [x] F10.8 Reglas de arquitectura por proyecto (Clean, Hexagonal, DDD) impuestas desde el proceso principal
+- [x] F10.9 Asistente en línea `Ctrl+I` / `Cmd+I` con vista previa de diferencias y aceptar/descartar
+- [x] F10.10 Acciones rápidas en el menú contextual del editor y del árbol de archivos
+- [x] F10.11 Sección "Asistente de IA" en los ajustes, con "Probar conexión" y control del contexto enviado
+- [x] F10.12 Modo de diagnóstico `--ui=ai` y menú nativo "IA"
+- [x] F10.13 Pruebas: 113 nuevas (proveedores, contexto RAG, diferencias y streaming de punta a punta)
 
 ---
 
@@ -934,3 +949,152 @@ apuntaban a carpetas borradas.
 1.3.0, sin funcionalidad nueva ni cambios de contrato para el usuario, así que por semver le
 corresponde el tercer número: **1.3.1**. Los canales `workspace:recents` y `workspace:open-recent`
 son internos —superficie IPC, no API pública— y existen sólo para poder hacer la corrección.
+
+### ADR-016 — El prompt de sistema lo compone el proceso principal, no el renderer
+**Fecha:** 2026-08-23
+**Contexto:** El asistente promete algo concreto: responder respetando la arquitectura del proyecto
+abierto. Esa promesa se cumple o se incumple en un sitio muy pequeño —el prompt de sistema— y
+había que decidir quién lo escribe.
+**Opciones:**
+- (a) El renderer compone el prompt completo y lo manda por IPC. Es lo más directo: la vista ya
+  tiene el archivo, la selección y los diagnósticos.
+- (b) El renderer manda contexto y mensajes; el proceso principal compone el prompt.
+**Decisión:** (b). El renderer envía `AiContext` y la lista de mensajes; `systemPrompt()` se ejecuta
+en el proceso principal en cada petición, y `register.ts` **sobrescribe** la arquitectura y el mapa
+de proyectos con los de la solución realmente abierta en vez de fiarse de lo que llegue.
+**Consecuencias:** las reglas de arquitectura dejan de ser un parámetro de la interfaz y pasan a ser
+parte del contrato del asistente. Un fallo del renderer —o una página comprometida, que es el
+escenario contra el que existe todo el aislamiento de esta app— no puede pedir "ignora las reglas":
+el validador descarta los roles que no son `user` ni `assistant`, así que un `system` inyectado
+desde el renderer no llega a ninguna parte. El coste es que el renderer no puede afinar el prompt;
+a cambio, lo que se le impone al modelo se lee entero en un único archivo probado.
+
+### ADR-017 — HTTP directo para los tres proveedores, sin SDK
+**Fecha:** 2026-08-23
+**Contexto:** Hay tres proveedores (Anthropic, OpenAI y Ollama) y cada uno tiene su SDK oficial o
+su cliente recomendado.
+**Opciones:**
+- (a) Un SDK por proveedor. Tipos oficiales, reintentos y helpers de streaming ya resueltos.
+- (b) El SDK de Anthropic para Anthropic y `fetch` para los otros dos.
+- (c) `fetch` para los tres, con un constructor de peticiones y un parser de streaming por formato.
+**Decisión:** (c).
+**Consecuencias:** (b) queda descartada de entrada: mezclar un SDK con llamadas HTTP crudas dentro
+del mismo módulo da lo peor de las dos cosas —dos modelos de error, dos formas de cancelar y dos
+sitios donde mirar cuando algo falla—. Entre (a) y (c) pesa el empaquetado: un IDE de escritorio
+carga esto en el proceso principal de Electron y tres SDK son tres árboles de dependencias que hay
+que auditar, actualizar y firmar. Con (c), la superficie es un archivo que construye una petición y
+otro que la parsea, los dos funciones puras y por tanto probables sin red ni claves — que es
+justamente lo que permite las 46 aserciones de `ai-providers.test.mjs`. El precio es real y conviene
+anotarlo: cuando un proveedor cambie su formato de streaming, el aviso no llegará por un `npm
+outdated`, llegará por un fallo. Por eso el parser está probado con troceado arbitrario y por eso
+los errores HTTP se traducen a mensajes accionables en vez de propagarse crudos.
+
+### ADR-018 — Modelos de la generación actual por defecto, los anteriores como opción
+**Fecha:** 2026-08-23
+**Contexto:** La especificación de la fase pedía "Claude 3.7 Sonnet / Claude 3.5 Haiku" y
+"GPT-4o / o3-mini". Los dos modelos de Claude citados son de la generación anterior; la actual es
+la familia Claude 5 (Opus 5, Sonnet 5) más Haiku 4.5, y su API tiene diferencias que no son
+cosméticas: `temperature` y `budget_tokens` están retirados —devuelven 400— y el esfuerzo se
+controla con `output_config.effort` junto a razonamiento adaptativo.
+**Decisión:** el catálogo ofrece las dos generaciones. El valor por defecto es `claude-opus-5`, y
+`claude-3-7-sonnet-latest` y `claude-3-5-haiku-latest` quedan marcados como `legacy: true` y se
+enseñan en el desplegable con el sufijo "· anterior".
+**Consecuencias:** quien tenga una clave con acceso limitado, o quiera reproducir un resultado
+antiguo, sigue pudiendo elegirlos; quien no toque nada arranca con lo mejor disponible. La
+diferencia de API se resuelve con un flag por modelo (`supportsEffort`) en vez de con una cadena de
+`if` por versión: a un modelo antiguo no se le manda `output_config` ni `thinking`, y a ninguno se
+le manda nunca `temperature` ni `budget_tokens`. Hay una prueba por cada una de esas tres reglas,
+porque el fallo sería un 400 en mitad de una conversación y no un error de compilación.
+
+### ADR-019 — Sin cifrado del sistema, la clave no toca el disco
+**Fecha:** 2026-08-23
+**Contexto:** Las claves de API se guardan con `safeStorage`, que delega en DPAPI (Windows) y
+Keychain (macOS). En algún entorno —una sesión de Linux sin llavero— `isEncryptionAvailable()`
+devuelve false.
+**Opciones:** (a) guardar la clave en claro en `userData` avisando en la interfaz, (b) no guardarla
+y usarla sólo durante la sesión, (c) no permitir configurar el proveedor en ese caso.
+**Decisión:** (b). La clave se queda en memoria, el archivo `ai-credentials.json` ni se crea, y el
+handler devuelve un estado con el motivo, que la interfaz enseña.
+**Consecuencias:** el usuario tiene que volver a pegar la clave en cada arranque en ese entorno
+concreto, lo cual es molesto y se le dice claramente. La alternativa (a) es la que acaba, años
+después, con una clave de producción en el perfil de alguien y en una copia de seguridad que nadie
+recordaba. (c) sería peor que el problema: el asistente dejaría de existir en esa máquina.
+
+---
+
+### Iteración 13 — 2026-08-23 — Fase 10: DotForge AI Assistant
+**Objetivo:** que el IDE entienda de la arquitectura del proyecto abierto y pueda ayudar sin
+romperla — que es lo único que un asistente genérico no puede hacer.
+
+**Módulo 1 — Proveedor y transporte.**
+- `src/shared/ai.ts`: catálogo de proveedores y modelos, preferencias y tipos del streaming. Sin
+  dependencias, así que lo comparten proceso principal, renderer y pruebas.
+- `src/main/services/ai/request-builder.ts` y `stream-parser.ts`: funciones puras que construyen la
+  petición de cada proveedor y parsean su respuesta (SSE con tipos en Anthropic, SSE con `[DONE]`
+  en OpenAI, NDJSON en Ollama).
+- `ai-service.ts`: un `AbortController` por `requestId`, temporizador de inactividad de 90 s y
+  traducción de todos los fallos a mensajes accionables. La fuente de credenciales se **inyecta**
+  (`setCredentialSource`), así que el cliente entero no depende de Electron y se puede ejercitar
+  contra un servidor de mentira.
+- `secret-store.ts`: claves cifradas con `safeStorage`, con la política del ADR-019.
+- Canales nuevos: `ai:status`, `ai:set-key`, `ai:probe`, `ai:send`, `ai:cancel` y los eventos
+  `event:ai-delta` / `event:ai-end`.
+
+**Módulo 2 — Contexto RAG y reglas de arquitectura.**
+- `src/shared/ai-context.ts`: detección de la arquitectura (manifiesto `dotforge.json` primero,
+  forma de la solución después), mapa de proyecto a capa, recorte por ventana del archivo activo y
+  composición del prompt de sistema con las reglas de Clean, Hexagonal o DDD.
+- Las cuatro piezas del contexto —archivo, selección, arquitectura y diagnósticos— se pueden apagar
+  por separado desde los ajustes, y hay una prueba de que apagarlas surte efecto de verdad.
+
+**Módulo 3 — Interfaz.**
+- `views/ai-chat.ts`: sexto icono en la barra de actividad y panel de chat con respuesta token a
+  token, bloques de código con "Copiar" y "Aplicar", y acciones rápidas.
+- `views/ai-inline.ts`: `Ctrl+I` sobre la selección, con vista previa de diferencias — el cambio se
+  aplica al modelo de Monaco y se resalta, y el widget enseña lo que desaparece y el recuento.
+- `views/ai-diff.ts` (en `shared/ai-diff.ts`): extracción del bloque de código, reindentación al
+  hueco de la selección y diferencia por subsecuencia común más larga.
+- Acciones en el menú contextual del editor y del árbol de archivos, entradas en la paleta y un
+  menú nativo "IA".
+
+**Errores encontrados:**
+- *Síntoma:* un archivo de 48.000 caracteres en **una sola línea** llegaba entero al prompt pese al
+  recorte.
+  *Causa raíz:* `windowAround` recortaba por líneas, y una línea más larga que todo el presupuesto
+  no se puede recortar por líneas.
+  *Arreglo:* tope duro sobre la ventana ya calculada. Lo destapó la prueba, no un usuario.
+- *Síntoma:* `coerceChatRequest` aceptaba un `requestId` de 80 caracteres recortándolo a 64.
+  *Causa raíz:* recortar por costumbre. Un id truncado es válido pero ya no casa con el que espera
+  el renderer, así que los deltas irían a una conversación que no los reclama.
+  *Arreglo:* se valida sin recortar; un id largo se rechaza.
+- *Síntoma:* la suite pasaba en verde y tardaba **cinco minutos** en salir.
+  *Causa raíz:* la prueba de cancelación deja adrede una respuesta HTTP sin cerrar, y `server.close()`
+  espera al `requestTimeout` del servidor, que por defecto son 300 s.
+  *Arreglo:* `closeAllConnections()` antes de cerrar. De 302 s a 302 ms.
+- *Síntoma (evitado a tiempo):* `Ctrl+Shift+I` para abrir el asistente chocaba con el inspector de
+  Electron, y `Ctrl+I` registrado a la vez en el menú nativo y en `window` abría el widget dos veces.
+  *Arreglo:* el atajo del panel es `Ctrl+Shift+A`, y `Ctrl+I` se atiende sólo desde el menú nativo,
+  cuyo acelerador llega antes que el renderer.
+
+**Verificado sobre la aplicación real**, con `--ui=` y `--probe=` en vez de mirar capturas:
+- Barra de actividad: `["Explorador de soluciones","Generador de arquitecturas","Paquetes NuGet",
+  "Depuración y pruebas","DotForge AI Assistant","Ajustes"]`.
+- Panel de IA: título `DotForge AI`, estado `Falta la clave de API de Anthropic. [Configurar]` y
+  acciones rápidas `["Explicar","Pruebas xUnit","Revisar arquitectura"]` — es decir, sin clave el
+  asistente lo dice y ofrece el camino, en vez de fallar al primer mensaje.
+- Ajustes: el grupo "Asistente de IA" con proveedor, modelo, endpoint, clave, longitud, esfuerzo y
+  los cuatro interruptores de contexto; el desplegable lista `Claude Opus 5`, `Claude Sonnet 5`,
+  `Claude Haiku 4.5`, `Claude 3.7 Sonnet · anterior` y `Claude 3.5 Haiku · anterior`.
+- **Conversación real de punta a punta** contra un servidor que habla el protocolo de Ollama
+  (`tests/unit/ai-streaming.test.mjs`): el texto llega en varios deltas, el cierre trae el consumo
+  de tokens, el prompt de sistema que sale por el cable contiene las reglas de la arquitectura
+  detectada, el contexto viaja sólo en el último turno, un 401 se traduce a "clave de API", un
+  endpoint apagado a "comprueba que Ollama está en marcha" y cancelar cierra la conexión.
+- `npm test` en verde de punta a punta: **596 pruebas** (442 unit, 41 security, 57 package, 56
+  scaffold), de las cuales 113 son nuevas del módulo de IA. `--smoke-test` → `SMOKE_OK`.
+- Empaquetado real: `npm run dist:win` → `DotForge IDE-1.4.0-Setup-x64.exe` (117,3 MB) y
+  `DotForge IDE-1.4.0-win-x64.zip` (161,6 MB); la poda liberó los 278,9 MB de la 1.3.1 antes de
+  empaquetar y `verify:dist` termina sin problemas (sin firmar, como corresponde sin certificado).
+
+**Versión:** el módulo de IA es funcionalidad nueva, con contratos IPC nuevos y sin romper nada de
+lo anterior, así que por semver le corresponde el segundo número: 1.3.1 → **1.4.0** (ADR-009).

@@ -357,6 +357,61 @@ export class EditorView {
     void this.editor?.getAction(actionId)?.run();
   }
 
+  /**
+   * Registra una acción en el editor y, opcionalmente, en su menú contextual.
+   *
+   * Es la vía de Monaco: las entradas aparecen en el menú del botón derecho con su atajo, se
+   * traducen solas al idioma del editor y respetan el estado (no salen si no hay modelo).
+   */
+  addAction(spec: {
+    id: string;
+    label: string;
+    keybindings?: number[];
+    contextMenuGroupId?: string;
+    order?: number;
+    run: () => void;
+  }): void {
+    if (!this.editor) return;
+
+    this.disposables.push(
+      this.editor.addAction({
+        id: spec.id,
+        label: spec.label,
+        ...(spec.keybindings ? { keybindings: spec.keybindings } : {}),
+        ...(spec.contextMenuGroupId ? { contextMenuGroupId: spec.contextMenuGroupId } : {}),
+        ...(spec.order === undefined ? {} : { contextMenuOrder: spec.order }),
+        run: () => spec.run(),
+      }),
+    );
+  }
+
+  /** Selección actual, para inyectarla como contexto del asistente. Null si no hay ninguna. */
+  currentSelection(): { startLine: number; endLine: number; text: string } | null {
+    const selection = this.editor?.getSelection();
+    const model = this.editor?.getModel();
+    if (!selection || !model || selection.isEmpty()) return null;
+
+    return {
+      startLine: selection.startLineNumber,
+      endLine: selection.endLineNumber,
+      text: model.getValueInRange(selection),
+    };
+  }
+
+  /**
+   * Sustituye la selección por un texto (o lo inserta en el cursor si no hay selección).
+   *
+   * Pasa por `executeEdits` y no por `setValue` para que quede en la pila de deshacer: un código
+   * que llega de un modelo es justo el que uno quiere poder revertir con Ctrl+Z.
+   */
+  replaceSelection(text: string): void {
+    const selection = this.editor?.getSelection();
+    if (!this.editor || !selection) return;
+
+    this.editor.executeEdits('dotforge.ai', [{ range: selection, text, forceMoveMarkers: true }]);
+    this.editor.focus();
+  }
+
   focus(): void {
     this.editor?.focus();
   }

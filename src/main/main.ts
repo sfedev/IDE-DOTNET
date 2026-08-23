@@ -19,6 +19,8 @@ import {
   startLanguageServerForCurrentWorkspace,
 } from './ipc/register.js';
 import { lspClient } from './lsp/lsp-client.js';
+import * as aiService from './services/ai/ai-service.js';
+import * as aiSecrets from './services/ai/secret-store.js';
 import * as processRegistry from './services/process-registry.js';
 import * as settingsService from './services/settings-service.js';
 import * as startupService from './services/startup-service.js';
@@ -354,22 +356,23 @@ const uiAction = (() => {
 })();
 
 const UI_ACTIONS: Record<string, string> = {
-  // La barra de actividad, en orden: solución, generador, NuGet, depuración, [spacer], ajustes.
+  // La barra de actividad, en orden: solución, generador, NuGet, depuración, IA, [spacer], ajustes.
   wizard: "document.querySelectorAll('.activity-item')[1]?.click()",
   nuget: "document.querySelectorAll('.activity-item')[2]?.click()",
   debug: "document.querySelectorAll('.activity-item')[3]?.click()",
-  settings: "document.querySelectorAll('.activity-item')[4]?.click()",
+  ai: "document.querySelectorAll('.activity-item')[4]?.click()",
+  settings: "document.querySelectorAll('.activity-item')[5]?.click()",
   palette: "document.querySelector('#statusbar button:last-of-type')?.click()",
   terminal: "[...document.querySelectorAll('.panel-tab')].find((tab) => tab.textContent?.includes('Terminal'))?.click()",
   // Dos pasos: abrir ajustes y pulsar "Claro". Se encadenan con un retardo porque la vista se
   // repinta entre uno y otro.
   light:
-    "document.querySelectorAll('.activity-item')[4]?.click();" +
+    "document.querySelectorAll('.activity-item')[5]?.click();" +
     "setTimeout(() => [...document.querySelectorAll('.segmented button')]" +
     ".find((button) => button.textContent?.includes('Claro'))?.click(), 400)",
   // Despliega el grupo de archivos satélite de appsettings.json.
   'probe-theme':
-    "document.querySelectorAll('.activity-item')[4]?.click();" +
+    "document.querySelectorAll('.activity-item')[5]?.click();" +
     "setTimeout(() => {" +
     "  [...document.querySelectorAll('.segmented button')].find((b) => b.textContent?.includes('Claro'))?.click();" +
     "  setTimeout(() => {" +
@@ -527,7 +530,15 @@ app.on('second-instance', () => {
 app.whenReady().then(async () => {
   settingsService.initialize(app.getPath('userData'));
   startupService.initialize(app.getPath('userData'));
+  aiSecrets.initialize(app.getPath('userData'));
   await settingsService.load();
+  await aiSecrets.load();
+
+  // El cliente de IA no conoce el llavero: se le dice de dónde salen las claves.
+  aiService.setCredentialSource({
+    get: (provider) => aiSecrets.get(provider),
+    configured: () => aiSecrets.configuredProviders(),
+  });
 
   registerIpcHandlers();
   installApplicationMenu();
@@ -570,6 +581,8 @@ app.on('window-all-closed', () => {
  */
 app.on('before-quit', () => {
   void lspClient.stop();
+  // Una petición en streaming sigue consumiendo tokens aunque nadie mire la respuesta.
+  aiService.cancelAll();
   processRegistry.killAll();
 });
 
