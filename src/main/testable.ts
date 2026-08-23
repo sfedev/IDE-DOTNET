@@ -20,3 +20,9 @@ export { detectApplicationUrl, parseMsBuildDiagnostics, summarize } from './serv
 export { findSolutionFile, loadSolution, readProject, IGNORED_DIRECTORIES } from './services/solution-service.js';
 export { languageIdFor } from './services/file-service.js';
 export { ALLOWED_COMMANDS, CommandError, tokenize } from './services/command-runner.js';
+export {
+  environmentFromProfile,
+  parseLaunchSettings,
+  readLaunchEnvironment,
+  selectProfile,
+} from './services/launch-settings.js';

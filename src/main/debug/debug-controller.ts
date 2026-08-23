@@ -17,6 +17,7 @@ import type {
   DebugState,
   DebugVariable,
 } from '../../shared/contracts.js';
+import { readLaunchEnvironment } from '../services/launch-settings.js';
 import { readProject, readInheritedProperties } from '../services/solution-service.js';
 import { acquireDebugger, DebugSession, type DebuggerBinary } from './netcoredbg.js';
 
@@ -26,6 +27,16 @@ export interface DebugTarget {
   /** Directorio de trabajo del proceso depurado. */
   cwd: string;
   projectName: string;
+  /**
+   * Entorno del perfil de `launchSettings.json`. Sin esto, una aplicación ASP.NET lanzada desde
+   * `bin/Debug` arranca en Production: puerto 5000, sin static web assets y avisando de que no
+   * encuentra `wwwroot`.
+   */
+  env: Record<string, string>;
+  /** Perfil aplicado, para poder decirlo en la salida de depuración. */
+  launchProfile: string | null;
+  /** Aviso del lector de perfiles, si lo hubo. */
+  launchWarning: string | null;
 }
 
 /**
@@ -43,21 +54,29 @@ export async function resolveDebugTarget(projectPath: string, workspaceRoot: str
 
   const attempted: string[] = [];
 
+  // El perfil se lee del proyecto, no del directorio de salida: `Properties/launchSettings.json`
+  // no se copia a `bin/`, y es justo lo que el depurador necesita para no arrancar en Production.
+  const launch = await readLaunchEnvironment(project.directory, project.name);
+  const describe = (program: string): DebugTarget => ({
+    program,
+    cwd: dirname(program),
+    projectName: project.name,
+    env: launch.env,
+    launchProfile: launch.profile,
+    launchWarning: launch.warning,
+  });
+
   for (const framework of frameworks) {
     const candidate = join(outputRoot, framework, `${assemblyName}.dll`);
     attempted.push(candidate);
-    if (existsSync(candidate)) {
-      return { program: candidate, cwd: dirname(candidate), projectName: project.name };
-    }
+    if (existsSync(candidate)) return describe(candidate);
   }
 
   // El TargetFramework puede haber cambiado sin recompilar: se mira qué hay realmente en bin/Debug.
   if (existsSync(outputRoot)) {
     for (const entry of await readdir(outputRoot)) {
       const candidate = join(outputRoot, entry, `${assemblyName}.dll`);
-      if (existsSync(candidate)) {
-        return { program: candidate, cwd: dirname(candidate), projectName: project.name };
-      }
+      if (existsSync(candidate)) return describe(candidate);
     }
   }
 
@@ -156,9 +175,21 @@ export class DebugController extends EventEmitter {
         progress: null,
       });
 
+      if (target.launchWarning) {
+        this.emit('output', { category: 'stderr', text: `${target.launchWarning}\n` });
+      }
+      if (target.launchProfile) {
+        const variables = Object.keys(target.env).sort().join(', ');
+        this.emit('output', {
+          category: 'console',
+          text: `Perfil de arranque "${target.launchProfile}": ${variables || 'sin variables'}\n`,
+        });
+      }
+
       await this.session.start(this.binary, {
         program: target.program,
         cwd: target.cwd,
+        env: target.env,
         stopAtEntry,
       });
 

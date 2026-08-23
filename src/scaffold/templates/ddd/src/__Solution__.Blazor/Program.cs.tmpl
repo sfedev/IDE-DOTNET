@@ -6,6 +6,11 @@ using {{Solution}}.Infrastructure.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Los static web assets (wwwroot) sólo se activan solos en Development. Un depurador lanza el
+// ensamblado de bin/, donde no hay wwwroot: sin esta línea la app avisa en cada petición de que
+// no encuentra los archivos estáticos. En una app publicada la llamada no hace nada.
+builder.WebHost.UseStaticWebAssets();
+
 builder.Host.UseSerilog((context, services, configuration) => configuration
     .ReadFrom.Configuration(context.Configuration)
     .ReadFrom.Services(services)

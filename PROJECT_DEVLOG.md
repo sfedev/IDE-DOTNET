@@ -712,3 +712,48 @@ el instalador recién compilado. Dejar basura es recuperable; borrar el artefact
 **Verificado:** `node scripts/prune-dist.mjs --dry-run` sobre el `dist/` real listó exactamente los
 tres archivos de la 1.1.0; la ejecución liberó 278.8 MB y dejó intactos los de la 1.2.0,
 `win-unpacked` y los `builder-*.yml`. `npm run test:package` en verde (57 pruebas).
+
+### Iteración 10 — 2026-08-23 — Depurar aplicaba Production: el perfil de arranque se ignoraba
+**Síntoma:** al depurar (F5) una solución hexagonal con UI Blazor, el log decía
+`Hosting environment: Production`, `Now listening on: http://localhost:5000`, `The WebRootPath was
+not found: ...\bin\Debug\net10.0\wwwroot` y repetía en cada petición `Static Web Assets are not
+enabled`. Con `Ejecutar` (que es `dotnet run --project`) no pasaba.
+
+**Causa raíz:** dos problemas distintos que se manifestaban juntos.
+1. `dotnet run` aplica el perfil de `Properties/launchSettings.json`; el depurador no. El
+   controlador lanzaba el `.dll` con `cwd = bin/Debug/<tfm>` y **sin ninguna variable de entorno**,
+   así que ASP.NET asumía Production: puerto 5000 en vez de los del perfil, y sin los static web
+   assets, que sólo se activan solos en Development. `DebugSession` ya aceptaba `env` en la
+   petición `launch` de DAP; simplemente nadie lo rellenaba.
+2. La plantilla Blazor no traía favicon, así que cada carga de página dejaba un `404 /favicon.ico`
+   en el log. Eso no dependía del entorno.
+
+**Hecho:**
+- `src/main/services/launch-settings.ts`: lee el perfil, elige cuál aplicar con el mismo criterio
+  que Visual Studio (sólo `commandName: "Project"`; el homónimo del proyecto y si no el primero) y
+  traduce `applicationUrl` a `ASPNETCORE_URLS`, que es lo que hace `dotnet run`. No lanza nunca: un
+  `launchSettings.json` ausente es lo normal en una biblioteca, y uno corrupto no puede impedir
+  depurar, así que se devuelve un aviso que la sesión escribe en su salida.
+- `DebugTarget` lleva ahora `env`, `launchProfile` y `launchWarning`; el controlador los pasa al
+  `launch` de DAP y anuncia en la consola qué perfil ha aplicado.
+- Exportado por `src/main/testable.ts` para poder probarlo con Node puro.
+- Plantillas Blazor (las tres arquitecturas): `favicon.svg` propio de cada arquitectura —capas
+  concéntricas, hexágono, frontera de agregado— enlazado desde `App.razor`, y
+  `builder.WebHost.UseStaticWebAssets()` en `Program.cs`, para que la aplicación encuentre
+  `wwwroot` también cuando la lanza un depurador desde `bin/`. En una app publicada no hace nada.
+- 17 pruebas nuevas en `tests/unit/launch-settings.test.mjs`, con la fixture generada por el propio
+  scaffolder: así también se verifica que el `launchSettings.json` que produce es utilizable.
+
+**Verificado sobre una solución real** (`Hx`, hexagonal + Blazor, net10.0), lanzando el binario de
+`bin/Debug` igual que hace el depurador:
+- Sin perfil, ya sólo con `UseStaticWebAssets()`: desaparecen los avisos de `WebRootPath` y de
+  `Static Web Assets` (0 apariciones en el log), y `/favicon.svg` responde 200.
+- Con el entorno del perfil (`ASPNETCORE_ENVIRONMENT=Development` + `ASPNETCORE_URLS`):
+  `Hosting environment: Development`, escucha en 5355/5354 en vez de en el 5000, y desaparece
+  también `Failed to determine the https port for redirect`. `/`, `/products` y `/favicon.svg`
+  responden 200.
+- Queda un único aviso, ajeno al IDE: el certificado de desarrollo no está confiado en la máquina.
+  Se resuelve con `dotnet dev-certs https --trust`.
+
+**Nota de método:** el `404 /favicon.ico` que aparece al pedirlo con `curl` es esperado y no se
+corrige: un navegador con `<link rel="icon">` en el documento no pide `/favicon.ico`.
