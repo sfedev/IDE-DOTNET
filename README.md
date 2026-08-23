@@ -380,6 +380,7 @@ npm run build
 | `npm run dist:win` | **Windows:** instalador NSIS + portable ZIP → `dist/` |
 | `npm run dist:mac` | **macOS:** `.dmg` + `.app` comprimido, arm64 y x64 → `dist/` |
 | `npm run verify:dist` | Comprueba qué artefactos hay en `dist/`, su tamaño y su firma |
+| `npm run prune:dist` | Borra de `dist/` los artefactos de versiones anteriores (`--dry-run` sólo informa) |
 | `npm run clean` | Borra `build/` y `dist/` (`--all` incluye el toolchain cacheado) |
 
 ### macOS

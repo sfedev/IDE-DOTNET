@@ -677,3 +677,38 @@ anterior, así que por semver le corresponde el segundo número: 1.1.0 → **1.2
 
 **Verificado:** `node build/cli.js --version` → `1.2.0`; el literal inyectado aparece en los
 bundles `cli`, `scaffold` y `main`; `npm test` en verde.
+
+### Iteración 9 — 2026-08-23 — `dist/` se poda sola entre versiones
+**Síntoma:** tras `npm run dist:win` con la 1.2.0, `/dist` contenía los artefactos de la 1.1.0 y
+los de la 1.2.0 a la vez: 279 MB de instaladores viejos y dos `.exe` parecidos donde es fácil
+subir el que no era.
+
+**Causa raíz:** `artifactName` incluye `${version}`, así que cada release escribe archivos con
+nombre nuevo, y electron-builder no limpia su directorio de salida: sólo reescribe lo que vuelve
+a generar con el mismo nombre (`win-unpacked`, `builder-*.yml`).
+
+**Opciones consideradas:**
+- (a) Borrar `/dist` entera antes de empaquetar. Se descarta: `dist:win` y `dist:mac` se ejecutan
+  por separado —y en máquinas distintas—, así que el segundo se llevaría por delante lo del
+  primero. Y `dist:all` tendría el mismo problema entre sus dos mitades.
+- (b) Quitar `${version}` del nombre de artefacto. Se descarta: se pierde la trazabilidad de qué
+  instalador es cuál, que es justo lo que evita subir el equivocado.
+- (c) Podar sólo lo que lleve un sello de versión distinto del actual. **Elegida.**
+
+**Hecho:**
+- `scripts/lib/dist-artifacts.mjs`: la regla, como función pura y probable sin tocar disco.
+- `scripts/prune-dist.mjs`: recorre `dist/`, informa de tamaño y borra. Acepta `--dry-run`.
+- `pack`, `dist:win`, `dist:mac` y `dist:all` lo ejecutan **antes** de empaquetar; hay una prueba
+  que verifica ese orden, porque al revés borraría lo que se acaba de construir.
+- Expuesto también como `npm run prune:dist`, documentado en `CLAUDE.md` y en `README.md`.
+- 7 pruebas nuevas en `tests/package/packaging.test.mjs`.
+
+**Decisión que conviene recordar:** la regla es deliberadamente conservadora. Un archivo cuyo
+nombre contiene el sello de la versión actual **nunca** se borra, aunque sea una preliberación
+(`1.2.0-beta.1` estando en la `1.2.0` sobrevive). Distinguir ese caso exigiría mantener una lista
+de sufijos de destino (`win`, `mac`, `arm64`, `Setup`, …) y acertar siempre: equivocarse borraría
+el instalador recién compilado. Dejar basura es recuperable; borrar el artefacto bueno, no.
+
+**Verificado:** `node scripts/prune-dist.mjs --dry-run` sobre el `dist/` real listó exactamente los
+tres archivos de la 1.1.0; la ejecución liberó 278.8 MB y dejó intactos los de la 1.2.0,
+`win-unpacked` y los `builder-*.yml`. `npm run test:package` en verde (57 pruebas).

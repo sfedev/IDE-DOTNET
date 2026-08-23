@@ -25,11 +25,12 @@
     "test:unit": "node scripts/run-tests.mjs --filter unit",
     "test:scaffold": "node scripts/run-tests.mjs --filter scaffold",
     "test:package": "node scripts/run-tests.mjs --filter package",
-    "pack": "node scripts/build.mjs && electron-builder --dir",
-    "dist:win": "node scripts/build.mjs && electron-builder --win --publish never",
-    "dist:mac": "node scripts/build.mjs && node scripts/dist-mac.mjs",
-    "dist:all": "node scripts/build.mjs && electron-builder --win --publish never && node scripts/dist-mac.mjs",
-    "verify:dist": "node scripts/verify-dist.mjs"
+    "pack": "node scripts/build.mjs && node scripts/prune-dist.mjs && electron-builder --dir",
+    "dist:win": "node scripts/build.mjs && node scripts/prune-dist.mjs && electron-builder --win --publish never",
+    "dist:mac": "node scripts/build.mjs && node scripts/prune-dist.mjs && node scripts/dist-mac.mjs",
+    "dist:all": "node scripts/build.mjs && node scripts/prune-dist.mjs && electron-builder --win --publish never && node scripts/dist-mac.mjs",
+    "verify:dist": "node scripts/verify-dist.mjs",
+    "prune:dist": "node scripts/prune-dist.mjs"
   },
   "keywords": [
     "ide",

@@ -121,6 +121,8 @@ npm run dist:win
 - `npm run dist:mac` — macOS: `.dmg` + `.zip` con `.app` (arm64 + x64) → `/dist`.
 - `npm run dist:all` — ambos.
 - `npm run verify:dist` — qué hay en `/dist`, tamaño y estado de firma. Acepta `--require win|mac`.
+- `npm run prune:dist` — borra de `/dist` los artefactos de versiones anteriores. Lo ejecutan
+  solos `pack`, `dist:win`, `dist:mac` y `dist:all` **antes** de empaquetar; acepta `--dry-run`.
 - `npm run clean` — borra `build/` y `dist/`; con `--all`, también el toolchain cacheado.
 
 ### Modos de diagnóstico de la aplicación

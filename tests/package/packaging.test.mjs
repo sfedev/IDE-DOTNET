@@ -11,6 +11,8 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { isStaleArtifact, selectStaleArtifacts } from '../../scripts/lib/dist-artifacts.mjs';
+
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const buildDir = join(root, 'build');
 const iconsDir = join(root, 'resources', 'icons');
@@ -255,5 +257,93 @@ describe('flujo de macOS', () => {
     assert.match(workflow, /runs-on:\s*macos-latest/);
     assert.match(workflow, /npm run dist:mac/);
     assert.match(workflow, /verify-dist\.mjs --require mac/);
+  });
+});
+
+describe('poda de artefactos de versiones anteriores', () => {
+  const currentVersion = '1.2.0';
+
+  it('todos los scripts que escriben en dist/ podan antes', () => {
+    for (const script of ['pack', 'dist:win', 'dist:mac', 'dist:all']) {
+      assert.match(
+        packageJson.scripts[script],
+        /scripts\/prune-dist\.mjs/,
+        `"${script}" no poda dist/ antes de empaquetar`,
+      );
+    }
+    assert.ok(existsSync(join(root, 'scripts', 'prune-dist.mjs')));
+  });
+
+  it('la poda ocurre antes de generar, no después', () => {
+    // Al revés borraría lo que se acaba de construir.
+    const script = packageJson.scripts['dist:win'];
+    assert.ok(
+      script.indexOf('prune-dist.mjs') < script.indexOf('electron-builder'),
+      'prune-dist.mjs debe ejecutarse antes que electron-builder',
+    );
+  });
+
+  it('marca como obsoletos los artefactos de otra versión', () => {
+    for (const name of [
+      'DotForge IDE-1.1.0-Setup-x64.exe',
+      'DotForge IDE-1.1.0-Setup-x64.exe.blockmap',
+      'DotForge IDE-1.1.0-win-x64.zip',
+      'DotForge IDE-0.9.0-arm64.dmg',
+      'DotForge IDE-1.1.0-mac-x64.zip',
+    ]) {
+      assert.equal(isStaleArtifact(name, currentVersion), true, name);
+    }
+  });
+
+  it('conserva los artefactos de la versión actual', () => {
+    for (const name of [
+      'DotForge IDE-1.2.0-Setup-x64.exe',
+      'DotForge IDE-1.2.0-Setup-x64.exe.blockmap',
+      'DotForge IDE-1.2.0-win-x64.zip',
+      'DotForge IDE-1.2.0-arm64.dmg',
+      'DotForge IDE-1.2.0-mac-arm64.zip',
+    ]) {
+      assert.equal(isStaleArtifact(name, currentVersion), false, name);
+    }
+  });
+
+  it('no toca lo que no lleva versión en el nombre: cada build lo reescribe', () => {
+    for (const name of ['win-unpacked', 'mac', 'mac-arm64', 'builder-debug.yml', 'builder-effective-config.yaml', 'latest.yml']) {
+      assert.equal(isStaleArtifact(name, currentVersion), false, name);
+    }
+  });
+
+  it('no confunde el sufijo de plataforma con una preliberación', () => {
+    // El riesgo real: "1.2.0-win-x64" no es la preliberación "win-x64" de la 1.2.0.
+    assert.equal(isStaleArtifact('DotForge IDE-1.2.0-win-x64.zip', '1.2.0'), false);
+    assert.equal(isStaleArtifact('DotForge IDE-1.2.0-beta.1-win-x64.zip', '1.2.0-beta.1'), false);
+    assert.equal(isStaleArtifact('DotForge IDE-1.2.0-win-x64.zip', '1.2.0-beta.1'), true);
+  });
+
+  it('ante la duda conserva: una preliberación de la misma base sobrevive', () => {
+    // Limitación asumida y documentada en dist-artifacts.mjs: el sello "-1.2.0-" está presente en
+    // el nombre, así que no se borra. Preferimos dejar basura antes que borrar el artefacto que
+    // se acaba de construir.
+    assert.equal(isStaleArtifact('DotForge IDE-1.2.0-beta.1-win-x64.zip', '1.2.0'), false);
+  });
+
+  it('selectStaleArtifacts filtra y ordena, y nunca devuelve algo de la versión actual', () => {
+    const entries = [
+      'DotForge IDE-1.2.0-win-x64.zip',
+      'DotForge IDE-1.1.0-win-x64.zip',
+      'DotForge IDE-1.0.0-Setup-x64.exe',
+      'win-unpacked',
+      'builder-debug.yml',
+    ];
+
+    assert.deepEqual(selectStaleArtifacts(entries, currentVersion), [
+      'DotForge IDE-1.0.0-Setup-x64.exe',
+      'DotForge IDE-1.1.0-win-x64.zip',
+    ]);
+  });
+
+  it('exige una versión actual válida en vez de borrar a ciegas', () => {
+    assert.throws(() => isStaleArtifact('DotForge IDE-1.1.0-win-x64.zip', ''), TypeError);
+    assert.throws(() => isStaleArtifact('DotForge IDE-1.1.0-win-x64.zip', undefined), TypeError);
   });
 });
