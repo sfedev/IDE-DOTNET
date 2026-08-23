@@ -89,6 +89,8 @@ export const ALLOWED_COMMANDS = new Set([
   'powershell',
   'python',
   'docker',
+  // La CLI de Azure: publicar la API que se acaba de escribir es parte del mismo flujo.
+  'az',
 ]);
 
 export interface CommandCallbacks {

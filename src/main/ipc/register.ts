@@ -26,6 +26,7 @@ import type {
   LspState,
   RecentWorkspace,
   SolutionInfo,
+  TerminalContext,
 } from '../../shared/contracts.js';
 import type { GitDiffRequest } from '../../shared/git.js';
 import type { EfOperation, EfOperationOptions } from '../../shared/efcore.js';
@@ -45,11 +46,13 @@ import * as aiService from '../services/ai/ai-service.js';
 import * as aiSecrets from '../services/ai/secret-store.js';
 import { AiRequestError, coerceChatRequest } from '../services/ai/validate.js';
 import * as commandRunner from '../services/command-runner.js';
+import * as dockerService from '../services/docker-service.js';
 import * as dotnetService from '../services/dotnet-service.js';
 import * as efcoreService from '../services/efcore-service.js';
 import * as fileService from '../services/file-service.js';
 import * as httpClient from '../services/http-client-service.js';
 import * as gitService from '../services/git-service.js';
+import { readNpmScripts } from '../services/node-scripts.js';
 import * as nugetService from '../services/nuget-service.js';
 import * as settingsService from '../services/settings-service.js';
 import * as startupService from '../services/startup-service.js';
@@ -560,6 +563,30 @@ export function registerIpcHandlers(): void {
 
   // --- Terminal integrada -----------------------------------------------------------------------
   ipcMain.handle(IPC.terminalAllowed, (): string[] => [...commandRunner.ALLOWED_COMMANDS].sort());
+
+  /**
+   * Contexto del autocompletado.
+   *
+   * Se resuelve entero de una vez y con tolerancia a fallos: sin Docker instalado, sin
+   * `package.json` o sin workspace abierto, lo que falta llega vacío y la terminal sigue
+   * autocompletando lo demás. Que falte una fuente no puede apagar el autocompletado entero.
+   */
+  ipcMain.handle(IPC.terminalContext, async (): Promise<TerminalContext> => {
+    const [docker, npmScripts] = await Promise.all([
+      dockerService.readNames().catch(() => ({ containers: [], images: [] })),
+      currentSolution ? readNpmScripts(currentSolution.directory) : Promise.resolve([]),
+    ]);
+
+    const state = await dockerService.readState().catch(() => ({ available: false }));
+
+    return {
+      programs: [...commandRunner.ALLOWED_COMMANDS].sort(),
+      containers: docker.containers,
+      images: docker.images,
+      npmScripts,
+      dockerAvailable: state.available,
+    };
+  });
 
   ipcMain.handle(IPC.terminalRun, (_event, line: unknown) => {
     if (!currentSolution) throw new Error('abre una carpeta antes de usar la terminal');

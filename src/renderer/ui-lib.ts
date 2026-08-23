@@ -139,3 +139,53 @@ export {
   sampleForParameter,
 } from '../shared/api-endpoints.js';
 export type { ApiEndpoint } from '../shared/api-endpoints.js';
+
+/**
+ * Visor de registro estructurado.
+ *
+ * El parseo de la salida de Serilog, NLog, la consola de .NET y CLEF, y el reconocimiento de los
+ * marcos de pila. Son reglas sobre texto con formatos que conviven en la misma salida: se prueban
+ * con capturas reales en vez de a ojo.
+ */
+export {
+  countByLevel,
+  filterEvents,
+  firstNavigableFrame,
+  isAtLeast,
+  isExceptionLine,
+  LEVEL_LABEL,
+  LOG_LEVELS,
+  parseLogEvents,
+  parseStackFrame,
+  toLevel,
+} from '../shared/log-events.js';
+export type { LogEvent, LogLevel, StackFrame } from '../shared/log-events.js';
+
+/** Linter de reglas de arquitectura: capas, dependencias permitidas y paquetes del núcleo. */
+export {
+  checkPackages,
+  checkProjectReferences,
+  checkSolution,
+  checkUsings,
+  isDependencyAllowed,
+  isInfrastructurePackage,
+  LAYER_LABEL,
+  layerOfProject,
+  projectOfFile,
+  readUsings,
+} from '../shared/architecture-rules.js';
+export type { ArchitectureViolation, Layer } from '../shared/architecture-rules.js';
+
+/** Modelo de Docker: parseo de la salida de la CLI y servicios de apoyo reconocidos. */
+export {
+  defaultPortOf,
+  imageName,
+  localUrlOf,
+  parseContainers,
+  parseImages,
+  parseLabels,
+  parsePorts,
+  supportKindOf,
+  supportLabel,
+} from '../shared/docker.js';
+export type { ContainerState, DockerContainer, DockerImage, SupportKind } from '../shared/docker.js';

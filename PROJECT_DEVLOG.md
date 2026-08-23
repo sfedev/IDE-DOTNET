@@ -219,6 +219,26 @@ por tanto **compila** pero no **ejecuta** los proyectos generados. Se añade el 
 - [x] F12.15 Menú nativo "Datos" y comandos de paleta para EF Core y HTTP
 - [x] F12.16 Pruebas: 82 nuevas (EF Core, esquema, formato `.http`, envío real contra un servidor y endpoints)
 
+### Fase 13 — Registro estructurado, linter de arquitectura y terminal en la nube
+- [x] F13.1 Parser de registro (`src/shared/log-events.ts`): Serilog, consola de .NET, NLog y CLEF
+- [x] F13.2 Marcos de pila reconocidos por su forma, no por las palabras `at`/`in` (están traducidas)
+- [x] F13.3 Pestaña "Registro" con pastillas por nivel, cuentas y filtro de texto
+- [x] F13.4 Detalle desplegable por evento: excepción y traza completa
+- [x] F13.5 Marcos clicables que abren el `.cs` en su línea exacta
+- [x] F13.6 Repintado con freno de 400 ms para que una aplicación arrancando no bloquee el panel
+- [x] F13.7 Modelo de reglas de arquitectura (`src/shared/architecture-rules.ts`): capas y dependencias permitidas
+- [x] F13.8 Aviso `DF1001` por referencia de proyecto prohibida entre capas
+- [x] F13.9 Aviso `DF1002` por `using` prohibido, con su línea exacta
+- [x] F13.10 Aviso `DF1003` por paquete de infraestructura dentro del dominio o los puertos
+- [x] F13.11 Los avisos van al panel de problemas y al margen del editor, con propietario propio de marcadores
+- [x] F13.12 Modelo de Docker (`src/shared/docker.ts`) y servicio que lee el estado del motor
+- [x] F13.13 Canal `terminal:context`: contenedores, imágenes y scripts del `package.json`
+- [x] F13.14 Sugerencias de `docker` y `docker compose`, con contenedores e imágenes reales
+- [x] F13.15 Sugerencias de la CLI de Azure por grupos (`webapp`, `group`, `sql`, `acr`, `containerapp`)
+- [x] F13.16 Sugerencias de `npm` con los scripts reales del `package.json`, y banderas de `node`
+- [x] F13.17 Corrección en las plantillas: el `outputTemplate` de Serilog escribía la hora literal
+- [x] F13.18 Pruebas: 80 nuevas (registro, arquitectura, Docker y sugerencias de terminal)
+
 ---
 
 ## Decisiones técnicas (ADR corto)
@@ -1405,3 +1425,117 @@ migraciones y probar un endpoint.
 
 **Versión:** funcionalidad nueva con contratos IPC nuevos, sin romper nada anterior:
 1.5.0 → **1.6.0** (ADR-009).
+
+---
+
+### ADR-028 — El registro se parsea por formato, no por regex sobre palabras traducidas
+**Fecha:** 2026-08-23
+**Contexto:** El visor de registro tiene que entender la salida de una aplicación .NET real, que
+mezcla en el mismo flujo la consola de `Microsoft.Extensions.Logging` (arranque del host), Serilog
+(cuando toma el control) y, si alguien lo configuró, NLog o JSON compacto.
+**Decisión:** un parser por formato, todos probados con capturas reales, y **ninguna decisión
+basada en una palabra traducible**. En particular, un marco de pila se reconoce por su forma
+—firma de método, ruta que acaba en `.cs` y número al final— y no por las palabras `at` y `line`,
+que en un Windows en español son `en` y `línea`.
+**Consecuencias:** el visor funciona en cualquier idioma del sistema y con los cuatro formatos
+mezclados en la misma salida. Lo que no encaja con ningún formato **sigue apareciendo** como
+evento de nivel informativo: un visor que se come la mitad de la salida es peor que no tener
+visor. Es la tercera vez que este proyecto tropieza con lo mismo (los mensajes de git, el de
+`dotnet ef`), y por eso está escrito como decisión y no como comentario.
+
+### ADR-029 — El linter de arquitectura calla ante la duda
+**Fecha:** 2026-08-23
+**Contexto:** El linter clasifica cada proyecto en una capa por su nombre. ¿Qué hace con
+`Acme.Shop.Utilidades`, que no encaja en ninguna?
+**Opciones:** (a) asignarle la capa más parecida; (b) tratarlo como parte del núcleo y ser
+estricto; (c) dejarlo sin clasificar y no decir nada sobre él.
+**Decisión:** (c). Y lo mismo con una solución cuya arquitectura no se reconoce: cero avisos.
+**Consecuencias:** el linter nunca denuncia lo que no entiende, que es la única forma de que la
+gente no lo apague el primer día. El precio es que un proyecto con un nombre poco convencional se
+queda sin vigilar; se prefiere ese fallo al contrario. Los avisos son **siempre `warning`**, nunca
+`error`: una violación de arquitectura no impide compilar, y pintarla en rojo junto a los errores
+reales del compilador enseñaría a ignorar los dos. Y viven en su propio propietario de marcadores
+de Monaco, para que una compilación correcta no los borre: el código compila y sigue rompiendo la
+regla.
+
+### ADR-030 — El contexto del autocompletado se pide entero y de una vez
+**Fecha:** 2026-08-23
+**Contexto:** Sugerir contenedores de Docker, imágenes y scripts de `package.json` obliga a salir
+del renderer, que no puede ejecutar nada.
+**Decisión:** un único canal (`terminal:context`) que devuelve todo resuelto, invocado al abrir una
+solución y al mostrar la terminal — **nunca por pulsación de tecla**.
+**Consecuencias:** el motor de sugerencias sigue siendo una función pura sin E/S, que es lo que
+permite probarlo entero con Node pelado. Cada llamada lanza un `docker ps`, así que atarlo a las
+pulsaciones habría significado un proceso por tecla. A cambio, la lista puede quedar unos segundos
+desactualizada si se levanta un contenedor desde fuera del IDE; se resuelve volviendo a abrir la
+terminal, y es un precio bajo comparado con la alternativa.
+
+---
+
+### Iteración 16 — 2026-08-23 — Fase 13: registro, linter de arquitectura y terminal en la nube
+**Objetivo:** que las tres preguntas que obligan a salir del IDE —"¿qué ha pasado?", "¿esto rompe
+la arquitectura?" y "¿cómo se llamaba ese comando?"— se respondan dentro.
+
+**Módulo 1 — Visor de registro estructurado.**
+- `src/shared/log-events.ts`: parser de los cinco formatos que salen de una solución .NET sin
+  configurar nada (Serilog con plantilla corta y con marca completa, la consola de
+  `Microsoft.Extensions.Logging` a dos líneas, NLog y CLEF), con las trazas pegadas al evento que
+  las provocó y los marcos reconocidos por su forma (ADR-028).
+- Pestaña **Registro** en el panel inferior: pastillas por nivel con su cuenta, filtro de texto,
+  detalle desplegable por evento y marcos de pila **clicables** que abren el `.cs` en su línea.
+- El repintado va con freno de 400 ms: una aplicación arrancando escupe cientos de líneas por
+  segundo y repintar por cada una haría imposible pulsar en un marco.
+
+**Módulo 2 — Linter de reglas de arquitectura.**
+- `src/shared/architecture-rules.ts`: las reglas que el asistente sabe explicar en prosa, ahora
+  comprobables. Tres vías: referencias entre proyectos (`DF1001`), `using` prohibidos con su línea
+  (`DF1002`) y paquetes de infraestructura dentro del núcleo (`DF1003`).
+- Se ejecuta al abrir o recargar la solución y al guardar un `.cs`. Los avisos van al panel de
+  problemas y al margen del editor, en su propio propietario de marcadores (ADR-029).
+
+**Módulo 3 — Terminal: Docker, Azure y npm.**
+- `src/shared/docker.ts` + `docker-service.ts`: estado del motor leído con `--format "{{json .}}"`,
+  con puertos publicados deduplicados (IPv4 e IPv6 son el mismo puerto) y las etiquetas de Compose
+  ya interpretadas.
+- Sugerencias nuevas: subcomandos de `docker` y `docker compose`, **contenedores reales** tras
+  `docker logs`/`exec`/`stop`, **imágenes locales** tras `docker run`, los grupos de `az` que usa
+  un desarrollador .NET (`webapp`, `group`, `sql`, `acr`, `containerapp`) y los **scripts del
+  `package.json` de este repositorio** tras `npm run`.
+- `az` entra en la lista blanca de la terminal: publicar la API que se acaba de escribir es parte
+  del mismo flujo.
+
+**Errores encontrados y solucionados:**
+1. *Síntoma:* el visor de registro enseñaba `[HH:mm:ss INF] Application started` — con la hora
+   literal — en una solución recién generada.
+   *Causa raíz:* **la plantilla de scaffolding estaba mal desde la v1.1**: el `outputTemplate` de
+   Serilog escribía `[HH:mm:ss {Level:u3}]` en vez de `[{Timestamp:HH:mm:ss} {Level:u3}]`, así que
+   todas las soluciones generadas registraban la misma hora falsa en cada línea. Nadie lo había
+   visto porque el resto de la línea era correcto.
+   *Arreglo:* corregido en las seis plantillas y añadida una prueba que lo vigila
+   (`tests/unit/blueprints.test.mjs`). Es exactamente el tipo de fallo que sólo aparece cuando una
+   herramienta nueva mira de verdad lo que produce la anterior.
+2. *Síntoma:* el marco de pila `at Servicio.CreateAsync(CreateProduct command) in C:\…\S.cs:line 42`
+   devolvía como archivo `command) in C:\…\S.cs`.
+   *Causa raíz:* el patrón buscaba "algo, espacio, algo, espacio, ruta", y los argumentos del
+   método tienen espacios. Además una ruta de Windows trae sus propios dos puntos (`C:\`), que un
+   patrón poco anclado confunde con el separador `:line`.
+   *Arreglo:* se ancla al **último paréntesis** de la firma, que es lo único estable, y la ruta se
+   exige terminada en una extensión de código.
+3. *Síntoma:* `SuggestionKind` creció y la etiqueta del menú de sugerencias dejó de compilar.
+   *Causa raíz:* `Record<SuggestionKind, string>` es exhaustivo a propósito.
+   *Arreglo:* añadidas las tres etiquetas nuevas. El tipo hizo su trabajo: el fallo apareció al
+   compilar y no en la interfaz.
+
+**Verificado sobre la aplicación real** (solución `Acme.Logs` generada y ejecutada de verdad):
+- `--ui=startup-logs`: la aplicación arranca y el visor enseña **93 eventos** con la hora real
+  (`23:39:46`), 33 de nivel informativo y el resto de depuración, con las pastillas de nivel
+  contando cada una.
+- Violación de arquitectura introducida a mano en el `.csproj` del dominio y leída con `--probe=`:
+  `DF1001 Acme.Logs.Domain referencia a Acme.Logs.Infrastructure: Dominio no puede depender de
+  Infraestructura en una arquitectura Clean. — Acme.Logs.Domain.csproj:1:1`, con la insignia `1` en
+  la pestaña de problemas.
+- `npm test` en verde de punta a punta: **856 pruebas** (702 unit, 41 security, 57 package, 56
+  scaffold), de las cuales 80 son nuevas de esta fase.
+
+**Versión:** funcionalidad nueva, un canal IPC nuevo y una corrección en las plantillas generadas:
+1.6.0 → **1.7.0** (ADR-009).

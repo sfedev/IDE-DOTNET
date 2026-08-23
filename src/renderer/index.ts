@@ -21,6 +21,8 @@ import type {
 import type { AiContext, AiProviderId, AiStatus, AiTask } from '../shared/ai.js';
 import { buildHttpFile, findEndpoints, httpFileNameFor, requestFor } from '../shared/api-endpoints.js';
 import { isHttpFile, parseHttpFile } from '../shared/http-file.js';
+import type { ArchitectureViolation } from '../shared/architecture-rules.js';
+import { checkSolution, checkUsings } from '../shared/architecture-rules.js';
 import { architectureLabel, buildContext, detectArchitecture } from '../shared/ai-context.js';
 import type { RunMode, StartupConfig } from '../shared/startup.js';
 import { launchPlan, runnableProjects, shortProjectName } from '../shared/startup.js';
@@ -59,6 +61,9 @@ class DotForgeApp {
   private sidebarView: SidebarView = 'explorer';
   private lspProviders: MonacoApi.IDisposable | null = null;
   private git: GitStatus | null = null;
+
+  /** Avisos del linter de arquitectura. Viven aquí porque no los produce ninguna tarea. */
+  private architectureIssues: BuildDiagnostic[] = [];
   private gitTimer: number | undefined;
 
   /** Ramas del repositorio, para el autocompletado de la terminal. Se refrescan con el estado. */
@@ -77,6 +82,11 @@ class DotForgeApp {
 
   /** Lista blanca de la terminal; el autocompletado la ofrece como primer nivel. */
   private allowedCommands: string[] = [];
+
+  /** Contexto del autocompletado que sólo conoce el proceso principal. */
+  private containers: string[] = [];
+  private images: string[] = [];
+  private npmScripts: string[] = [];
 
   private readonly debug = new DebugView({
     openLocation: (file, line) => void this.openFile(file, line),
@@ -102,6 +112,8 @@ class DotForgeApp {
     onSaved: (tab) => {
       // Guardar un .csproj o el .sln cambia el modelo de la solución: se recarga el explorador.
       if (/\.(csproj|sln|slnx|props|targets)$/i.test(tab.path)) void this.reloadSolution();
+      // Guardar un .cs puede haber añadido (o quitado) un `using` prohibido.
+      if (/\.cs$/i.test(tab.path)) this.lintArchitecture();
     },
   });
 
@@ -125,10 +137,14 @@ class DotForgeApp {
     runCommand: (line) => void this.runTerminalCommand(line),
     renderDebug: (container) => this.debug.render(container, () => this.panel.render()),
     renderHttp: (container) => this.httpClient.render(container),
+    openLogLocation: (file, line) => void this.openFile(file, line),
     suggestContext: () => ({
       branches: this.branches,
       projects: (this.solution?.projects ?? []).map((project) => project.path),
       programs: this.allowedCommands,
+      containers: this.containers,
+      images: this.images,
+      npmScripts: this.npmScripts,
     }),
     openUrl: (url) => void window.dotforge.app.openExternal(url),
     restartService: (service) => void this.restartService(service),
@@ -252,14 +268,9 @@ class DotForgeApp {
     // Estado del asistente: proveedor, modelo y si hay credencial guardada.
     void this.refreshAiStatus();
 
-    // La lista de programas permitidos se muestra como ayuda en la terminal.
-    void window.dotforge.terminal
-      .allowed()
-      .then((commands) => {
-        this.allowedCommands = commands;
-        this.panel.setAllowedCommands(commands);
-      })
-      .catch(() => undefined);
+    // Contexto del autocompletado de la terminal: programas permitidos, contenedores de Docker,
+    // imágenes locales y scripts del package.json. Se pide una vez al arrancar.
+    void this.refreshTerminalContext();
 
     // Reabre el último workspace: volver al trabajo no debería costar dos clics.
     // Lo decide el proceso principal, que es quien puede comprobar si la carpeta sigue existiendo;
@@ -340,7 +351,9 @@ class DotForgeApp {
     this.startupBar.setSolution(solution);
     this.aiChat.setArchitecture(architectureLabel(detectArchitecture(solution)));
     this.updateTitle();
+    this.lintArchitecture();
     void this.loadStartupConfig();
+    void this.refreshTerminalContext();
 
     if (solution) {
       this.notify(
@@ -357,6 +370,7 @@ class DotForgeApp {
       this.solution = reloaded;
       this.explorer.setSolution(reloaded);
       this.nuget.setSolution(reloaded);
+      this.lintArchitecture();
     } catch (error) {
       this.notify(`No se ha podido recargar la solución: ${this.messageOf(error)}`, 'warn');
     }
@@ -989,6 +1003,28 @@ class DotForgeApp {
     });
   }
 
+  /**
+   * Relee el contexto del autocompletado de la terminal.
+   *
+   * Se pide entero al proceso principal (programas, contenedores, imágenes y scripts de npm) y se
+   * guarda aquí: el motor de sugerencias es puro y no puede consultar nada, así que lo que no esté
+   * en este objeto no se puede sugerir. Se refresca al abrir una solución y al mostrar la
+   * terminal, nunca por pulsación de tecla: cada llamada lanza un `docker ps`.
+   */
+  private async refreshTerminalContext(): Promise<void> {
+    try {
+      const context = await window.dotforge.terminal.context();
+
+      this.allowedCommands = context.programs;
+      this.containers = context.containers;
+      this.images = context.images;
+      this.npmScripts = context.npmScripts;
+      this.panel.setAllowedCommands(context.programs);
+    } catch {
+      // Sin contexto se sigue autocompletando lo que no depende de él (git, dotnet).
+    }
+  }
+
   /** Refresca el estado de Git y repinta lo que dependa de él si ha cambiado. */
   private async refreshGit(): Promise<void> {
     try {
@@ -1304,7 +1340,36 @@ class DotForgeApp {
         title: 'Terminal integrada',
         group: 'Ver',
         keybinding: `${modifier}+J`,
-        run: () => this.panel.show('terminal'),
+        run: () => {
+          this.panel.show('terminal');
+          // El autocompletado sugiere contenedores e imágenes: se refrescan al abrir la terminal,
+          // que es cuando el usuario puede haber levantado algo desde fuera del IDE.
+          void this.refreshTerminalContext();
+        },
+      },
+      {
+        id: 'view.logs',
+        icon: 'history',
+        title: 'Registro de la aplicación',
+        group: 'Ver',
+        keybinding: `${modifier}+Shift+L`,
+        run: () => this.panel.show('logs'),
+      },
+      {
+        id: 'architecture.check',
+        icon: 'hexagon',
+        title: 'Revisar las reglas de arquitectura',
+        group: 'Compilar',
+        run: () => {
+          this.lintArchitecture();
+          this.panel.show('problems');
+          this.notify(
+            this.architectureIssues.length === 0
+              ? 'Arquitectura correcta: ninguna dependencia prohibida.'
+              : `${this.architectureIssues.length} aviso(s) de arquitectura.`,
+            this.architectureIssues.length === 0 ? 'ok' : 'warn',
+          );
+        },
       },
       { id: 'view.output', title: 'Salida', group: 'Ver', run: () => this.panel.show('output') },
       {
@@ -1531,6 +1596,68 @@ class DotForgeApp {
     );
 
     overlay.appendChild(dialog);
+  }
+
+  // -------------------------------------------------------------------------------------------
+  // Linter de arquitectura
+  // -------------------------------------------------------------------------------------------
+
+  /**
+   * Comprueba las reglas de la arquitectura detectada y publica los avisos.
+   *
+   * Se ejecuta al abrir o recargar la solución, y al guardar un archivo de C#. No hace falta más:
+   * las referencias de proyecto sólo cambian al tocar un `.csproj`, y los `using` de un archivo,
+   * al guardarlo.
+   *
+   * Los avisos van al panel de problemas y al margen del editor, pero **nunca** como errores: una
+   * violación de arquitectura no impide compilar, y marcarla en rojo junto a los errores reales
+   * del compilador acabaría enseñando a ignorar los dos.
+   */
+  private lintArchitecture(): void {
+    if (!this.solution) {
+      this.architectureIssues = [];
+      this.panel.setArchitectureDiagnostics([]);
+      return;
+    }
+
+    const solutionIssues = checkSolution(this.solution).map((violation) => toDiagnostic(violation));
+
+    // Los `using` se comprueban sobre lo que hay abierto: es lo único que se puede leer sin ir
+    // al disco archivo por archivo, y es donde el aviso llega a tiempo.
+    const fileIssues = this.editor
+      .listTabs()
+      .filter((tab) => tab.languageId === 'csharp')
+      .flatMap((tab) => checkUsings(this.solution, tab.path, tab.model.getValue()))
+      .map((violation) => toDiagnostic(violation));
+
+    this.architectureIssues = [...solutionIssues, ...fileIssues];
+    this.panel.setArchitectureDiagnostics(this.architectureIssues);
+    this.applyArchitectureMarkers();
+    this.renderActivityBar();
+  }
+
+  /** Pinta los avisos de arquitectura en el margen del editor, sin pisar los del compilador. */
+  private applyArchitectureMarkers(): void {
+    const monaco = getMonaco();
+    const byPath = new Map<string, MonacoApi.editor.IMarkerData[]>();
+
+    for (const issue of this.architectureIssues) {
+      if (!issue.file) continue;
+
+      const markers = byPath.get(issue.file) ?? [];
+      markers.push({
+        severity: monaco.MarkerSeverity.Warning,
+        message: `${issue.code}: ${issue.message}`,
+        startLineNumber: Math.max(issue.line, 1),
+        startColumn: 1,
+        endLineNumber: Math.max(issue.line, 1),
+        endColumn: 200,
+        source: 'DotForge',
+      });
+      byPath.set(issue.file, markers);
+    }
+
+    this.editor.setArchitectureMarkers(byPath);
   }
 
   // -------------------------------------------------------------------------------------------
@@ -1957,6 +2084,25 @@ class DotForgeApp {
       'y',
     );
   }
+}
+
+/**
+ * Violación de arquitectura como diagnóstico del panel de problemas.
+ *
+ * Se reutiliza `BuildDiagnostic` a propósito: para quien lo lee, un aviso de arquitectura es un
+ * problema más de la solución, y compartir el modelo hace que se pinte, se ordene y se abra igual
+ * que los del compilador sin escribir una segunda vista.
+ */
+function toDiagnostic(violation: ArchitectureViolation): BuildDiagnostic {
+  return {
+    file: violation.file,
+    line: violation.line,
+    column: violation.column,
+    severity: violation.severity,
+    code: violation.code,
+    message: violation.message,
+    project: violation.project,
+  };
 }
 
 const app = new DotForgeApp();

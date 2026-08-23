@@ -364,6 +364,25 @@ export interface ConnectionStringFileInfo {
   connections: ConnectionStringInfo[];
 }
 
+/**
+ * Contexto del autocompletado de la terminal, ya resuelto por el proceso principal.
+ *
+ * Se devuelve en una sola llamada porque se pide entero cada vez: al abrir la terminal y cada vez
+ * que algo puede haber cambiado. Tres consultas separadas por pulsación de tecla serían tres
+ * procesos por pulsación.
+ */
+export interface TerminalContext {
+  /** Programas de la lista blanca. */
+  programs: string[];
+  /** Contenedores de Docker, en ejecución o parados. Vacío si Docker no está disponible. */
+  containers: string[];
+  /** Imágenes locales (`repositorio:etiqueta`). */
+  images: string[];
+  /** Scripts del `package.json` del workspace. */
+  npmScripts: string[];
+  dockerAvailable: boolean;
+}
+
 export interface AppInfo {
   name: string;
   version: string;
@@ -480,6 +499,7 @@ export const IPC = {
 
   terminalRun: 'terminal:run',
   terminalAllowed: 'terminal:allowed',
+  terminalContext: 'terminal:context',
 
   nugetSearch: 'nuget:search',
   nugetVersions: 'nuget:versions',
@@ -544,6 +564,8 @@ export type MenuCommand =
   | 'view.nuget'
   | 'view.efcore'
   | 'view.problems'
+  | 'view.logs'
+  | 'architecture.check'
   | 'view.terminal'
   | 'view.toggle-theme'
   | 'build.build'
@@ -690,6 +712,11 @@ export interface DotForgeApi {
     run(line: string): Promise<DotnetTaskStarted>;
     /** Programas que la terminal admite. La UI los muestra como ayuda. */
     allowed(): Promise<string[]>;
+    /**
+     * Contexto del autocompletado: programas, contenedores, imágenes y scripts de npm.
+     * Las ramas de git y los proyectos los pone el renderer, que ya los tiene.
+     */
+    context(): Promise<TerminalContext>;
   };
   nuget: {
     search(query: string, includePrerelease: boolean): Promise<NuGetSearchResult[]>;

@@ -46,6 +46,7 @@ import type {
   NuGetSearchResult,
   RecentWorkspace,
   SolutionInfo,
+  TerminalContext,
 } from '../shared/contracts.js';
 import { IPC, IPC_EVENTS } from '../shared/contracts.js';
 import type { GitDiffRequest, GitRepositoryStatus } from '../shared/git.js';
@@ -145,6 +146,7 @@ const api: DotForgeApi = {
   terminal: {
     run: (line) => ipcRenderer.invoke(IPC.terminalRun, line) as Promise<DotnetTaskStarted>,
     allowed: () => ipcRenderer.invoke(IPC.terminalAllowed) as Promise<string[]>,
+    context: () => ipcRenderer.invoke(IPC.terminalContext) as Promise<TerminalContext>,
   },
 
   nuget: {

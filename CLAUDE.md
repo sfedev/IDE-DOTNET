@@ -14,6 +14,11 @@ Su módulo estrella es el **Scaffolding Wizard**: un generador de arquitecturas 
 que produce soluciones .NET **compilables y ejecutables** siguiendo Clean Architecture,
 Arquitectura Hexagonal (Ports & Adapters) o Domain-Driven Design + CQRS.
 
+Desde la v1.7.0 incluye un **visor de registro estructurado** (Serilog, NLog, la consola de .NET y
+JSON compacto, con filtro por nivel y marcos de pila clicables), un **linter de reglas de
+arquitectura** que avisa de las dependencias prohibidas entre capas, y autocompletado de
+**Docker, Docker Compose, la CLI de Azure y npm** en la terminal integrada.
+
 Desde la v1.6.0 incluye un **gestor visual de Entity Framework Core** (migraciones aplicadas y
 pendientes, `Add-Migration` y `Update-Database` con interfaz, esquema deducido de las migraciones y
 cadenas de conexión de los `appsettings*.json`) y un **cliente HTTP integrado**: archivos `.http` /
@@ -56,6 +61,9 @@ IDE-DOTNET/
 │   │   ├── efcore-schema.ts    # * Esquema deducido de los archivos de migración (puro)
 │   │   ├── http-file.ts        # * Formato .http/.rest: bloques, variables y resolución (puro)
 │   │   ├── api-endpoints.ts    # * Endpoints de Minimal API y controladores + generación .http (puro)
+│   │   ├── log-events.ts       # * Parser del registro: Serilog, NLog, consola de .NET y CLEF (puro)
+│   │   ├── architecture-rules.ts # * Linter de capas: dependencias permitidas y paquetes (puro)
+│   │   ├── docker.ts           # * Modelo de Docker: contenedores, puertos y servicios de apoyo (puro)
 │   │   └── dotnet-verbosity.ts # * Nivel de salida de la CLI -> argumentos y variables (puro)
 │   ├── scaffold/           # * MODULO ESTRELLA: generador de arquitecturas (Node puro)
 │   │   ├── engine.ts           # Micro motor de plantillas {{token}}
@@ -73,7 +81,8 @@ IDE-DOTNET/
 │   │   ├── services/           # Solución, NuGet, tareas dotnet, terminal, rutas, ZIP, settings,
 │   │   │                       # git-service.ts (estado y operaciones de control de fuentes),
 │   │   │                       # efcore-service.ts (dotnet ef + migraciones del disco),
-│   │   │                       # http-client-service.ts (envío real de las peticiones .http)
+│   │   │                       # http-client-service.ts (envío real de las peticiones .http),
+│   │   │                       # docker-service.ts (estado del motor), node-scripts.ts (package.json)
 │   │   │   └── ai/             # * Asistente de IA: proveedores, streaming y claves cifradas
 │   │   │       ├── request-builder.ts  # Petición HTTP por proveedor (puro)
 │   │   │       ├── stream-parser.ts    # SSE/NDJSON -> deltas (puro)
@@ -182,7 +191,7 @@ npx electron . --smoke-test
 - `--ui=<vista>` — abre una vista antes de la captura pulsando los mismos controles que pulsaría
   un usuario (`wizard`, `settings`, `nuget`, `debug`, `ai`, `terminal`, `palette`, `light`,
   `nesting`, `startup`, `startup-dialog`, `terminal-suggest`, `git`, `git-diff`, `startup-play`,
-  `startup-run-mode`, `ai-toggle`, `efcore`, `http`).
+  `startup-run-mode`, `ai-toggle`, `efcore`, `http`, `logs`, `startup-logs`).
 - `--ui-wait=<ms>` — cuánto se espera antes de **pulsar** la acción de `--ui=`. Los 3,2 s por
   defecto no bastan si se arranca con una solución abierta: la interfaz todavía está cargando
   Monaco y el control que hay que pulsar aún no existe.
@@ -275,6 +284,27 @@ npx electron . --smoke-test
   tardar minutos, y su salida tiene que ir al panel inferior como la de cualquier `dotnet build`.
 - El nombre de una migración se valida como identificador de C# **antes** de construir los
   argumentos, y el `--context` sólo admite un identificador: los dos llegan del renderer.
+
+### Visor de registro (`src/shared/log-events.ts`)
+
+- **Un parser por formato.** En la misma salida conviven la consola de `Microsoft.Extensions.Logging`
+  (arranque del host), Serilog, y a veces NLog o CLEF. Se reconocen los cuatro; lo que no encaja
+  sigue apareciendo como evento informativo, nunca se descarta.
+- **Ni `at` ni `in` ni `line`.** Un marco de pila se reconoce por su forma —firma con paréntesis,
+  ruta terminada en extensión de código y número al final—, porque esas palabras están traducidas
+  al idioma del sistema (ADR-028).
+- El panel **reparsea el buffer** en cada pintado en vez de mantener estado incremental: el buffer
+  está acotado y así no hay dos verdades que puedan divergir cuando una excepción llega partida.
+
+### Linter de arquitectura (`src/shared/architecture-rules.ts`)
+
+- **Ante la duda, callar** (ADR-029): capa sin clasificar, arquitectura no reconocida o proyecto de
+  pruebas ⇒ ningún aviso. Se declara lo permitido, no lo prohibido.
+- Los avisos son **siempre `warning`** y usan su propio propietario de marcadores
+  (`dotforge-architecture`): una compilación correcta no puede borrarlos, porque el código compila
+  y sigue rompiendo la regla.
+- La presentación **sí** puede ver la infraestructura en las tres arquitecturas: es la raíz de
+  composición. Prohibírselo obligaría a inventar un proyecto de arranque extra.
 
 ### Cliente HTTP (`src/main/services/http-client-service.ts`, `src/shared/http-file.ts`)
 
@@ -441,6 +471,13 @@ npm run fetch:toolchain -- --platform win32 --arch x64
   execute because the specified command or file was not found", que no dice qué hacer. Se detecta
   por la **ausencia del bloque JSON**, no buscando esa frase (está traducida), y se añade la orden
   `dotnet tool install --global dotnet-ef`.
+- **`[HH:mm:ss {Level:u3}]` no es la plantilla de Serilog.** La hora tiene que ir como marcador
+  (`{Timestamp:HH:mm:ss}`); escrita a pelo se imprime literalmente en cada línea y nadie lo nota,
+  porque el resto de la línea es correcto. Estuvo así en las seis plantillas desde la v1.1 hasta
+  que el visor de registro lo enseñó. Hay una prueba que lo vigila.
+- **Un marco de pila no se parte por espacios.** `at Servicio.Create(CreateProduct command) in
+  C:\ruta\S.cs:line 42` tiene espacios en los argumentos y dos puntos en la unidad de Windows: hay
+  que anclar al último paréntesis de la firma y exigir que la ruta acabe en extensión de código.
 - **Una prueba de tamaño no es una prueba de contenido.** El tope de 400 KB del bundle del renderer
   quería decir "Monaco no está dentro" y lo que decía era "el renderer no ha crecido": se puso en
   rojo al añadir dos vistas legítimas. Ahora compara el bundle con la carpeta `vendor/monaco` que

@@ -391,8 +391,9 @@ const UI_ACTIONS: Record<string, string> = {
   debug: "document.querySelectorAll('.activity-item')[5]?.click()",
   ai: "document.querySelectorAll('.activity-item')[6]?.click()",
   settings: "document.querySelectorAll('.activity-item')[7]?.click()",
-  // Cliente HTTP: la pestaña del panel inferior.
+  // Cliente HTTP y visor de registro: pestañas del panel inferior.
   http: "[...document.querySelectorAll('.panel-tab')].find((tab) => tab.textContent?.includes('HTTP'))?.click()",
+  logs: "[...document.querySelectorAll('.panel-tab')].find((tab) => tab.textContent?.includes('Registro'))?.click()",
   palette: "document.querySelector('#statusbar button:last-of-type')?.click()",
   terminal: "[...document.querySelectorAll('.panel-tab')].find((tab) => tab.textContent?.includes('Terminal'))?.click()",
   // Dos pasos: abrir ajustes y pulsar "Claro". Se encadenan con un retardo porque la vista se
@@ -433,6 +434,12 @@ const UI_ACTIONS: Record<string, string> = {
     "}, 300)",
   // Fase 11: arranca el perfil activo, para revisar las pastillas de proceso de la barra superior.
   'startup-play': "document.querySelector('.startup-play')?.click()",
+  // Fase 12: arranca el perfil y abre el visor de registro cuando la aplicación ya está escupiendo
+  // líneas. Los 12 s son el arranque real de una Web API con restauración caliente.
+  'startup-logs':
+    "document.querySelector('.startup-play')?.click();" +
+    'setTimeout(() => [...document.querySelectorAll(".panel-tab")]' +
+    ".find((tab) => tab.textContent?.includes('Registro'))?.click(), 12000)",
   'startup-run-mode':
     "[...document.querySelectorAll('.startup-mode-btn')].find((b) => b.textContent?.includes('Sin depurar'))?.click();" +
     "setTimeout(() => document.querySelector('.startup-play')?.click(), 400)",

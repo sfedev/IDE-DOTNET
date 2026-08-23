@@ -25,7 +25,9 @@ desde el primer minuto, con un CRUD funcional de ejemplo. Desde la v1.4.0 lleva 
 **asistente de IA que conoce esa arquitectura** y ayuda sin romperla, y desde la v1.5.0 un
 **panel visual de control de código fuente**, pastillas de estado de los procesos en marcha y un
 control del nivel de detalle de la salida de la CLI de .NET. La v1.6.0 añade el **gestor visual de
-Entity Framework Core** y un **cliente HTTP integrado** para probar la API que estás escribiendo.
+Entity Framework Core** y un **cliente HTTP integrado** para probar la API que estás escribiendo, y
+la v1.7.0 un **visor de registro estructurado**, un **linter de reglas de arquitectura** y
+autocompletado de Docker, Azure y npm en la terminal.
 
 ![DotForge IDE con una solución DDD abierta](docs/screenshot-workspace.png)
 
@@ -38,6 +40,8 @@ Entity Framework Core** y un **cliente HTTP integrado** para probar la API que e
 - [Asistente de IA](#asistente-de-ia)
 - [Base de datos y Entity Framework Core](#base-de-datos-y-entity-framework-core)
 - [Cliente HTTP integrado](#cliente-http-integrado)
+- [Registro estructurado](#registro-estructurado)
+- [Linter de reglas de arquitectura](#linter-de-reglas-de-arquitectura)
 - [Instalación](#instalación)
 - [El generador de arquitecturas](#el-generador-de-arquitecturas)
   - [Clean Architecture](#clean-architecture)
@@ -255,6 +259,56 @@ Content-Type: application/json
 > el destino es `localhost`, `127.0.0.1` o `::1`; contra un host remoto, un certificado inválido
 > sigue siendo un error.
 
+### Registro estructurado
+
+La pestaña **Registro** del panel inferior (`Ctrl+Shift+L`) lee la salida de la aplicación y la
+convierte en eventos, no en un muro de texto.
+
+- **Reconoce lo que escribe una solución .NET real**, sin configurar nada: Serilog (con la
+  plantilla corta y con marca de tiempo completa), el registro por consola de
+  `Microsoft.Extensions.Logging` —el de dos líneas del arranque—, NLog y JSON compacto (CLEF). Los
+  cuatro pueden convivir en la misma salida, que es justo lo que pasa al arrancar.
+- **Filtro por nivel** con la cuenta de cada uno (`Todo`, `Info`, `Aviso`, `Error`, `Crítico`) y
+  filtro de texto que busca también dentro de las excepciones.
+- **Las excepciones no se pierden**: la traza queda pegada al evento que la provocó y se despliega
+  al pulsarlo.
+- **Los marcos de pila son clicables** y abren el `.cs` exacto en su línea. Funciona igual con el
+  runtime en español, donde la traza dice `en … :línea 42` en vez de `at … :line 42`.
+
+### Linter de reglas de arquitectura
+
+El IDE conoce la arquitectura de la solución abierta y avisa cuando una dependencia la rompe. Los
+avisos salen en el panel de problemas y en el margen del editor, siempre como **advertencia**:
+romper una regla de arquitectura no impide compilar, y pintarlo en rojo junto a los errores del
+compilador sólo enseñaría a ignorar los dos.
+
+| Código | Qué detecta | Ejemplo |
+|---|---|---|
+| `DF1001` | Referencia de proyecto prohibida entre capas | `Acme.Shop.Domain` referencia a `Acme.Shop.Infrastructure` |
+| `DF1002` | `using` de una capa prohibida, con su línea | `using Acme.Shop.Infrastructure.Persistence;` dentro del dominio |
+| `DF1003` | Paquete de infraestructura en el núcleo | `Microsoft.EntityFrameworkCore` en `.Domain` |
+
+Las reglas dependen de la arquitectura detectada: en Clean y en DDD el dominio sólo ve al Shared
+Kernel y la aplicación no ve la infraestructura; en Hexagonal el núcleo (`.Domain` + `.Ports`) no ve
+ningún adaptador. La presentación **sí** puede ver la infraestructura en las tres: es la raíz de
+composición, donde se registran las implementaciones en el contenedor de dependencias.
+
+Ante la duda, el linter calla: un proyecto con un nombre que no encaja en ninguna capa, o una
+solución cuya arquitectura no se reconoce, no producen ni un aviso.
+
+### Terminal: Docker, Azure y npm
+
+El autocompletado de la terminal integrada ya no se limita a `git` y `dotnet`:
+
+- **Docker y Docker Compose** — subcomandos ordenados por uso real (`compose up -d` el primero) y,
+  lo que de verdad ahorra tiempo, **tus contenedores** tras `docker logs`, `exec`, `stop` o `rm`, y
+  **tus imágenes locales** tras `docker run`.
+- **Azure CLI** — el camino de un desarrollador .NET: `az webapp up`, `az webapp log tail`,
+  `az group create`, `az sql db create`, `az containerapp up`, `az acr build`. Al escribir el grupo
+  (`az webapp `) se ofrecen sus operaciones.
+- **npm** — subcomandos y, tras `npm run`, **los scripts de tu `package.json`**, no una lista
+  inventada.
+
 ### Paquetes NuGet
 
 - Panel visual: buscar en nuget.org, ver lo instalado, elegir versión, instalar y desinstalar.
@@ -461,6 +515,7 @@ En macOS, `Ctrl` es `Cmd`.
 | Paquetes NuGet | `Ctrl+Shift+U` |
 | **Base de datos y EF Core** | `Ctrl+Shift+D` |
 | **Enviar la petición HTTP del cursor** | `Alt+Enter` |
+| **Registro de la aplicación** | `Ctrl+Shift+L` |
 | **Asistente de IA** | `Ctrl+Shift+A` |
 | **Editar con IA la selección** | `Ctrl+I` |
 | Problemas | `Ctrl+Shift+M` |

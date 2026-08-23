@@ -250,3 +250,113 @@ describe('detección de la URL de la aplicación', () => {
     assert.equal(portOf('https://example.com'), null);
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// Docker, Azure y npm (v1.7.0)
+// ---------------------------------------------------------------------------------------------
+
+/** Contexto ampliado: lo que sólo puede saber el proceso principal. */
+const CLOUD = {
+  ...CONTEXT,
+  programs: ['dotnet', 'git', 'npm', 'docker', 'az'],
+  containers: ['acmeshop-sqlserver-1', 'acmeshop-redis-1'],
+  images: ['redis:7-alpine', 'mcr.microsoft.com/mssql/server:2022-latest'],
+  npmScripts: ['build', 'watch', 'test'],
+};
+
+describe('docker', () => {
+  it('ofrece los subcomandos, con compose arriba del todo', () => {
+    const result = values(suggest('docker ', CLOUD));
+    assert.equal(result[0], 'compose up -d');
+    assert.ok(result.includes('ps'));
+    assert.ok(result.includes('logs -f'));
+  });
+
+  it('filtra por prefijo como el resto', () => {
+    assert.deepEqual(values(suggest('docker com', CLOUD)), ['compose up -d', 'compose down']);
+  });
+
+  it('los comandos sobre un contenedor ofrecen los contenedores reales', () => {
+    for (const line of ['docker logs ', 'docker exec ', 'docker stop ', 'docker rm ']) {
+      const result = suggest(line, CLOUD);
+      assert.deepEqual(values(result), CLOUD.containers, `falla en "${line}"`);
+      assert.equal(result[0].kind, 'container');
+    }
+  });
+
+  it('los comandos sobre una imagen ofrecen las imágenes locales', () => {
+    const result = suggest('docker run ', CLOUD);
+    assert.deepEqual(values(result), CLOUD.images);
+    assert.equal(result[0].kind, 'image');
+  });
+
+  it('sin contexto de Docker no se inventa nada', () => {
+    assert.deepEqual(suggest('docker logs ', CONTEXT), []);
+  });
+
+  it('`docker compose` tiene sus propios subcomandos', () => {
+    const result = values(suggest('docker compose ', CLOUD));
+    assert.ok(result.includes('up -d'));
+    assert.ok(result.includes('down'));
+    assert.ok(result.includes('logs -f'));
+  });
+
+  it('`docker compose logs` ofrece los servicios levantados', () => {
+    assert.deepEqual(values(suggest('docker compose logs ', CLOUD)), CLOUD.containers);
+  });
+});
+
+describe('az', () => {
+  it('ofrece el camino de un desarrollador .NET', () => {
+    const result = values(suggest('az ', CLOUD));
+    assert.equal(result[0], 'login');
+    assert.ok(result.includes('webapp up'));
+    assert.ok(result.includes('group create'));
+  });
+
+  it('al escribir un grupo, ofrece sus operaciones', () => {
+    const result = values(suggest('az webapp ', CLOUD));
+    assert.ok(result.includes('up'));
+    assert.ok(result.includes('log tail'));
+    assert.equal(result.includes('login'), false, 'no debe mezclar operaciones de otro grupo');
+  });
+
+  it('un grupo desconocido no sugiere nada en vez de sugerir cualquier cosa', () => {
+    assert.deepEqual(suggest('az cosmosdb ', CLOUD), []);
+  });
+
+  it('filtra por prefijo dentro del grupo', () => {
+    assert.deepEqual(values(suggest('az group cr', CLOUD)), ['create --name']);
+  });
+});
+
+describe('npm y node', () => {
+  it('ofrece los subcomandos de npm', () => {
+    const result = values(suggest('npm ', CLOUD));
+    assert.equal(result[0], 'run');
+    assert.ok(result.includes('install'));
+  });
+
+  it('`npm run` ofrece los scripts de este package.json, no una lista inventada', () => {
+    const result = suggest('npm run ', CLOUD);
+    assert.deepEqual(values(result), ['build', 'watch', 'test']);
+    assert.equal(result[0].kind, 'script');
+  });
+
+  it('sin package.json no hay scripts que sugerir', () => {
+    assert.deepEqual(suggest('npm run ', CONTEXT), []);
+  });
+
+  it('node ofrece sus banderas de uso diario', () => {
+    const result = values(suggest('node --', CLOUD));
+    assert.ok(result.includes('--test'));
+    assert.ok(result.includes('--watch'));
+  });
+
+  it('el fantasma y la aceptación funcionan igual con las fuentes nuevas', () => {
+    // Ya escrito entero: no hay fantasma que pintar, y eso se expresa con null, no con "".
+    assert.equal(ghostText('docker ps', suggest('docker ps', CLOUD)), null);
+    assert.equal(ghostText('docker p', suggest('docker p', CLOUD)), 's');
+    assert.equal(applySuggestion('docker logs ', suggest('docker logs ', CLOUD)[0]), 'docker logs acmeshop-sqlserver-1 ');
+  });
+});

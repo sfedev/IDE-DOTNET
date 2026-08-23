@@ -84,6 +84,7 @@ export function buildApplicationMenu(): Menu {
         item('Paquetes NuGet', 'view.nuget', 'CmdOrCtrl+Shift+U'),
         item('Base de datos y EF Core', 'view.efcore', 'CmdOrCtrl+Shift+D'),
         item('Problemas', 'view.problems', 'CmdOrCtrl+Shift+M'),
+        item('Registro de la aplicación', 'view.logs', 'CmdOrCtrl+Shift+L'),
         item('Salida y terminal', 'view.terminal', 'CmdOrCtrl+J'),
         { type: 'separator' },
         item('Cambiar tema', 'view.toggle-theme'),
@@ -137,6 +138,8 @@ export function buildApplicationMenu(): Menu {
         item('Restaurar paquetes', 'build.restore'),
         { type: 'separator' },
         item('Ejecutar pruebas', 'build.test', 'CmdOrCtrl+Shift+T'),
+        { type: 'separator' },
+        item('Revisar las reglas de arquitectura', 'architecture.check'),
       ],
     },
     {

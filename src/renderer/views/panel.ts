@@ -12,6 +12,8 @@
  *    línea nueva al log visible.
  */
 import type { BuildDiagnostic, DotnetTaskExit, DotnetTaskStarted, ProjectKind } from '../../shared/contracts.js';
+import type { LogEvent, LogLevel } from '../../shared/log-events.js';
+import { countByLevel, filterEvents, firstNavigableFrame, LEVEL_LABEL, parseLogEvents } from '../../shared/log-events.js';
 import { byId, clear, el } from '../dom.js';
 import { presentProject } from '../file-icons.js';
 import { icon, type IconName } from '../icons.js';
@@ -31,7 +33,7 @@ const MAX_OUTPUT_LINES = 5000;
 /** Cuántas sugerencias se listan en el menú. Más que esto ya no se lee: se ojea. */
 const MAX_SUGGESTIONS = 8;
 
-export type PanelTab = 'output' | 'terminal' | 'problems' | 'debug' | 'http';
+export type PanelTab = 'output' | 'terminal' | 'problems' | 'debug' | 'http' | 'logs';
 
 export interface PanelHost {
   openDiagnostic(diagnostic: BuildDiagnostic): void;
@@ -40,6 +42,8 @@ export interface PanelHost {
   renderDebug(container: HTMLElement): void;
   /** Pinta el cliente HTTP dentro del panel. Misma idea que `renderDebug`. */
   renderHttp(container: HTMLElement): void;
+  /** Abre un archivo por su ruta y línea: lo pide un marco de pila del visor de registro. */
+  openLogLocation(file: string, line: number): void;
   /** Contexto para el autocompletado: ramas de git y proyectos de la solución. */
   suggestContext(): SuggestContext;
   /** Abre una URL en el navegador del sistema. */
@@ -120,6 +124,9 @@ const TERMINAL_CHANNEL = 'terminal';
 export class PanelView {
   private tab: PanelTab = 'output';
   private diagnostics: BuildDiagnostic[] = [];
+
+  /** Violaciones de las reglas de arquitectura. Sobreviven a una compilación correcta. */
+  private architecture: BuildDiagnostic[] = [];
   private runningTasks = new Map<string, DotnetTaskStarted>();
   private collapsed = false;
 
@@ -145,6 +152,13 @@ export class PanelView {
 
   /** Elemento del log visible, para poder añadir líneas sin repintar el panel entero. */
   private logElement: HTMLElement | null = null;
+
+  /** Estado del visor de registro estructurado: nivel mínimo, texto y detalles desplegados. */
+  private logLevel: LogLevel = 'trace';
+  private logQuery = '';
+  private readonly expandedLogs = new Set<number>();
+  private logCache: LogEvent[] | null = null;
+  private logTimer: number | undefined;
   private logChannelId: string | null = null;
 
   /** Historial de la terminal, navegable con las flechas. */
@@ -329,6 +343,9 @@ export class PanelView {
       return;
     }
 
+    // El visor de registro se repinta con freno: reparsea el buffer y no puede ir por línea.
+    if (this.tab === 'logs' && channelId === this.activeChannel) this.scheduleLogRefresh();
+
     // Camino rápido: añadir sólo el nodo nuevo al log que ya está en pantalla.
     if (this.isVisibleChannel(channelId) && this.logElement) {
       this.logElement.appendChild(el('div', { className: LINE_CLASS[kind], text }));
@@ -409,8 +426,21 @@ export class PanelView {
     this.render();
   }
 
+  /**
+   * Avisos del linter de arquitectura.
+   *
+   * Van en una lista aparte de los del compilador a propósito: una compilación correcta borra sus
+   * propios diagnósticos, y una violación de arquitectura **no desaparece porque el código
+   * compile** — precisamente por eso hace falta el linter.
+   */
+  setArchitectureDiagnostics(diagnostics: BuildDiagnostic[]): void {
+    this.architecture = diagnostics;
+    this.render();
+  }
+
+  /** Problemas del compilador y de la arquitectura, en ese orden. */
   getDiagnostics(): BuildDiagnostic[] {
-    return this.diagnostics;
+    return [...this.diagnostics, ...this.architecture];
   }
 
   hasRunningTasks(): boolean {
@@ -458,6 +488,10 @@ export class PanelView {
 
       case 'problems':
         content.appendChild(this.renderProblems());
+        return;
+
+      case 'logs':
+        content.appendChild(this.renderLogs());
         return;
     }
   }
@@ -661,7 +695,9 @@ export class PanelView {
   }
 
   private renderProblems(): HTMLElement {
-    if (this.diagnostics.length === 0) {
+    const problems = this.getDiagnostics();
+
+    if (problems.length === 0) {
       return el(
         'div',
         { className: 'empty-state' },
@@ -676,7 +712,7 @@ export class PanelView {
 
     const container = el('div');
 
-    for (const diagnostic of this.diagnostics) {
+    for (const diagnostic of problems) {
       const where = diagnostic.file
         ? `${diagnostic.file.split(/[\\/]/).pop()}:${diagnostic.line}:${diagnostic.column}`
         : 'solución';
@@ -697,6 +733,225 @@ export class PanelView {
     }
 
     return container;
+  }
+
+  // --- Registro estructurado ---------------------------------------------------------------------
+
+  /**
+   * Eventos del canal activo.
+   *
+   * Se **reparsea el buffer** en cada pintado en vez de mantener un estado incremental. Suena caro
+   * y no lo es: el buffer está acotado a 5000 líneas y parsearlas cuesta pocos milisegundos, sólo
+   * ocurre cuando la pestaña está a la vista, y a cambio no hay dos verdades que puedan divergir.
+   * Un parser incremental se habría equivocado el día que una excepción llega partida en dos
+   * trozos de `stdout`.
+   */
+  private logEvents(): LogEvent[] {
+    const channel = this.channel(this.activeChannel);
+    return parseLogEvents(channel.lines.map((line) => line.text).join('\n'));
+  }
+
+  /** Errores y críticos del canal activo: es la insignia de la pestaña. */
+  private errorEventCount(): number {
+    if (this.logCache === null) return 0;
+    return this.logCache.filter((event) => event.level === 'error' || event.level === 'critical').length;
+  }
+
+  /**
+   * Repintado del registro con freno.
+   *
+   * Una aplicación arrancando escupe cientos de líneas por segundo; repintar la lista entera por
+   * cada una la dejaría inservible (y haría imposible pulsar en un marco de pila). Se agrupa en
+   * ventanas de 400 ms, que es más rápido de lo que se lee.
+   */
+  private scheduleLogRefresh(): void {
+    if (this.logTimer !== undefined) return;
+
+    this.logTimer = window.setTimeout(() => {
+      this.logTimer = undefined;
+      if (this.tab === 'logs' && !this.collapsed) this.render();
+    }, 400);
+  }
+
+  private renderLogs(): HTMLElement {
+    const events = this.logEvents();
+    this.logCache = events;
+
+    const container = el('div', { className: 'log-panel' });
+    container.appendChild(this.buildChannelBar());
+    container.appendChild(this.buildLogToolbar(events));
+
+    const visible = filterEvents(events, { minimum: this.logLevel, query: this.logQuery });
+
+    if (visible.length === 0) {
+      container.appendChild(
+        el(
+          'div',
+          { className: 'empty-state' },
+          icon('history', { size: 28, className: 'empty-state-icon' }),
+          el('p', {
+            text:
+              events.length === 0
+                ? 'Sin registro todavía: ejecuta la aplicación para ver aquí sus eventos.'
+                : 'Ningún evento con este filtro.',
+          }),
+          el('p', {
+            className: 'empty-state-hint',
+            text: 'Se reconocen Serilog, NLog, el registro por consola de .NET y JSON compacto (CLEF).',
+          }),
+        ),
+      );
+      return container;
+    }
+
+    const list = el('div', { className: 'log-list' });
+    for (const event of visible) list.appendChild(this.buildLogRow(event));
+    container.appendChild(list);
+
+    // La lista se lee de abajo arriba, como cualquier log: se baja del todo al pintar.
+    setTimeout(() => {
+      list.scrollTop = list.scrollHeight;
+    }, 0);
+
+    return container;
+  }
+
+  private buildLogToolbar(events: readonly LogEvent[]): HTMLElement {
+    const counts = countByLevel(events);
+
+    /** Un nivel mínimo. "Aviso" enseña avisos, errores y críticos: es como se filtra un log. */
+    const level = (value: LogLevel, label: string, count: number): HTMLElement =>
+      el(
+        'button',
+        {
+          className: `chip log-chip ${value}${this.logLevel === value ? ' active' : ''}`,
+          title: `${label} y por encima`,
+          on: {
+            click: () => {
+              this.logLevel = value;
+              this.render();
+            },
+          },
+        },
+        el('span', { text: label }),
+        count > 0 ? el('span', { className: 'log-chip-count', text: String(count) }) : null,
+      );
+
+    const search = el('input', {
+      className: 'input log-search',
+      placeholder: 'Filtrar por texto…',
+      value: this.logQuery,
+      attrs: { 'aria-label': 'Filtrar el registro' },
+      on: {
+        input: (event) => {
+          this.logQuery = (event.currentTarget as HTMLInputElement).value;
+          this.renderLogListOnly();
+        },
+      },
+    });
+
+    return el(
+      'div',
+      { className: 'log-toolbar' },
+      level('trace', 'Todo', events.length),
+      level('information', 'Info', counts.information),
+      level('warning', 'Aviso', counts.warning),
+      level('error', 'Error', counts.error),
+      level('critical', 'Crítico', counts.critical),
+      search,
+    );
+  }
+
+  /**
+   * Repinta sólo la lista, conservando el foco del buscador.
+   *
+   * Repintar el panel entero mientras se escribe en el filtro destruiría el `input` y con él el
+   * cursor: es exactamente el fallo que ya costó caro en la terminal.
+   */
+  private renderLogListOnly(): void {
+    const list = document.querySelector('.log-list');
+    if (!list) {
+      this.render();
+      return;
+    }
+
+    const visible = filterEvents(this.logCache ?? [], { minimum: this.logLevel, query: this.logQuery });
+    clear(list);
+    for (const event of visible) list.appendChild(this.buildLogRow(event));
+  }
+
+  private buildLogRow(event: LogEvent): HTMLElement {
+    const frame = firstNavigableFrame(event);
+    const expanded = this.expandedLogs.has(event.index);
+    const hasDetail = event.exception.length > 0 || event.frames.length > 0;
+
+    const head = el(
+      'button',
+      {
+        className: `log-row ${event.level}`,
+        title: event.category ?? '',
+        on: {
+          click: () => {
+            if (!hasDetail) return;
+            if (expanded) this.expandedLogs.delete(event.index);
+            else this.expandedLogs.add(event.index);
+            this.renderLogListOnly();
+          },
+        },
+      },
+      el('span', { className: `log-level ${event.level}`, text: LEVEL_LABEL[event.level].slice(0, 4).toUpperCase() }),
+      event.timestamp === null ? null : el('span', { className: 'log-time', text: event.timestamp }),
+      event.category === null ? null : el('span', { className: 'log-category', text: shortCategory(event.category) }),
+      el('span', { className: 'log-message', text: event.message }),
+      hasDetail ? icon(expanded ? 'chevron-down' : 'chevron-right', { size: 13 }) : null,
+    );
+
+    if (!expanded) return head;
+
+    const detail = el('div', { className: 'log-detail' });
+
+    for (const line of event.exception) detail.appendChild(el('div', { className: 'log-exception', text: line }));
+
+    for (const stackFrame of event.frames) {
+      const navigable = stackFrame.file !== null && stackFrame.line > 0;
+
+      detail.appendChild(
+        el(
+          navigable ? 'button' : 'div',
+          {
+            className: `log-frame${navigable ? ' navigable' : ''}`,
+            title: navigable ? `${stackFrame.file}:${stackFrame.line}` : '',
+            ...(navigable
+              ? { on: { click: () => this.host.openLogLocation(stackFrame.file!, stackFrame.line) } }
+              : {}),
+          },
+          el('span', { className: 'log-frame-method', text: stackFrame.method }),
+          navigable
+            ? el('span', {
+                className: 'log-frame-file',
+                text: `${stackFrame.file!.split(/[\\/]/).pop()}:${stackFrame.line}`,
+              })
+            : null,
+        ),
+      );
+    }
+
+    // Marco navegable: se ofrece el salto directo sin tener que buscarlo en la lista.
+    if (frame !== null) {
+      detail.appendChild(
+        el(
+          'button',
+          {
+            className: 'link-btn log-jump',
+            on: { click: () => this.host.openLogLocation(frame.file!, frame.line) },
+          },
+          icon('external-link', { size: 13 }),
+          el('span', { text: `Abrir ${frame.file!.split(/[\\/]/).pop()}:${frame.line}` }),
+        ),
+      );
+    }
+
+    return el('div', { className: 'log-entry' }, head, detail);
   }
 
   // --- Terminal asistida -------------------------------------------------------------------------
@@ -921,8 +1176,9 @@ export class PanelView {
     const tabs = byId('panel-tabs');
     clear(tabs);
 
-    const errors = this.diagnostics.filter((diagnostic) => diagnostic.severity === 'error').length;
-    const warnings = this.diagnostics.filter((diagnostic) => diagnostic.severity === 'warning').length;
+    const problems = this.getDiagnostics();
+    const errors = problems.filter((diagnostic) => diagnostic.severity === 'error').length;
+    const warnings = problems.filter((diagnostic) => diagnostic.severity === 'warning').length;
 
     const makeTab = (id: PanelTab, iconName: IconName, label: string, badge?: HTMLElement | null): HTMLElement =>
       el(
@@ -959,6 +1215,14 @@ export class PanelView {
           : null,
       ),
       makeTab('debug', 'bug', 'Depuración'),
+      makeTab(
+        'logs',
+        'history',
+        'Registro',
+        this.errorEventCount() > 0
+          ? el('span', { className: 'count danger', text: String(this.errorEventCount()) })
+          : null,
+      ),
       makeTab('http', 'send', 'HTTP'),
       el('span', { className: 'spacer', style: { flex: '1' } }),
     );
@@ -997,6 +1261,11 @@ export class PanelView {
   }
 }
 
+/** `Microsoft.Hosting.Lifetime` -> `Lifetime`: la fila no tiene sitio para el espacio entero. */
+function shortCategory(category: string): string {
+  return category.split('.').pop() ?? category;
+}
+
 const KIND_LABEL: Record<Suggestion['kind'], string> = {
   program: 'programa',
   subcommand: 'comando',
@@ -1004,6 +1273,9 @@ const KIND_LABEL: Record<Suggestion['kind'], string> = {
   branch: 'rama',
   package: 'paquete',
   project: 'proyecto',
+  container: 'contenedor',
+  image: 'imagen',
+  script: 'script',
 };
 
 /** Reexportado para que las pruebas de la interfaz puedan comprobar el troceo sin DOM. */

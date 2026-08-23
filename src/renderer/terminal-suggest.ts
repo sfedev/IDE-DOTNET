@@ -14,7 +14,16 @@
  *    tabulador; el resto sólo se ve en el menú.
  */
 
-export type SuggestionKind = 'program' | 'subcommand' | 'flag' | 'branch' | 'package' | 'project';
+export type SuggestionKind =
+  | 'program'
+  | 'subcommand'
+  | 'flag'
+  | 'branch'
+  | 'package'
+  | 'project'
+  | 'container'
+  | 'image'
+  | 'script';
 
 export interface Suggestion {
   /** Texto que sustituye al token que se está escribiendo. */
@@ -33,6 +42,17 @@ export interface SuggestContext {
   projects?: readonly string[];
   /** Programas que la terminal admite (lista blanca del proceso principal). */
   programs?: readonly string[];
+  /**
+   * Contenedores de Docker existentes, en ejecución o parados, ya resueltos.
+   *
+   * Se ofrecen los parados también a propósito: `docker start` y `docker rm` se escriben
+   * justamente sobre contenedores que no están corriendo.
+   */
+  containers?: readonly string[];
+  /** Imágenes locales (`repositorio:etiqueta`). */
+  images?: readonly string[];
+  /** Scripts declarados en el `package.json` del workspace. */
+  npmScripts?: readonly string[];
 }
 
 interface CommandSpec {
@@ -48,6 +68,7 @@ const DEFAULT_PROGRAMS: CommandSpec[] = [
   { value: 'npx', detail: 'ejecuta un paquete de Node' },
   { value: 'node', detail: 'runtime de Node' },
   { value: 'docker', detail: 'contenedores' },
+  { value: 'az', detail: 'CLI de Azure' },
 ];
 
 /** Subcomandos de git, ordenados por frecuencia real de uso, no alfabéticamente. */
@@ -108,6 +129,138 @@ const COMMON_PACKAGES: CommandSpec[] = [
   { value: 'Bogus', detail: 'datos falsos para pruebas' },
 ];
 
+/**
+ * Subcomandos de Docker, ordenados por lo que se teclea de verdad en un flujo .NET.
+ *
+ * `compose up -d` va arriba del todo por un motivo concreto: en una solución con SQL Server o
+ * Redis de apoyo, levantar el compose es lo primero que se hace cada mañana.
+ */
+const DOCKER_SUBCOMMANDS: CommandSpec[] = [
+  { value: 'compose up -d', detail: 'levanta los servicios en segundo plano' },
+  { value: 'compose down', detail: 'para y elimina los servicios' },
+  { value: 'ps', detail: 'contenedores en ejecución' },
+  { value: 'ps -a', detail: 'todos los contenedores, parados incluidos' },
+  { value: 'logs -f', detail: 'sigue la salida de un contenedor' },
+  { value: 'exec -it', detail: 'abre un comando dentro del contenedor' },
+  { value: 'build -t', detail: 'construye una imagen con etiqueta' },
+  { value: 'run', detail: 'crea y arranca un contenedor' },
+  { value: 'start', detail: 'arranca un contenedor parado' },
+  { value: 'stop', detail: 'para un contenedor' },
+  { value: 'restart', detail: 'reinicia un contenedor' },
+  { value: 'rm', detail: 'elimina un contenedor' },
+  { value: 'images', detail: 'imágenes locales' },
+  { value: 'pull', detail: 'descarga una imagen' },
+  { value: 'inspect', detail: 'detalle en JSON' },
+  { value: 'stats', detail: 'consumo en vivo' },
+  { value: 'system prune -f', detail: 'libera espacio de lo no usado' },
+];
+
+/** Subcomandos de `docker compose`. */
+const COMPOSE_SUBCOMMANDS: CommandSpec[] = [
+  { value: 'up -d', detail: 'levanta en segundo plano' },
+  { value: 'up --build', detail: 'reconstruye y levanta' },
+  { value: 'down', detail: 'para y elimina' },
+  { value: 'down -v', detail: 'para y borra también los volúmenes' },
+  { value: 'ps', detail: 'estado de los servicios' },
+  { value: 'logs -f', detail: 'sigue la salida' },
+  { value: 'build', detail: 'construye las imágenes' },
+  { value: 'restart', detail: 'reinicia los servicios' },
+  { value: 'pull', detail: 'descarga las imágenes' },
+  { value: 'exec', detail: 'ejecuta dentro de un servicio' },
+  { value: 'config', detail: 'muestra la configuración resuelta' },
+];
+
+/** Subcomandos de la CLI de Azure, acotados a lo que usa un desarrollador .NET. */
+const AZ_SUBCOMMANDS: CommandSpec[] = [
+  { value: 'login', detail: 'inicia sesión en Azure' },
+  { value: 'account show', detail: 'suscripción activa' },
+  { value: 'account set --subscription', detail: 'cambia de suscripción' },
+  { value: 'webapp up', detail: 'publica la aplicación en App Service' },
+  { value: 'webapp list --output table', detail: 'lista las webapps' },
+  { value: 'webapp log tail', detail: 'sigue el log en vivo' },
+  { value: 'webapp deployment source config-zip', detail: 'despliega un zip' },
+  { value: 'webapp config appsettings set', detail: 'cambia la configuración' },
+  { value: 'group create', detail: 'crea un grupo de recursos' },
+  { value: 'group list --output table', detail: 'lista los grupos' },
+  { value: 'group delete', detail: 'borra un grupo de recursos' },
+  { value: 'sql server create', detail: 'crea un servidor SQL' },
+  { value: 'sql db create', detail: 'crea una base de datos' },
+  { value: 'containerapp up', detail: 'publica un contenedor en Container Apps' },
+  { value: 'acr build', detail: 'construye la imagen en el registro' },
+  { value: 'acr login', detail: 'autentica contra el registro' },
+  { value: 'staticwebapp create', detail: 'crea una Static Web App (Blazor WASM)' },
+  { value: 'keyvault secret show', detail: 'lee un secreto' },
+  { value: 'logout', detail: 'cierra la sesión' },
+];
+
+/** Grupos de `az` que se completan solos al escribir el primer nivel. */
+const AZ_GROUPS: Record<string, CommandSpec[]> = {
+  webapp: [
+    { value: 'up', detail: 'publica la aplicación' },
+    { value: 'list --output table', detail: 'lista las webapps' },
+    { value: 'log tail', detail: 'sigue el log en vivo' },
+    { value: 'restart', detail: 'reinicia la aplicación' },
+    { value: 'create', detail: 'crea una webapp' },
+    { value: 'delete', detail: 'borra una webapp' },
+  ],
+  group: [
+    { value: 'create --name', detail: 'crea un grupo de recursos' },
+    { value: 'list --output table', detail: 'lista los grupos' },
+    { value: 'delete --name', detail: 'borra un grupo' },
+  ],
+  sql: [
+    { value: 'server create', detail: 'crea un servidor SQL' },
+    { value: 'db create', detail: 'crea una base de datos' },
+    { value: 'db list --output table', detail: 'lista las bases de datos' },
+  ],
+  acr: [
+    { value: 'build --registry', detail: 'construye la imagen en el registro' },
+    { value: 'login --name', detail: 'autentica contra el registro' },
+    { value: 'repository list', detail: 'lista los repositorios' },
+  ],
+  containerapp: [
+    { value: 'up', detail: 'publica el contenedor' },
+    { value: 'list --output table', detail: 'lista las aplicaciones' },
+    { value: 'logs show', detail: 'muestra el log' },
+  ],
+  account: [
+    { value: 'show', detail: 'suscripción activa' },
+    { value: 'list --output table', detail: 'lista las suscripciones' },
+    { value: 'set --subscription', detail: 'cambia de suscripción' },
+  ],
+};
+
+/** Subcomandos de npm. Los scripts del `package.json` llegan por contexto. */
+const NPM_SUBCOMMANDS: CommandSpec[] = [
+  { value: 'run', detail: 'ejecuta un script del package.json' },
+  { value: 'install', detail: 'instala las dependencias' },
+  { value: 'ci', detail: 'instala exactamente el lockfile' },
+  { value: 'install --save-dev', detail: 'añade una dependencia de desarrollo' },
+  { value: 'uninstall', detail: 'quita una dependencia' },
+  { value: 'update', detail: 'actualiza dentro del rango' },
+  { value: 'outdated', detail: 'qué se ha quedado atrás' },
+  { value: 'audit fix', detail: 'corrige vulnerabilidades' },
+  { value: 'version patch', detail: 'sube la versión de parche' },
+  { value: 'publish --dry-run', detail: 'ensaya la publicación' },
+];
+
+/** Argumentos habituales de `node`. */
+const NODE_SUBCOMMANDS: CommandSpec[] = [
+  { value: '--version', detail: 'versión instalada' },
+  { value: '--test', detail: 'runner de pruebas nativo' },
+  { value: '--watch', detail: 'reinicia al cambiar un archivo' },
+  { value: '--inspect', detail: 'abre el depurador' },
+  { value: '--env-file=.env', detail: 'carga variables de un archivo' },
+];
+
+/** Subcomandos de Docker que esperan un contenedor como argumento siguiente. */
+const DOCKER_CONTAINER_COMMANDS = new Set([
+  'logs', 'exec', 'stop', 'start', 'restart', 'rm', 'inspect', 'attach', 'top', 'port', 'kill', 'cp', 'stats',
+]);
+
+/** Subcomandos de Docker que esperan una imagen. */
+const DOCKER_IMAGE_COMMANDS = new Set(['run', 'rmi', 'push', 'pull', 'tag', 'save', 'history', 'create']);
+
 const GIT_BRANCH_COMMANDS = new Set(['checkout', 'switch', 'merge', 'rebase', 'cherry-pick']);
 
 /** Flags que se piden a menudo justo después del subcomando. */
@@ -135,6 +288,19 @@ const FLAGS: Record<string, CommandSpec[]> = {
   'git log': [
     { value: '--oneline', detail: 'una línea por commit' },
     { value: '--graph', detail: 'dibuja las ramas' },
+  ],
+  'docker build': [
+    { value: '-t', detail: 'etiqueta de la imagen' },
+    { value: '-f', detail: 'Dockerfile alternativo' },
+    { value: '--no-cache', detail: 'construye sin caché' },
+  ],
+  'docker ps': [
+    { value: '-a', detail: 'incluye los parados' },
+    { value: '--filter status=running', detail: 'sólo los que están arriba' },
+  ],
+  'npm install': [
+    { value: '--save-dev', detail: 'dependencia de desarrollo' },
+    { value: '--save-exact', detail: 'fija la versión exacta' },
   ],
 };
 
@@ -189,8 +355,94 @@ export function suggest(line: string, context: SuggestContext = {}): Suggestion[
 
   if (program === 'git') return byPrefix(gitSuggestions(tokens, context), typing);
   if (program === 'dotnet') return byPrefix(dotnetSuggestions(tokens, context), typing);
+  if (program === 'docker') return byPrefix(dockerSuggestions(tokens, context), typing);
+  if (program === 'az') return byPrefix(azureSuggestions(tokens), typing);
+  if (program === 'npm' || program === 'pnpm' || program === 'yarn') {
+    return byPrefix(npmSuggestions(tokens, context), typing);
+  }
+  if (program === 'node') return byPrefix(toSuggestions(NODE_SUBCOMMANDS, 'flag'), typing);
 
   return [];
+}
+
+/**
+ * Sugerencias de Docker.
+ *
+ * La regla que hace útil esto no es la lista de subcomandos —esa se aprende— sino la segunda
+ * palabra: `docker logs ` ofrece **tus** contenedores y `docker run ` ofrece **tus** imágenes. Es
+ * la diferencia entre autocompletar y recordarle a alguien lo que tiene levantado.
+ */
+function dockerSuggestions(tokens: string[], context: SuggestContext): Suggestion[] {
+  if (tokens.length === 1) return toSuggestions(DOCKER_SUBCOMMANDS, 'subcommand');
+
+  const subcommand = tokens[1]!.toLowerCase();
+
+  if (subcommand === 'compose') {
+    if (tokens.length === 2) return toSuggestions(COMPOSE_SUBCOMMANDS, 'subcommand');
+
+    // `docker compose logs `, `docker compose exec `... esperan un servicio, que en la práctica
+    // se llama igual que el contenedor que levanta.
+    const composeCommand = tokens[2]!.toLowerCase();
+    if (['logs', 'exec', 'restart', 'stop', 'start', 'up', 'build', 'pull'].includes(composeCommand)) {
+      return containerSuggestions(context);
+    }
+    return [];
+  }
+
+  if (DOCKER_CONTAINER_COMMANDS.has(subcommand)) return containerSuggestions(context);
+  if (DOCKER_IMAGE_COMMANDS.has(subcommand)) return imageSuggestions(context);
+
+  return toSuggestions(FLAGS[`docker ${subcommand}`] ?? [], 'flag');
+}
+
+function containerSuggestions(context: SuggestContext): Suggestion[] {
+  return (context.containers ?? []).map((name) => ({
+    value: name,
+    label: name,
+    detail: 'contenedor',
+    kind: 'container' as const,
+  }));
+}
+
+function imageSuggestions(context: SuggestContext): Suggestion[] {
+  return (context.images ?? []).map((name) => ({
+    value: name,
+    label: name,
+    detail: 'imagen local',
+    kind: 'image' as const,
+  }));
+}
+
+/**
+ * Sugerencias de la CLI de Azure.
+ *
+ * `az` tiene miles de comandos; aquí sólo están los del camino de un desarrollador .NET que
+ * publica una API o un Blazor. Al escribir el grupo (`az webapp `) se ofrecen sus operaciones,
+ * que es donde de verdad se pierde el tiempo buscando en la documentación.
+ */
+function azureSuggestions(tokens: string[]): Suggestion[] {
+  if (tokens.length === 1) return toSuggestions(AZ_SUBCOMMANDS, 'subcommand');
+
+  const group = tokens[1]!.toLowerCase();
+  return toSuggestions(AZ_GROUPS[group] ?? [], 'subcommand');
+}
+
+/** Sugerencias de npm: subcomandos y, tras `npm run`, los scripts reales del `package.json`. */
+function npmSuggestions(tokens: string[], context: SuggestContext): Suggestion[] {
+  if (tokens.length === 1) return toSuggestions(NPM_SUBCOMMANDS, 'subcommand');
+
+  const subcommand = tokens[1]!.toLowerCase();
+
+  if (subcommand === 'run' || subcommand === 'run-script') {
+    return (context.npmScripts ?? []).map((script) => ({
+      value: script,
+      label: script,
+      detail: 'script del package.json',
+      kind: 'script' as const,
+    }));
+  }
+
+  return toSuggestions(FLAGS[`npm ${subcommand}`] ?? [], 'flag');
 }
 
 function gitSuggestions(tokens: string[], context: SuggestContext): Suggestion[] {
@@ -318,4 +570,9 @@ export const SUGGESTION_SOURCES = {
   git: GIT_SUBCOMMANDS.map((spec) => spec.value),
   dotnet: DOTNET_SUBCOMMANDS.map((spec) => spec.value),
   packages: COMMON_PACKAGES.map((spec) => spec.value),
+  docker: DOCKER_SUBCOMMANDS.map((spec) => spec.value),
+  compose: COMPOSE_SUBCOMMANDS.map((spec) => spec.value),
+  az: AZ_SUBCOMMANDS.map((spec) => spec.value),
+  npm: NPM_SUBCOMMANDS.map((spec) => spec.value),
+  node: NODE_SUBCOMMANDS.map((spec) => spec.value),
 } as const;

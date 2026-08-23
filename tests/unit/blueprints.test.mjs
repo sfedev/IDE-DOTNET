@@ -288,3 +288,32 @@ describe('resolveOptions', () => {
     assert.equal(puertos.size, 4);
   });
 });
+
+/**
+ * El registro que escriben las soluciones generadas.
+ *
+ * Lo destapó el visor de registro de la v1.7.0 al enseñar `[HH:mm:ss INF] Application started`:
+ * la plantilla de salida de Serilog llevaba la hora como **texto literal** en vez de como el
+ * marcador `{Timestamp:HH:mm:ss}`, así que todas las soluciones generadas escribían la misma hora
+ * falsa en cada línea. Nadie lo había visto porque el resto de la línea era correcto.
+ */
+describe('plantilla de salida de Serilog', () => {
+  const appsettings = walk(templatesRoot).filter((file) => file.endsWith('appsettings.json.tmpl'));
+
+  it('hay un appsettings por proyecto de presentación', () => {
+    assert.ok(appsettings.length >= 6, `sólo se han encontrado ${appsettings.length}`);
+  });
+
+  for (const file of appsettings) {
+    const contents = readFileSync(file, 'utf8');
+    if (!contents.includes('outputTemplate')) continue;
+
+    it(`${file.slice(templatesRoot.length + 1)}: la hora es un marcador, no texto`, () => {
+      assert.ok(
+        contents.includes('{Timestamp:HH:mm:ss}'),
+        'la plantilla escribiría "HH:mm:ss" literal en cada línea',
+      );
+      assert.ok(contents.includes('{Level:u3}'));
+    });
+  }
+});

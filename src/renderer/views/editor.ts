@@ -323,6 +323,21 @@ export class EditorView {
     }
   }
 
+  /**
+   * Avisos del linter de arquitectura.
+   *
+   * Van en su **propio propietario** de marcadores (`dotforge-architecture`), no en el de MSBuild:
+   * si compartieran propietario, una compilación correcta borraría los avisos de arquitectura, que
+   * es justo lo que no debe pasar — el código compila y sigue rompiendo la regla.
+   */
+  setArchitectureMarkers(byPath: Map<string, MonacoApi.editor.IMarkerData[]>): void {
+    const monaco = getMonaco();
+
+    for (const model of monaco.editor.getModels()) {
+      monaco.editor.setModelMarkers(model, 'dotforge-architecture', byPath.get(model.uri.fsPath) ?? []);
+    }
+  }
+
   /** Pinta los breakpoints de un archivo en el margen. */
   setBreakpoints(path: string, lines: number[]): void {
     const monaco = getMonaco();
