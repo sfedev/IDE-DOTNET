@@ -208,6 +208,11 @@ async function runNew(parsed: ParsedArgs): Promise<void> {
     console.log(paint(`\n  Aviso: ${warning}`, 'yellow'));
   }
 
+  console.log(
+    `\n  ${paint('README.md', 'cyan')} explica la arquitectura, las reglas de dependencia,\n` +
+      '  cómo añadir una funcionalidad paso a paso y los comandos de compilación y pruebas.',
+  );
+
   console.log(`\n${paint('  Siguientes pasos', 'bold')}`);
   for (const step of result.nextSteps) {
     console.log(`    ${paint('$', 'dim')} ${step}`);

@@ -1,0 +1,734 @@
+# {{Solution}}
+
+> Solución **Arquitectura Hexagonal (Ports & Adapters)** generada con **DotForge IDE**.
+> Este documento explica el hexágono que tienes delante: qué es un puerto, qué es un adaptador,
+> dónde va cada tipo de código y cómo añadir una funcionalidad sin agujerear el núcleo.
+
+| | |
+|---|---|
+| **Arquitectura** | Hexagonal / Ports & Adapters (Alistair Cockburn) |
+| **Framework objetivo** | `{{Framework}}` |
+| **Adaptadores conductores** | {{#if hasBoth}}Web API minimal + Blazor interactivo{{else}}{{#if hasWebApi}}Web API minimal{{/if}}{{#if hasBlazor}}Blazor Server interactivo{{/if}}{{/if}} |
+| **Adaptadores conducidos** | Persistencia EF Core sobre `{{DbProvider}}` + notificaciones por log |
+| **Entidad de ejemplo** | `{{Entity}}` (plural `{{EntityPlural}}`, {{#if hasWebApi}}ruta `/api/{{entityRoute}}`{{else}}página `/{{entityRoute}}`{{/if}}) |
+| **Pruebas** | {{#if hasTests}}xUnit en `tests/{{Solution}}.UnitTests`{{else}}no generadas (`--no-tests`){{/if}} |
+
+---
+
+## Índice
+
+1. [La arquitectura en dos minutos](#1-la-arquitectura-en-dos-minutos)
+2. [Estructura y responsabilidades: qué va en cada proyecto](#2-estructura-y-responsabilidades-qué-va-en-cada-proyecto)
+3. [Guía paso a paso: cómo añadir una funcionalidad](#3-guía-paso-a-paso-cómo-añadir-una-funcionalidad)
+4. [El ejemplo incluido, explicado](#4-el-ejemplo-incluido-explicado)
+5. [Comandos útiles y pruebas](#5-comandos-útiles-y-pruebas)
+6. [Errores frecuentes y cómo evitarlos](#6-errores-frecuentes-y-cómo-evitarlos)
+
+---
+
+## 1. La arquitectura en dos minutos
+
+La arquitectura hexagonal parte de una idea muy concreta: **la aplicación debe poder ejecutarse
+igual la lances desde donde la lances y guardes donde guardes**. Para conseguirlo separa el
+sistema en tres piezas:
+
+- **El hexágono (núcleo):** el modelo de dominio y los servicios de aplicación. Es el único sitio
+  donde vive el "qué hace" el sistema.
+- **Los puertos:** interfaces que definen las conversaciones que el núcleo mantiene con el
+  exterior. Son parte del núcleo, no del exterior.
+- **Los adaptadores:** implementaciones concretas de esas conversaciones. Son sustituibles.
+
+Los puertos tienen dos direcciones, y confundirlas es el error más común:
+
+| | **Puerto de entrada** (*driving / inbound*) | **Puerto de salida** (*driven / outbound*) |
+|---|---|---|
+| ¿Quién llama? | El mundo exterior llama al núcleo | El núcleo llama al mundo exterior |
+| ¿Quién lo implementa? | El **núcleo** (`{{EntityPlural}}Service`) | Un **adaptador** (`Ef{{Entity}}RepositoryAdapter`) |
+| Ejemplo aquí | `IManage{{EntityPlural}}` | `I{{Entity}}RepositoryPort`, `INotificationPort`, `IClockPort` |
+| Adaptador típico | Web API, Blazor, CLI, worker, consumidor de mensajes | Base de datos, correo, colas, APIs de terceros, reloj |
+
+> **La regla del hexágono:** el núcleo **nunca** nombra a un adaptador. Sólo nombra puertos.
+> Si en `{{Solution}}.Ports` aparece un `using {{Solution}}.Adapters.*`, la arquitectura se rompió.
+
+### Qué te llevas a cambio
+
+| Beneficio | Por qué ocurre aquí |
+|---|---|
+| **Desacoplamiento simétrico** | Da igual si la entrada es HTTP, Blazor o un job: todos entran por el mismo puerto. Y da igual si la salida es {{#if useSqlite}}SQLite{{else}}memoria{{/if}}, Postgres o un fichero. |
+| **Testeabilidad total** | El hexágono completo se ejercita en pruebas con adaptadores dobles: sin servidor, sin base de datos, sin reloj real. Mira `tests/{{Solution}}.UnitTests/Hexagon`. |
+| **Mantenibilidad** | Cada tecnología vive en su propio proyecto de adaptador. Sustituir una no obliga a leer el resto. |
+| **Decisiones aplazables** | La elección de infraestructura se toma en `Program.cs`, en tres líneas de registro. |
+| **Simetría** | No hay una "capa de arriba" y otra "de abajo": hay dentro y fuera. Eso simplifica el razonamiento. |
+
+### Diagrama de puertos y adaptadores
+
+Las flechas se leen **"depende de" / "compila contra"**. Observa que **todas** las flechas apuntan
+hacia el hexágono: los adaptadores conocen a los puertos, nunca al revés.
+
+```mermaid
+flowchart LR
+    subgraph DRIVING["Adaptadores conductores (entrada)"]
+{{#if hasWebApi}}
+        WEB["{{Solution}}.Adapters.Web<br/>minimal API + OpenAPI"]
+{{/if}}
+{{#if hasBlazor}}
+        UI["{{Solution}}.Adapters.Blazor<br/>componentes interactivos"]
+{{/if}}
+{{#if hasTests}}
+        TST["Pruebas<br/>llaman al puerto directamente"]
+{{/if}}
+    end
+
+    subgraph HEX["El hexágono"]
+        direction TB
+        IN["PUERTO DE ENTRADA<br/>IManage{{EntityPlural}}"]
+        APP["{{Solution}}.Ports.Application<br/>{{EntityPlural}}Service"]
+        DOM["{{Solution}}.Domain<br/>{{Entity}} · Money · invariantes"]
+        OUT["PUERTOS DE SALIDA<br/>I{{Entity}}RepositoryPort<br/>INotificationPort · IClockPort"]
+        IN --> APP
+        APP --> DOM
+        APP --> OUT
+    end
+
+    subgraph DRIVEN["Adaptadores conducidos (salida)"]
+        PER["{{Solution}}.Adapters.Persistence<br/>EF Core · {{DbProvider}}"]
+        NOT["{{Solution}}.Adapters.Notifications<br/>escribe en el log"]
+    end
+
+{{#if hasWebApi}}
+    WEB --> IN
+{{/if}}
+{{#if hasBlazor}}
+    UI --> IN
+{{/if}}
+{{#if hasTests}}
+    TST --> IN
+{{/if}}
+    PER --> OUT
+    NOT --> OUT
+    PER --> DOM
+```
+
+### Recorrido de una petición
+
+```mermaid
+sequenceDiagram
+    autonumber
+{{#if hasWebApi}}
+    participant C as Cliente HTTP
+    participant A as {{Entity}}Endpoints<br/>(adaptador conductor)
+{{/if}}
+{{#unless hasWebApi}}
+    participant C as Navegador
+    participant A as {{EntityPlural}}.razor<br/>(adaptador conductor)
+{{/unless}}
+    participant P as IManage{{EntityPlural}}<br/>(puerto de entrada)
+    participant S as {{EntityPlural}}Service<br/>(núcleo)
+    participant D as {{Entity}}<br/>(dominio)
+    participant R as I{{Entity}}RepositoryPort<br/>(puerto de salida)
+    participant E as Ef{{Entity}}RepositoryAdapter
+
+{{#if hasWebApi}}
+    C->>A: POST /api/{{entityRoute}}
+{{/if}}
+{{#unless hasWebApi}}
+    C->>A: alta desde /{{entityRoute}}
+{{/unless}}
+    A->>P: RegisterAsync(Register{{Entity}}Command)
+    P->>S: (implementación registrada en Program.cs)
+    S->>R: ExistsBySkuAsync(sku)
+    R->>E: consulta EF Core
+    E-->>S: false
+    S->>D: {{Entity}}.Create(..., clock.UtcNow)
+    Note over D: valida invariantes<br/>o lanza DomainException
+    S->>R: SaveAsync + CommitAsync
+    S->>S: Notify{{Entity}}RegisteredAsync (puerto de notificación)
+    S-->>A: Result&lt;{{Entity}}View&gt;
+    A-->>C: 201 Created / 400 / 409
+```
+
+El servicio del hexágono no sabe que existe EF Core, ni HTTP, ni el reloj del sistema. **Sólo
+conoce puertos.**
+
+---
+
+## 2. Estructura y responsabilidades: qué va en cada proyecto
+
+```text
+{{Solution}}/
+├── {{Solution}}.sln
+├── Directory.Build.props — Propiedades comunes: TargetFramework, Nullable, ImplicitUsings
+├── Directory.Packages.props — Versiones centralizadas de NuGet
+├── dotforge.json — Manifiesto: opciones con las que DotForge generó la solución
+├── README.md — Este documento
+├── src/
+│   ├── {{Solution}}.Domain/ — DENTRO del hexágono: el modelo
+│   │   └── Model/
+│   │       ├── {{Entity}}.cs — Entidad con sus invariantes
+│   │       ├── Money.cs — Objeto de valor: importe + moneda
+│   │       └── DomainException.cs — Violación de una invariante
+
+│   ├── {{Solution}}.Ports/ — DENTRO del hexágono: puertos + servicios
+│   │   ├── Inbound/
+│   │   │   ├── IManage{{EntityPlural}}.cs — PUERTO DE ENTRADA: qué se le puede pedir
+│   │   │   ├── {{Entity}}Contracts.cs — Comandos y vistas del puerto de entrada
+│   │   │   └── Result.cs — Éxito o error explícito
+│   │   ├── Outbound/
+│   │   │   ├── I{{Entity}}RepositoryPort.cs — PUERTO DE SALIDA: persistencia
+│   │   │   ├── INotificationPort.cs — PUERTO DE SALIDA: avisar al exterior
+│   │   │   └── IClockPort.cs — PUERTO DE SALIDA: el tiempo
+│   │   ├── Application/
+│   │   │   └── {{EntityPlural}}Service.cs — Implementa el puerto de entrada usando los de salida
+│   │   └── DependencyInjection.cs — AddHexagon()
+
+│   ├── {{Solution}}.Adapters.Persistence/ — FUERA: adaptador conducido
+│   │   ├── HexagonDbContext.cs — DbContext de EF Core
+│   │   ├── Ef{{Entity}}RepositoryAdapter.cs — Implementa I{{Entity}}RepositoryPort
+│   │   └── PersistenceAdapterInstaller.cs — AddPersistenceAdapter() + datos de ejemplo
+
+│   ├── {{Solution}}.Adapters.Notifications/ — FUERA: adaptador conducido
+│   │   ├── LoggingNotificationAdapter.cs — Implementa INotificationPort escribiendo en el log
+│   │   └── NotificationsAdapterInstaller.cs — AddNotificationsAdapter()
+{{#if hasWebApi}}
+
+│   ├── {{Solution}}.Adapters.Web/ — FUERA: adaptador conductor
+│   │   ├── Endpoints/{{Entity}}Endpoints.cs — Traduce HTTP a llamadas al puerto de entrada
+│   │   ├── Program.cs — MONTAJE DEL HEXÁGONO: núcleo + adaptadores
+│   │   └── appsettings*.json — Configuración y cadena de conexión
+{{/if}}
+{{#if hasBlazor}}
+
+│   └── {{Solution}}.Adapters.Blazor/ — FUERA: adaptador conductor
+│       ├── Components/Pages/{{EntityPlural}}.razor — Listado + alta contra el puerto de entrada
+│       ├── Program.cs — MONTAJE DEL HEXÁGONO para la UI
+│       └── wwwroot/app.css — Estilos
+{{/if}}
+{{#if hasTests}}
+
+└── tests/
+    └── {{Solution}}.UnitTests/
+        ├── Domain/{{Entity}}Tests.cs — Invariantes del modelo
+        ├── Hexagon/{{EntityPlural}}ServiceTests.cs — El hexágono entero con dobles
+        └── Adapters/InMemoryAdapters.cs — Adaptadores de prueba de cada puerto
+{{/if}}
+```
+
+### 2.1 `{{Solution}}.Domain` — el modelo, dentro del hexágono
+
+| ✅ DEBE estar aquí | ❌ TIENE PROHIBIDO estar aquí |
+|---|---|
+| Entidades con comportamiento (`{{Entity}}.Create`, `AdjustStock`) | `using Microsoft.EntityFrameworkCore` o cualquier atributo de EF |
+| Objetos de valor inmutables (`Money`) | `DbContext`, SQL, cadenas de conexión |
+| Invariantes y validaciones de negocio | `HttpContext`, códigos de estado, rutas |
+| `DomainException` | `DateTimeOffset.UtcNow` (el tiempo llega como parámetro) |
+| Vocabulario del negocio | Cualquier referencia a `Ports` o a un adaptador |
+
+**Dependencias permitidas:** ninguna. Sólo la BCL.
+
+### 2.2 `{{Solution}}.Ports` — puertos y servicios de aplicación
+
+Este proyecto es **la frontera del hexágono**: declara las conversaciones y las orquesta.
+
+| ✅ DEBE estar aquí | ❌ TIENE PROHIBIDO estar aquí |
+|---|---|
+| Puertos de entrada (`IManage{{EntityPlural}}`) | Implementaciones concretas de infraestructura |
+| Puertos de salida (`I{{Entity}}RepositoryPort`, `INotificationPort`, `IClockPort`) | `DbContext`, `HttpClient`, SMTP, ficheros |
+| Servicios de aplicación que implementan los puertos de entrada | `DateTimeOffset.UtcNow` (usa `IClockPort`) |
+| Comandos y vistas del contrato (`Register{{Entity}}Command`, `{{Entity}}View`) | Tipos de ASP.NET o de Blazor |
+| Reglas de aplicación (unicidad del SKU, orden de los pasos) | Invariantes del modelo (van en `Domain`) |
+| `Result` / `Error` | `throw` como control de flujo esperado |
+
+**Dependencias permitidas:** `{{Solution}}.Domain` y abstracciones de la plataforma
+(`Microsoft.Extensions.Logging.Abstractions`, `...DependencyInjection.Abstractions`).
+
+> **Prueba de humo:** si abres `{{EntityPlural}}Service.cs` y encuentras un `DbContext`, un
+> `HttpContext` o un `DateTimeOffset.UtcNow`, el hexágono tiene una fuga.
+
+### 2.3 Adaptadores conducidos — `Adapters.Persistence`, `Adapters.Notifications`
+
+Implementan puertos de **salida**. Son la parte reemplazable del sistema.
+
+| ✅ DEBE estar aquí | ❌ TIENE PROHIBIDO estar aquí |
+|---|---|
+| `DbContext`, configuraciones, consultas y migraciones | Reglas de negocio o de aplicación |
+| La clase que implementa el puerto (`Ef{{Entity}}RepositoryAdapter`) | Interfaces que el núcleo debería declarar |
+| Instaladores de DI (`AddPersistenceAdapter`, `AddNotificationsAdapter`) | Decisiones de caso de uso |
+| Traducción entre el modelo de dominio y el de almacenamiento | Tipos que el núcleo tenga que conocer |
+| Reintentos, timeouts, credenciales, detalles del proveedor | Validaciones que el modelo ya garantiza |
+
+**Dependencias permitidas:** `{{Solution}}.Ports` (para el puerto) y `{{Solution}}.Domain`
+(para el modelo que persisten).
+
+> `INotificationPort` está deliberadamente en el ejemplo para dejar claro que **un puerto de
+> salida no es sinónimo de base de datos**: también lo es enviar un correo, publicar en una cola
+> o llamar a un servicio de terceros.
+
+### 2.4 Adaptadores conductores — {{#if hasWebApi}}`Adapters.Web`{{/if}}{{#if hasBoth}}, {{/if}}{{#if hasBlazor}}`Adapters.Blazor`{{/if}}
+
+Implementan la traducción del mundo exterior a llamadas al puerto de entrada, y son la
+**raíz de composición**: el único sitio donde se decide qué adaptador concreto se enchufa.
+
+| ✅ DEBE estar aquí | ❌ TIENE PROHIBIDO estar aquí |
+|---|---|
+| Endpoints{{#if hasBlazor}} y componentes `.razor`{{/if}} que llaman al puerto de entrada | Consultas contra `DbContext` |
+| Mapeo `Result` → HTTP{{#if hasBlazor}} o → mensaje en pantalla{{/if}} | Reglas de negocio ("el stock no puede ser negativo") |
+| Binding y validación de forma del transporte | Instanciar servicios del hexágono a mano |
+| `Program.cs` con `AddHexagon()` + `Add*Adapter()` | Lógica reutilizable desde otro adaptador |
+| Serilog, OpenAPI, ProblemDetails, configuración | Referencias directas a otro adaptador conductor |
+
+**Dependencias permitidas:** `{{Solution}}.Ports` (para llamar al puerto de entrada) y los
+adaptadores conducidos **sólo** para registrarlos en `Program.cs`.
+
+### 2.5 Tabla resumen de dependencias
+
+| Desde ↓ / Hacia → | Domain | Ports | Adapters.Persistence | Adapters.Notifications | Adaptadores conductores |
+|---|---|---|---|---|---|
+| **Domain** | — | ❌ | ❌ | ❌ | ❌ |
+| **Ports** | ✅ | — | ❌ | ❌ | ❌ |
+| **Adapters.Persistence** | ✅ | ✅ | — | ❌ | ❌ |
+| **Adapters.Notifications** | ✅ | ✅ | ❌ | — | ❌ |
+| **Adaptadores conductores** | ✅ | ✅ | ⚠️ sólo en `Program.cs` | ⚠️ sólo en `Program.cs` | — |
+
+---
+
+## 3. Guía paso a paso: cómo añadir una funcionalidad
+
+Caso real y completo: **"reservar unidades de un {{entity}}"** — restar stock para un pedido y
+avisar al exterior cuando el {{entity}} se queda sin existencias.
+
+El orden siempre es el mismo: **modelo → puertos → servicio → adaptadores**.
+
+### Paso 1 · Domain — expresa la regla en el modelo
+
+`src/{{Solution}}.Domain/Model/{{Entity}}.cs`
+
+```csharp
+/// <summary>Reserva unidades. La invariante "el stock nunca es negativo" vive aquí, y sólo aquí.</summary>
+public void Reserve(int units, DateTimeOffset nowUtc)
+{
+    DomainException.ThrowIf(units <= 0, "Las unidades a reservar deben ser positivas.");
+    DomainException.ThrowIf(units > Stock, $"Sólo quedan {Stock} unidades disponibles.");
+
+    Stock -= units;
+    UpdatedAtUtc = nowUtc;
+}
+```
+
+La hora entra como parámetro: el modelo no conoce el reloj, y las pruebas pueden congelarlo.
+
+### Paso 2 · Ports/Inbound — amplía el contrato del hexágono
+
+`src/{{Solution}}.Ports/Inbound/{{Entity}}Contracts.cs`
+
+```csharp
+public sealed record Reserve{{Entity}}Command(int Units);
+```
+
+`src/{{Solution}}.Ports/Inbound/IManage{{EntityPlural}}.cs`
+
+```csharp
+Task<Result<{{Entity}}View>> ReserveAsync(Guid id, Reserve{{Entity}}Command command, CancellationToken cancellationToken = default);
+```
+
+**Esto es lo primero que ve el mundo exterior.** Piensa el nombre en lenguaje de negocio: el
+puerto de entrada es el catálogo de capacidades del sistema, no una lista de operaciones CRUD.
+
+### Paso 3 · Ports/Outbound — declara lo que el núcleo necesita del exterior
+
+¿Te hace falta un puerto de salida nuevo? Sólo si necesitas una conversación con el exterior que
+todavía no existe. Aquí sí queremos avisar de la rotura de stock, así que ampliamos el puerto de
+notificación:
+
+`src/{{Solution}}.Ports/Outbound/INotificationPort.cs`
+
+```csharp
+Task Notify{{Entity}}OutOfStockAsync(Guid id, string sku, CancellationToken cancellationToken = default);
+```
+
+> **Cómo se nombra un puerto de salida:** por **lo que el núcleo necesita**, no por la tecnología
+> que lo resolverá. `INotificationPort`, no `ISendGridClient`. Si el nombre del puerto contiene
+> una marca, ya has filtrado un detalle dentro del hexágono.
+
+### Paso 4 · Ports/Application — implementa el caso de uso
+
+`src/{{Solution}}.Ports/Application/{{EntityPlural}}Service.cs`
+
+```csharp
+public async Task<Result<{{Entity}}View>> ReserveAsync(
+    Guid id,
+    Reserve{{Entity}}Command command,
+    CancellationToken cancellationToken = default)
+{
+    var existing = await _repository.FindAsync(id, cancellationToken);
+    if (existing is null)
+    {
+        return Result.Failure<{{Entity}}View>(Error.NotFound($"el {{entity}} {id}"));
+    }
+
+    try
+    {
+        existing.Reserve(command.Units, _clock.UtcNow);
+
+        await _repository.SaveAsync(existing, cancellationToken);
+        await _repository.CommitAsync(cancellationToken);
+
+        if (!existing.IsAvailable)
+        {
+            await _notifications.Notify{{Entity}}OutOfStockAsync(existing.Id, existing.Sku, cancellationToken);
+        }
+
+        _logger.LogInformation("Reservadas {Units} unidades de {{Entity}} {Id}", command.Units, id);
+        return Result.Success({{Entity}}View.From(existing));
+    }
+    catch (DomainException ex)
+    {
+        return Result.Failure<{{Entity}}View>(Error.Validation(ex.Message));
+    }
+}
+```
+
+Todo lo que toca el exterior pasa por `_repository`, `_notifications` y `_clock`: **tres puertos,
+ninguna tecnología**.
+
+### Paso 5 · Adaptadores conducidos — implementa los puertos nuevos
+
+`src/{{Solution}}.Adapters.Notifications/LoggingNotificationAdapter.cs`
+
+```csharp
+public Task Notify{{Entity}}OutOfStockAsync(Guid id, string sku, CancellationToken cancellationToken = default)
+{
+    _logger.LogWarning("{{Entity}} {Id} ({Sku}) se ha quedado sin stock", id, sku);
+    return Task.CompletedTask;
+}
+```
+
+Cuando mañana quieras mandar un correo de verdad, escribes `EmailNotificationAdapter`, cambias
+**una** línea de registro en `NotificationsAdapterInstaller` y **no tocas el hexágono**. Eso es
+todo el propósito de la arquitectura.
+
+{{#if useSqlite}}
+Si el cambio afecta al esquema, actualiza `HexagonDbContext` y genera la migración:
+
+```bash
+dotnet ef migrations add Reserve{{Entity}} --project src/{{Solution}}.Adapters.Persistence --startup-project src/{{Solution}}.Adapters.{{#if hasWebApi}}Web{{else}}Blazor{{/if}}
+```
+{{/if}}
+
+### Paso 6 · Adaptadores conductores — expón la funcionalidad
+
+{{#if hasWebApi}}
+`src/{{Solution}}.Adapters.Web/Endpoints/{{Entity}}Endpoints.cs`
+
+```csharp
+group.MapPost("/{id:guid}/reserve", async (
+        Guid id,
+        Reserve{{Entity}}Command command,
+        IManage{{EntityPlural}} {{entityPlural}},
+        CancellationToken cancellationToken) =>
+    (await {{entityPlural}}.ReserveAsync(id, command, cancellationToken)).ToHttpResult())
+    .WithName("Reserve{{Entity}}")
+    .WithSummary("Reserva unidades de un {{entity}}.");
+```
+
+El adaptador web inyecta **el puerto**, `IManage{{EntityPlural}}`, nunca la clase concreta.
+{{/if}}
+{{#if hasBlazor}}
+
+`src/{{Solution}}.Adapters.Blazor/Components/Pages/{{EntityPlural}}.razor`
+
+```razor
+@inject IManage{{EntityPlural}} {{EntityPlural}}Port
+
+<button @onclick="() => ReserveAsync(item.Id)">Reservar 1</button>
+
+@code {
+    private async Task ReserveAsync(Guid id)
+    {
+        var result = await {{EntityPlural}}Port.ReserveAsync(id, new Reserve{{Entity}}Command(1));
+        if (result.IsFailure) { _error = result.Error.Message; return; }
+        await ReloadAsync();
+    }
+}
+```
+
+Fíjate: la UI y la API **entran por el mismo puerto**. No hay lógica duplicada entre las dos.
+{{/if}}
+
+{{#if hasTests}}
+### Paso 7 · Pruebas — ejercita el hexágono con dobles
+
+`tests/{{Solution}}.UnitTests/Hexagon/{{EntityPlural}}ServiceTests.cs`
+
+```csharp
+[Fact]
+public async Task ReserveAsync_avisa_cuando_se_agota_el_stock()
+{
+    var sut = CreateSut();
+    var creado = await sut.Port.RegisterAsync(new Register{{Entity}}Command("Teclado", "KB-1", 10m, 2));
+
+    var result = await sut.Port.ReserveAsync(creado.Value.Id, new Reserve{{Entity}}Command(2));
+
+    Assert.True(result.IsSuccess);
+    Assert.Contains(sut.Notifications.Sent, mensaje => mensaje.Contains("KB-1"));
+}
+```
+
+Sin servidor, sin base de datos y sin reloj real: `InMemory{{Entity}}Adapter`,
+`RecordingNotificationAdapter` y `FrozenClockAdapter` implementan los tres puertos de salida.
+Esto es lo que la arquitectura hexagonal compra: **poder probar el sistema entero en memoria.**
+{{/if}}
+
+### Checklist de la funcionalidad
+
+- [ ] La invariante vive en `Domain`, en un método con nombre de negocio.
+- [ ] El puerto de entrada expresa una capacidad del negocio, no una operación de base de datos.
+- [ ] Los puertos de salida se nombran por necesidad, no por tecnología.
+- [ ] El servicio del hexágono no menciona ni EF Core, ni HTTP, ni `UtcNow`.
+- [ ] Cada adaptador nuevo se registra en su `*AdapterInstaller`, no en el núcleo.
+- [ ] Los adaptadores conductores sólo traducen: ni un `if` de negocio.
+{{#if hasTests}}- [ ] Hay una prueba del modelo y otra del hexágono completo con dobles.{{/if}}
+- [ ] `dotnet build` sin advertencias{{#if hasTests}} y `dotnet test` en verde{{/if}}.
+
+---
+
+## 4. El ejemplo incluido, explicado
+
+La solución trae un caso de uso completo y ejecutable de gestión de `{{EntityPlural}}`.
+
+### 4.1 `{{Entity}}` — el modelo (`Domain/Model`)
+
+Creación mediante factoría (`{{Entity}}.Create`), que normaliza el nombre, valida el SKU y rechaza
+stock negativo; y evolución mediante `Rename`, `ChangePrice` y `AdjustStock`. Todas las
+propiedades tienen setter privado. La hora **siempre** llega como parámetro: el modelo es
+determinista por construcción.
+
+### 4.2 `Money` — objeto de valor (`Domain/Model`)
+
+Importe + moneda, inmutable, con igualdad por valor. Se mapea como *owned type* de EF Core: dos
+columnas en la tabla, un concepto en el código.
+
+### 4.3 `IManage{{EntityPlural}}` — el puerto de entrada (`Ports/Inbound`)
+
+```csharp
+Task<IReadOnlyList<{{Entity}}View>> BrowseAsync(string? search, CancellationToken ct = default);
+Task<Result<{{Entity}}View>> FindAsync(Guid id, CancellationToken ct = default);
+Task<Result<{{Entity}}View>> RegisterAsync(Register{{Entity}}Command command, CancellationToken ct = default);
+Task<Result<{{Entity}}View>> AmendAsync(Guid id, Amend{{Entity}}Command command, CancellationToken ct = default);
+Task<Result> WithdrawAsync(Guid id, CancellationToken ct = default);
+```
+
+Es **el catálogo completo** de lo que el sistema sabe hacer con {{EntityPlural}}. Los verbos son
+de negocio (`Register`, `Amend`, `Withdraw`), no de CRUD. Junto a él viajan los comandos
+(`Register{{Entity}}Command`, `Amend{{Entity}}Command`) y la vista de salida (`{{Entity}}View`),
+en `{{Entity}}Contracts.cs`: el núcleo nunca expone la entidad hacia fuera.
+
+### 4.4 Los puertos de salida (`Ports/Outbound`)
+
+| Puerto | Para qué | Adaptador incluido |
+|---|---|---|
+| `I{{Entity}}RepositoryPort` | Buscar, comprobar SKU, guardar, borrar y **confirmar** | `Ef{{Entity}}RepositoryAdapter` ({{DbProvider}}) |
+| `INotificationPort` | Avisar al exterior de un hecho relevante | `LoggingNotificationAdapter` (escribe en el log) |
+| `IClockPort` | Saber qué hora es | `SystemClockAdapter` |
+
+`CommitAsync` está en el puerto de repositorio a propósito: el núcleo decide **cuándo** se
+confirma la transacción, aunque no sepa **cómo** se implementa.
+
+### 4.5 `{{EntityPlural}}Service` — el núcleo en acción (`Ports/Application`)
+
+Implementa el puerto de entrada apoyándose exclusivamente en puertos de salida. Léelo entero: es
+el archivo más importante de la solución. Fíjate en lo que **no** contiene: ni `DbContext`, ni
+`HttpContext`, ni `DateTimeOffset.UtcNow`.
+
+### 4.6 `Ef{{Entity}}RepositoryAdapter` — un adaptador conducido (`Adapters.Persistence`)
+
+Traduce el puerto a EF Core: consultas LINQ, `HexagonDbContext`, seguimiento de entidades y
+`SaveChangesAsync`. `PersistenceAdapterInstaller` registra el adaptador,
+{{#if useSqlite}}configura SQLite (`{{DbName}}`){{else}}configura el proveedor en memoria{{/if}}
+y siembra tres {{entityPlural}} de ejemplo la primera vez.
+
+{{#if hasWebApi}}
+### 4.7 `{{Entity}}Endpoints` y `Program.cs` (`Adapters.Web`)
+
+`MapGroup("/api/{{entityRoute}}")` con el CRUD completo; cada endpoint inyecta el puerto de
+entrada y traduce el `Result` a HTTP. En `Program.cs` está **el montaje del hexágono**:
+
+```csharp
+builder.Services.AddHexagon();                                    // el núcleo
+builder.Services.AddPersistenceAdapter(builder.Configuration);    // puerto de salida -> EF Core
+builder.Services.AddNotificationsAdapter();                       // puerto de salida -> log
+```
+
+Tres líneas. Ahí está toda la decisión tecnológica de la solución.
+{{/if}}
+{{#if hasBlazor}}
+
+### 4.8 `{{EntityPlural}}.razor` (`Adapters.Blazor`)
+
+Listado con filtro y alta con `EditForm`, inyectando `IManage{{EntityPlural}}`. Demuestra que un
+segundo adaptador conductor **no duplica ni una línea de lógica**.
+{{/if}}
+{{#if hasTests}}
+
+### 4.9 Las pruebas incluidas
+
+| Archivo | Qué demuestra |
+|---|---|
+| `Domain/{{Entity}}Tests.cs` | Que las invariantes del modelo se cumplen |
+| `Hexagon/{{EntityPlural}}ServiceTests.cs` | Que el hexágono completo funciona **sin infraestructura** |
+| `Adapters/InMemoryAdapters.cs` | Cómo se escribe un adaptador doble de cada puerto de salida |
+
+`FrozenClockAdapter` es el mejor argumento a favor de `IClockPort`: con el tiempo congelado, una
+prueba que compara fechas deja de ser intermitente.
+{{/if}}
+
+---
+
+## 5. Comandos útiles y pruebas
+
+Todos se ejecutan desde la raíz de la solución (donde está `{{Solution}}.sln`).
+En DotForge IDE tienes los mismos comandos en la paleta (`Ctrl/Cmd+Shift+P`) y en el menú
+**Ejecutar**; la terminal integrada se abre con `Ctrl/Cmd+J`.
+
+### Compilar
+
+```bash
+dotnet restore
+```
+
+```bash
+dotnet build
+```
+
+Objetivo: **0 errores y 0 advertencias**.
+
+{{#if hasTests}}
+### Probar
+
+```bash
+dotnet test
+```
+
+```bash
+dotnet test --filter "FullyQualifiedName~{{EntityPlural}}ServiceTests"
+```
+
+```bash
+dotnet test --collect:"XPlat Code Coverage"
+```
+{{/if}}
+
+{{#if hasWebApi}}
+### Ejecutar el adaptador web
+
+```bash
+dotnet run --project src/{{Solution}}.Adapters.Web
+```
+
+| Recurso | URL |
+|---|---|
+| Documentación interactiva (Scalar) | `https://localhost:{{ApiHttpsPort}}/scalar/v1` |
+| Documento OpenAPI | `https://localhost:{{ApiHttpsPort}}/openapi/v1.json` |
+| Salud del servicio | `https://localhost:{{ApiHttpsPort}}/health` |
+| CRUD de {{EntityPlural}} | `https://localhost:{{ApiHttpsPort}}/api/{{entityRoute}}` |
+| Perfil sólo HTTP | `http://localhost:{{ApiHttpPort}}` |
+
+```bash
+curl -k https://localhost:{{ApiHttpsPort}}/api/{{entityRoute}}
+```
+{{/if}}
+
+{{#if hasBlazor}}
+### Ejecutar el adaptador Blazor
+
+```bash
+dotnet run --project src/{{Solution}}.Adapters.Blazor
+```
+
+Disponible en `https://localhost:{{BlazorHttpsPort}}` (o `http://localhost:{{BlazorHttpPort}}`).
+La página de {{EntityPlural}} está en `/{{entityRoute}}`.
+{{/if}}
+
+### Recarga en caliente
+
+```bash
+dotnet watch --project src/{{Solution}}.Adapters.{{#if hasBlazor}}Blazor{{else}}Web{{/if}}
+```
+
+{{#if useSqlite}}
+### Base de datos
+
+Se crea `{{DbName}}` en la carpeta del adaptador de arranque y se siembra la primera vez. Para
+empezar de cero, borra el archivo.
+
+```bash
+dotnet tool install --global dotnet-ef
+```
+
+```bash
+dotnet ef migrations add NombreDeLaMigracion --project src/{{Solution}}.Adapters.Persistence --startup-project src/{{Solution}}.Adapters.{{#if hasWebApi}}Web{{else}}Blazor{{/if}}
+```
+
+```bash
+dotnet ef database update --project src/{{Solution}}.Adapters.Persistence --startup-project src/{{Solution}}.Adapters.{{#if hasWebApi}}Web{{else}}Blazor{{/if}}
+```
+{{/if}}
+{{#if useInMemory}}
+### Base de datos
+
+Estás usando el proveedor **en memoria**: los datos se pierden al parar la aplicación. Para pasar
+a una base de datos real, cambia `options.UseInMemoryDatabase(...)` por `UseSqlite`/`UseNpgsql`
+en `PersistenceAdapterInstaller.cs`. **El hexágono no se entera del cambio.**
+{{/if}}
+
+### Escribir un adaptador nuevo
+
+```bash
+dotnet new classlib -o src/{{Solution}}.Adapters.Messaging
+```
+
+```bash
+dotnet sln add src/{{Solution}}.Adapters.Messaging
+```
+
+```bash
+dotnet add src/{{Solution}}.Adapters.Messaging reference src/{{Solution}}.Ports
+```
+
+Después implementa el puerto y registra la implementación en su instalador. El nuevo proyecto
+referencia `Ports`; `Ports` **nunca** referencia al adaptador.
+
+### Gestión de paquetes
+
+Versiones centralizadas en `Directory.Packages.props` (los `.csproj` referencian sin versión).
+
+```bash
+dotnet add src/{{Solution}}.Adapters.Persistence package Npgsql.EntityFrameworkCore.PostgreSQL
+```
+
+```bash
+dotnet list package --outdated
+```
+
+---
+
+## 6. Errores frecuentes y cómo evitarlos
+
+| Síntoma | Por qué es un problema | Solución |
+|---|---|---|
+| Un `using {{Solution}}.Adapters.*` dentro de `Ports` | El núcleo pasa a depender de una tecnología: se acabó la sustituibilidad | Declara un puerto y deja que el adaptador lo implemente |
+| Puertos nombrados por tecnología (`ISqlRepository`) | El detalle se filtra al núcleo aunque la interfaz sea abstracta | Nombra por necesidad: `I{{Entity}}RepositoryPort` |
+| Confundir puerto de entrada y de salida | Se invierte la dirección de la dependencia y el núcleo acaba llamando a quien debería llamarle | Entrada: lo implementa el núcleo. Salida: lo implementa un adaptador |
+| Un puerto de salida por cada método de EF Core | El puerto deja de expresar una conversación y pasa a ser una fachada de la base de datos | Un puerto por concepto, con los métodos que el caso de uso necesita |
+| Devolver la entidad de dominio desde el puerto de entrada | El exterior queda acoplado al modelo interno | Devuelve una vista (`{{Entity}}View`) |
+| Lógica de negocio en el endpoint{{#if hasBlazor}} o en el `.razor`{{/if}} | Se duplica en cuanto aparece el segundo adaptador conductor | Muévela al servicio o al modelo |
+| `DateTimeOffset.UtcNow` dentro del hexágono | Pruebas intermitentes, imposibles de congelar | Usa `IClockPort` |
+| Un adaptador que llama a otro adaptador | Se salta el núcleo y crea un acoplamiento invisible | Todo pasa por el hexágono |
+
+### Para seguir leyendo
+
+- Alistair Cockburn, *Hexagonal Architecture (Ports and Adapters)* — el artículo original.
+- El manifiesto de esta solución está en `dotforge.json`: registra con qué opciones se generó.
+
+---
+
+<sub>Generado por **DotForge IDE** · Arquitectura Hexagonal · `{{Framework}}` · {{Year}}</sub>

@@ -266,6 +266,12 @@ npm run fetch:toolchain -- --platform win32 --arch x64
 - **`{{` en C# interpolado:** el motor de plantillas interpreta `{{Nombre}}` como token, así que
   una plantilla **no puede** usar `{{` como escape de llave literal en un string interpolado de C#.
   Si necesitas una llave literal, sácala a una constante.
+- **Mermaid dentro de una plantilla:** por el mismo motivo, la forma hexagonal de nodo de Mermaid
+  —`A{{Texto}}`— es sintaxis de token para el motor y no se puede usar en los `README.md.tmpl`.
+  Usa `[ ]`, `([ ])` o `[( )]`. Hay una prueba en `tests/unit/blueprints.test.mjs` que lo vigila.
+- **Alinear en columna dentro de una plantilla no funciona:** el ancho real de cada línea depende
+  del valor de los tokens (`{{Solution}}`, `{{Entity}}`), así que un árbol de carpetas con los
+  comentarios alineados por espacios se descuadra al generarse. Separa con ` — `, no con columnas.
 - **Monarch y la arroba:** dentro de una expresión regular de Monarch, `@@` es el escape de **una**
   arroba literal y `@nombre` es una referencia a un atributo del lenguaje. Para casar dos arrobas
   (la arroba literal de Razor) hay que escribir `@@@@`. Y una referencia `@atributo` usada dentro de

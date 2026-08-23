@@ -143,6 +143,65 @@ describe('coherencia entre blueprints y plantillas', () => {
   }
 });
 
+describe('README didáctico de cada arquitectura', () => {
+  /** Secciones exigidas por el diseño del generador de documentación. */
+  const SECCIONES = [
+    /## 1\. La arquitectura en dos minutos/,
+    /## 2\. Estructura y responsabilidades/,
+    /## 3\. Guía paso a paso/,
+    /## 4\. El ejemplo incluido, explicado/,
+    /## 5\. Comandos útiles y pruebas/,
+    /## 6\. Errores frecuentes/,
+  ];
+
+  for (const id of ARCHITECTURE_IDS) {
+    const blueprint = BLUEPRINTS[id];
+    const file = join(templatesRoot, blueprint.templateDir, 'README.md.tmpl');
+
+    it(`${id}: la plantilla existe y cubre las seis secciones`, () => {
+      const source = readFileSync(file, 'utf8');
+      for (const seccion of SECCIONES) {
+        assert.match(source, seccion, `${id}: falta la sección ${seccion}`);
+      }
+    });
+
+    it(`${id}: incluye diagramas Mermaid de dependencias y de flujo`, () => {
+      const source = readFileSync(file, 'utf8');
+      assert.match(source, /```mermaid\n(flowchart|graph)/, `${id}: sin diagrama de dependencias`);
+      assert.match(source, /```mermaid\nsequenceDiagram/, `${id}: sin diagrama de flujo`);
+      // Mermaid usa {{texto}} para los nodos hexagonales, y el motor lo interpretaría como token.
+      assert.ok(!/\{\{\s*\}\}/.test(source), `${id}: nodo Mermaid ambiguo para el motor de plantillas`);
+    });
+
+    it(`${id}: documenta las reglas de dependencia de cada capa`, () => {
+      const source = readFileSync(file, 'utf8');
+      assert.match(source, /DEBE estar aquí/, `${id}: no dice qué código va en cada capa`);
+      assert.match(source, /TIENE PROHIBIDO estar aquí/, `${id}: no dice qué código NO va en cada capa`);
+
+      const permitidas = source.match(/Dependencias permitidas/g) ?? [];
+      assert.ok(
+        permitidas.length >= 3,
+        `${id}: sólo ${permitidas.length} bloques de dependencias permitidas`,
+      );
+    });
+
+    it(`${id}: la guía paso a paso llega hasta la presentación y cierra con checklist`, () => {
+      const source = readFileSync(file, 'utf8');
+      for (const paso of ['Paso 1 ·', 'Paso 2 ·', 'Paso 3 ·', 'Paso 4 ·', 'Paso 5 ·']) {
+        assert.ok(source.includes(paso), `${id}: falta el ${paso}`);
+      }
+      assert.match(source, /Checklist/i, `${id}: la guía no termina en una lista de verificación`);
+    });
+
+    it(`${id}: los comandos de la CLI de .NET están documentados`, () => {
+      const source = readFileSync(file, 'utf8');
+      for (const comando of ['dotnet restore', 'dotnet build', 'dotnet test', 'dotnet run --project', 'dotnet watch']) {
+        assert.ok(source.includes(comando), `${id}: falta el comando ${comando}`);
+      }
+    });
+  }
+});
+
 describe('cobertura de tokens y flags de las plantillas', () => {
   const context = buildTemplateContext(resolveOptions(baseOptions), 2026);
   const knownTokens = new Set(Object.keys(context.tokens));

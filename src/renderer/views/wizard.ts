@@ -562,6 +562,26 @@ export class WizardView {
       );
     }
 
+    // El README generado es la guía didáctica de la arquitectura elegida: conviene que el usuario
+    // sepa que existe antes de empezar a tocar código.
+    container.appendChild(
+      el(
+        'div',
+        { className: 'notice info', style: { marginTop: '16px' } },
+        icon('markdown', { size: 15 }),
+        el(
+          'div',
+          {},
+          el('strong', { text: 'README.md incluido' }),
+          el('div', {
+            text:
+              'Explica la arquitectura, qué código va en cada capa, cómo añadir una funcionalidad ' +
+              'paso a paso y los comandos de compilación y pruebas.',
+          }),
+        ),
+      ),
+    );
+
     container.appendChild(
       el('h4', { className: 'section-title', style: { marginTop: '18px' }, text: 'Siguientes pasos' }),
     );

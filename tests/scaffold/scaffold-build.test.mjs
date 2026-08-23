@@ -176,6 +176,66 @@ for (const testCase of MATRIX) {
       assert.equal(manifest.projects.length, result.projects.length);
     });
 
+    it('genera un README.md didáctico y coherente con las opciones', () => {
+      assert.ok(result.files.includes('README.md'), 'no se ha generado README.md en la raíz');
+
+      const readme = readFileSync(join(solutionDir, 'README.md'), 'utf8');
+
+      // 1. Introducción y diagrama visual: al menos el de dependencias y el del flujo.
+      const mermaid = readme.match(/```mermaid/g) ?? [];
+      assert.ok(mermaid.length >= 2, `sólo ${mermaid.length} diagramas Mermaid`);
+      assert.match(readme, /```mermaid\r?\n(flowchart|graph)/, 'falta el diagrama de dependencias');
+      assert.match(readme, /```mermaid\r?\n\s*sequenceDiagram/, 'falta el diagrama de flujo');
+
+      // 2. Estructura y responsabilidades, con lo permitido y lo prohibido en cada capa.
+      assert.match(readme, /Estructura y responsabilidades/i);
+      assert.match(readme, /DEBE estar aquí/);
+      assert.match(readme, /TIENE PROHIBIDO estar aquí/);
+      assert.match(readme, /Dependencias permitidas/);
+
+      // 3. Guía paso a paso para añadir una funcionalidad.
+      assert.match(readme, /Paso 1 ·/);
+      assert.match(readme, /Paso 5 ·/);
+      assert.match(readme, /Checklist/i);
+
+      // 4. Explicación del código de ejemplo incluido.
+      assert.match(readme, /El ejemplo incluido, explicado/);
+
+      // 5. Comandos útiles y pruebas.
+      assert.match(readme, /dotnet build/);
+      assert.match(readme, /dotnet restore/);
+
+      // Coherencia con las opciones elegidas.
+      assert.ok(readme.includes('Df'), 'el README no menciona el nombre de la solución');
+      assert.ok(readme.includes(testCase.entity), 'el README no menciona la entidad de ejemplo');
+      assert.ok(readme.includes(testCase.framework ?? 'net9.0'), 'el README no menciona el framework');
+
+      const webProject = result.projects.find((project) => /(WebApi|Adapters\.Web)$/.test(project.name));
+      const blazorProject = result.projects.find((project) => /Blazor$/.test(project.name));
+
+      assert.equal(
+        readme.includes(`dotnet run --project src/${webProject?.name ?? ' '}`),
+        testCase.ui !== 'blazor',
+        'la sección de comandos no coincide con la presentación generada',
+      );
+      assert.equal(
+        readme.includes(`dotnet run --project src/${blazorProject?.name ?? ' '}`),
+        testCase.ui !== 'webapi',
+        'la sección de comandos no coincide con la presentación generada',
+      );
+      assert.equal(readme.includes('dotnet test'), testCase.includeTests, 'dotnet test mal condicionado');
+
+      // Nunca debe hablar de un proyecto que no existe en esta solución.
+      const nombres = new Set(result.projects.map((project) => project.name));
+      for (const candidato of ['Df.WebApi', 'Df.Blazor', 'Df.Adapters.Web', 'Df.Adapters.Blazor', 'Df.UnitTests']) {
+        if (nombres.has(candidato)) continue;
+        assert.ok(
+          !readme.includes(`src/${candidato}/`),
+          `el README documenta ${candidato}, que no se ha generado`,
+        );
+      }
+    });
+
     it('respeta las opciones de presentación y de pruebas', () => {
       const names = result.projects.map((project) => project.name);
       const tieneBlazor = names.some((name) => /Blazor$/.test(name));

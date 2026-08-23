@@ -4,7 +4,7 @@ Bitácora viva de desarrollo. Se actualiza **en cada iteración** del bucle de t
 
 - **Proyecto:** DotForge IDE — distribución de IDE para C# / .NET 9+ / Blazor
 - **Inicio:** 2026-08-23
-- **Estado global:** 🟢 Completado — v1.1.0 empaquetada y verificada
+- **Estado global:** 🟢 Completado — v1.2.0 empaquetada y verificada
 
 Leyenda: `[ ]` pendiente · `[~]` en curso · `[x]` completado y **verificado con un comando**
 
@@ -137,6 +137,19 @@ por tanto **compila** pero no **ejecuta** los proyectos generados. Se añade el 
 - [x] F7.21 Modos de diagnóstico `--ui=` y `--probe=` para revisar la interfaz sin ganchos en producción
 - [x] F7.22 Pruebas de las reglas visuales (anidamiento, iconos, insignias, geometría SVG)
 - [x] F7.23 Compilación de prueba del rediseño: artefactos Windows, verificación y arranque real
+
+### Fase 8 — Documentación didáctica en las soluciones generadas
+- [x] F8.1 Plantilla `README.md.tmpl` propia por arquitectura (clean, hexagonal, ddd)
+- [x] F8.2 Introducción a la arquitectura + diagramas **Mermaid** (dependencias y flujo de una petición)
+- [x] F8.3 Mapa de carpetas proyecto a proyecto con tabla "DEBE / TIENE PROHIBIDO" por capa
+- [x] F8.4 Matriz de la regla de dependencia y dependencias permitidas de cada proyecto
+- [x] F8.5 Guía paso a paso "cómo añadir una funcionalidad" con código real de la arquitectura
+- [x] F8.6 Explicación del CRUD de ejemplo incluido, archivo por archivo
+- [x] F8.7 Sección de comandos: `restore`, `build`, `test`, `run`, `watch`, `ef`, NuGet, URLs y puertos
+- [x] F8.8 Antipatrones frecuentes por arquitectura y cómo evitarlos
+- [x] F8.9 Contenido condicionado a las opciones del wizard (UI, base de datos, pruebas, framework)
+- [x] F8.10 Aviso del README en el resultado del wizard y en la salida de la CLI
+- [x] F8.11 Pruebas: estructura de las plantillas (`tests/unit`) y READMEs generados (`tests/scaffold`)
 
 ---
 
@@ -555,3 +568,112 @@ así que por semver le corresponde subir el segundo número, no el tercero: 1.0.
 
 **Verificado:** `node build/cli.js --version` → `1.1.0`; los tres bundles (`cli`, `scaffold`, `main`)
 contienen el literal inyectado; `npm test` en verde; `verify-dist` reconoce los artefactos nuevos.
+
+### ADR-010 — El README didáctico es una plantilla por arquitectura, no texto generado en código
+**Fecha:** 2026-08-23
+**Contexto:** Cada solución generada debe llevar un `README.md` extenso que enseñe la arquitectura
+elegida. Había tres formas de producirlo.
+**Opciones:**
+- (a) Componerlo en TypeScript a partir de `BlueprintInfo` (capas, patrones, highlights): una sola
+  implementación, pero el texto queda troceado en literales dentro del código y las tres
+  arquitecturas acaban compartiendo una prosa genérica que no enseña nada concreto.
+- (b) Un `README.md.tmpl` común en `_common/` con condicionales por `isClean` / `isHexagonal` /
+  `isDdd`: un único archivo de 2.000 líneas donde el 80% del contenido está dentro de un
+  condicional. Ilegible y muy fácil de romper.
+- (c) Un `README.md.tmpl` por arquitectura, junto a las plantillas de código que documenta.
+**Decisión:** (c). El README vive en `src/scaffold/templates/<arquitectura>/README.md.tmpl`.
+**Consecuencias:** el documento puede hablar de archivos, clases y namespaces reales de esa
+arquitectura —`IManage{{EntityPlural}}` en hexagonal, `IDispatcher` en DDD, `I{{Entity}}Service` en
+clean—, que es justo lo que lo hace didáctico. A cambio hay contenido repetido entre los tres
+(sección de comandos, gestión de paquetes), que se acepta: son tres documentos independientes y
+cada uno debe poder leerse solo. La coherencia entre ellos la vigilan las pruebas de
+`tests/unit/blueprints.test.mjs`, que exigen las mismas seis secciones en los tres.
+
+### ADR-011 — Los diagramas se escriben en Mermaid, no en ASCII ni como imagen
+**Fecha:** 2026-08-23
+**Contexto:** El README necesita un diagrama de dependencias entre capas y otro del recorrido de
+una petición.
+**Opciones:** (a) ASCII art, (b) una imagen SVG/PNG generada, (c) Mermaid embebido en el Markdown.
+**Decisión:** (c) Mermaid. Lo renderizan GitHub, GitLab, Azure DevOps y los previsualizadores de
+Markdown más habituales; sigue siendo legible como texto plano si no hay renderizador; y viaja
+dentro del propio archivo, sin binarios que versionar.
+**Consecuencias:** hay una trampa que documentar (ver la bitácora de la iteración 7): la forma
+hexagonal de Mermaid se escribe con dobles llaves, que es exactamente la sintaxis de token del
+motor de plantillas. Las plantillas no pueden usar esa forma de nodo, y hay una prueba que lo
+comprueba.
+
+---
+
+### Iteración 7 — 2026-08-23 — README didáctico por arquitectura
+**Objetivo:** que toda solución generada por el wizard lleve en su raíz un `README.md` que enseñe
+la arquitectura elegida: qué es, qué código va en cada capa, qué código tiene prohibido estar ahí,
+cómo añadir una funcionalidad paso a paso, qué trae el ejemplo incluido y con qué comandos se
+compila, se prueba y se ejecuta.
+
+**Hecho:**
+- Tres plantillas nuevas: `templates/clean/README.md.tmpl` (780 líneas),
+  `templates/hexagonal/README.md.tmpl` (734) y `templates/ddd/README.md.tmpl` (863). Se emiten como
+  cualquier otra plantilla, así que el filtro `includeFile` y el motor de condicionales funcionan
+  sin tocar el generador.
+- Seis secciones fijas en las tres: introducción y diagramas, estructura y responsabilidades, guía
+  paso a paso, ejemplo incluido, comandos, y antipatrones.
+- Dos diagramas Mermaid por arquitectura: uno de dependencias entre proyectos (con los proyectos de
+  presentación condicionados a lo que el usuario haya pedido) y una secuencia del recorrido de una
+  petición de alta, desde el cliente hasta la base de datos.
+- Tabla "✅ DEBE estar aquí / ❌ TIENE PROHIBIDO estar aquí" por cada proyecto, más la matriz
+  completa de la regla de dependencia y las dependencias permitidas de cada uno.
+- Guía paso a paso con un caso de uso real y distinto en cada arquitectura, con el código C# que
+  hay que escribir en cada paso: descatalogar la entidad de ejemplo (clean y DDD, este último con evento de
+  dominio) y reservar unidades (hexagonal, con puerto de salida nuevo). Termina en una checklist.
+- Todo el contenido está condicionado a las opciones del wizard: presentación (`hasWebApi`,
+  `hasBlazor`, `hasBoth`), pruebas (`hasTests`), base de datos (`useSqlite`, `useInMemory`) y
+  framework. Una solución sólo API no documenta Blazor, y una sin pruebas no habla de `dotnet test`.
+- Los puertos reales de la solución (`ApiHttpsPort`, `BlazorHttpsPort`) aparecen en las URLs, así
+  que las direcciones del README son las que de verdad abre `dotnet run`.
+- El resultado del wizard (`src/renderer/views/wizard.ts`) y la salida de la CLI
+  (`src/cli/index.ts`) avisan de que el README existe y qué contiene.
+- Pruebas nuevas: 15 en `tests/unit/blueprints.test.mjs` (secciones obligatorias, diagramas,
+  reglas de dependencia, pasos de la guía, comandos) y una por cada caso de la matriz en
+  `tests/scaffold/scaffold-build.test.mjs`, que valida el README **generado**: dos diagramas
+  Mermaid, secciones, coherencia con las opciones y que no documente un proyecto que no existe.
+
+**Errores encontrados:**
+- *Síntoma:* el árbol de carpetas del README salía descuadrado: los comentarios estaban alineados
+  en columna y, al sustituir `{{Solution}}` por `Ac.Shop` y `{{Entity}}` por `Product`, cada línea
+  cambiaba de ancho.
+  *Causa raíz:* alinear con espacios asume un ancho que sólo se conoce en tiempo de render.
+  *Arreglo:* el comentario se separa con ` — ` en vez de con una columna de espacios. Nunca se
+  descuadra, sea cual sea el nombre de la solución.
+- *Síntoma:* líneas en blanco sueltas dentro del árbol, justo antes de cada proyecto opcional.
+  *Causa raíz:* una línea que sólo contiene `{{#if}}` deja su salto de línea al desaparecer, y las
+  líneas de relleno `│   │` del árbol se sumaban a ese hueco.
+  *Arreglo:* las líneas de relleno se dejan vacías y `normalizeOutput` colapsa los saltos
+  sobrantes; el hueco pasa a ser un separador visual coherente entre proyectos.
+- *Síntoma:* la herramienta de escritura guardó las tres plantillas en CRLF, contra la convención
+  del repositorio (LF). *Arreglo:* normalizadas con `tr -d '\r'` y verificadas leyendo los bytes,
+  no confiando en `grep`. Es la trampa ya documentada en `CLAUDE.md`; ha vuelto a aparecer.
+- *Síntoma:* con `--ui blazor`, el encabezado del README anunciaba la ruta `/api/products` y el
+  diagrama de secuencia empezaba con un `POST` HTTP, en una solución sin Web API.
+  *Causa raíz:* dos frases sueltas fuera de los condicionales de presentación.
+  *Arreglo:* condicionadas; ahora esa variante habla de la página `/products`. La prueba de la
+  matriz comprueba que el README no mencione ningún proyecto que no se haya generado.
+- *Trampa nueva (anotada en `CLAUDE.md`):* en Mermaid, `A{{Texto}}` es un nodo hexagonal, y el
+  motor de plantillas lo interpretaría como un token. Las plantillas no pueden usar esa forma de
+  nodo; hay una prueba que lo verifica.
+
+**Verificado:** `npm run build` (157 plantillas), `npm test` en verde de punta a punta, y
+generación real de las tres arquitecturas más las variantes `--ui webapi --no-tests --db inmemory`
+y `--ui blazor`, revisando el Markdown resultante.
+
+### Iteración 8 — 2026-08-23 — v1.2.0
+El README didáctico es funcionalidad nueva de las soluciones generadas y no rompe nada de lo
+anterior, así que por semver le corresponde el segundo número: 1.1.0 → **1.2.0**.
+
+**Hecho:**
+- `1.2.0` en `package.json`, que por ADR-009 es la única fuente: los bundles reciben el valor por
+  `define` de esbuild y el manifiesto `dotforge.json` de cada solución lo hereda.
+- Nombres de artefacto actualizados en `README.md` (electron-builder los compone con `${version}`,
+  así que `electron-builder.yml` no se toca).
+
+**Verificado:** `node build/cli.js --version` → `1.2.0`; el literal inyectado aparece en los
+bundles `cli`, `scaffold` y `main`; `npm test` en verde.

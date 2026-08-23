@@ -1,0 +1,861 @@
+# {{Solution}}
+
+> Solución **Domain-Driven Design + CQRS** generada con **DotForge IDE**.
+> Este documento explica el modelo táctico que tienes delante: agregados, objetos de valor,
+> eventos de dominio, comandos y consultas separados, y un despachador propio con pipeline de
+> comportamientos. También explica dónde va cada cosa y cómo añadir un caso de uso nuevo.
+
+| | |
+|---|---|
+| **Arquitectura** | Domain-Driven Design (táctico) + CQRS |
+| **Framework objetivo** | `{{Framework}}` |
+| **Presentación** | {{#if hasBoth}}Web API minimal + Blazor interactivo{{else}}{{#if hasWebApi}}Web API minimal{{/if}}{{#if hasBlazor}}Blazor Server interactivo{{/if}}{{/if}} |
+| **Persistencia** | EF Core sobre `{{DbProvider}}` |
+| **Agregado de ejemplo** | `{{Entity}}` (plural `{{EntityPlural}}`, {{#if hasWebApi}}ruta `/api/{{entityRoute}}`{{else}}página `/{{entityRoute}}`{{/if}}) |
+| **Despachador** | `IDispatcher` propio, sin MediatR (licencia comercial) |
+| **Pruebas** | {{#if hasTests}}xUnit en `tests/{{Solution}}.UnitTests`{{else}}no generadas (`--no-tests`){{/if}} |
+
+---
+
+## Índice
+
+1. [La arquitectura en dos minutos](#1-la-arquitectura-en-dos-minutos)
+2. [Estructura y responsabilidades: qué va en cada proyecto](#2-estructura-y-responsabilidades-qué-va-en-cada-proyecto)
+3. [Guía paso a paso: cómo añadir un caso de uso](#3-guía-paso-a-paso-cómo-añadir-un-caso-de-uso)
+4. [El ejemplo incluido, explicado](#4-el-ejemplo-incluido-explicado)
+5. [Comandos útiles y pruebas](#5-comandos-útiles-y-pruebas)
+6. [Errores frecuentes y cómo evitarlos](#6-errores-frecuentes-y-cómo-evitarlos)
+
+---
+
+## 1. La arquitectura en dos minutos
+
+**Domain-Driven Design** pone el modelo de negocio en el centro y le da un vocabulario preciso.
+Los bloques tácticos que usa esta solución son cinco:
+
+| Bloque | Qué es | Aquí |
+|---|---|---|
+| **Entidad** | Tiene identidad propia y ciclo de vida | `Entity` (SharedKernel) |
+| **Raíz de agregado** | Frontera de consistencia: todo cambio entra por ella | `{{Entity}} : AggregateRoot` |
+| **Objeto de valor** | Sin identidad, inmutable, igualdad por valor | `Money`, `Sku` |
+| **Evento de dominio** | Un hecho que ya ha ocurrido, en pasado | `{{Entity}}RegisteredDomainEvent` |
+| **Repositorio** | Colección de agregados; se define **en el dominio** | `I{{Entity}}Repository` |
+
+**CQRS** (*Command Query Responsibility Segregation*) añade una segunda idea: **escribir y leer
+son problemas distintos**, así que se modelan por separado.
+
+| | **Comando** | **Consulta** |
+|---|---|---|
+| Intención | Cambiar el estado | Obtener datos |
+| Puede fallar por reglas | Sí (y devuelve `Result`) | Sólo por no encontrar |
+| Efectos secundarios | Sí | **Nunca** |
+| Pasa por el agregado | Sí, siempre | No: puede leer directo y proyectar |
+| Nombre | Imperativo: `Register{{Entity}}Command` | Descriptivo: `List{{EntityPlural}}Query` |
+
+Y la regla que ordena todo lo demás:
+
+> **Todo cambio de estado entra por la raíz del agregado.** Nadie modifica una propiedad desde
+> fuera; se invoca un método con nombre de negocio que valida las invariantes y **registra el
+> evento** correspondiente.
+
+### Qué te llevas a cambio
+
+| Beneficio | Por qué ocurre aquí |
+|---|---|
+| **Desacoplamiento** | La presentación sólo conoce `IDispatcher` y mensajes. No conoce ni un handler, ni un repositorio, ni una regla. |
+| **Testeabilidad** | Un handler se prueba con dobles del repositorio, del reloj y de la unidad de trabajo. El agregado se prueba sin nada más. |
+| **Mantenibilidad** | Un caso de uso = un archivo con su comando, su validador y su handler. Se lee de arriba abajo. |
+| **Extensibilidad sin tocar lo existente** | Los handlers se descubren por reflexión: añadir un caso de uso es añadir una clase, sin registrar nada a mano. |
+| **Transversalidad limpia** | Logging y validación viven en el pipeline (`IPipelineBehavior`), no repetidos en cada handler. |
+| **Trazabilidad del negocio** | Los eventos de dominio dejan por escrito qué ocurrió y permiten reaccionar sin acoplar. |
+
+### Diagrama de dependencias
+
+Las flechas se leen **"depende de" / "compila contra"**.
+
+```mermaid
+flowchart TD
+    subgraph PRES["Presentación (raíz de composición)"]
+{{#if hasWebApi}}
+        API["{{Solution}}.WebApi<br/>endpoints que sólo despachan mensajes"]
+{{/if}}
+{{#if hasBlazor}}
+        BLZ["{{Solution}}.Blazor<br/>componentes interactivos"]
+{{/if}}
+    end
+
+    subgraph INFRA["Infrastructure (detalles)"]
+        INF["{{Solution}}.Infrastructure<br/>EF Core · repositorios · UnitOfWork<br/>publicador de eventos · reloj"]
+    end
+
+    subgraph APP["Application (casos de uso · CQRS)"]
+        DISP["Dispatcher + IPipelineBehavior<br/>logging · validación"]
+        CMD["Commands<br/>Register · Amend · Withdraw"]
+        QRY["Queries<br/>List · GetById"]
+        EVH["EventHandlers<br/>reacciones a eventos de dominio"]
+    end
+
+    subgraph DOM["Domain (el modelo)"]
+        AGG["{{Entity}} (raíz de agregado)<br/>Sku · Money · eventos"]
+        REPO["I{{Entity}}Repository<br/>definido por el dominio"]
+    end
+
+    subgraph SK["SharedKernel"]
+        KER["AggregateRoot · Entity · ValueObject<br/>IDomainEvent · Result · DomainException"]
+    end
+
+{{#if hasWebApi}}
+    API --> DISP
+    API -. "sólo para registrar servicios" .-> INF
+{{/if}}
+{{#if hasBlazor}}
+    BLZ --> DISP
+    BLZ -. "sólo para registrar servicios" .-> INF
+{{/if}}
+    DISP --> CMD
+    DISP --> QRY
+    DISP --> EVH
+    CMD --> AGG
+    CMD --> REPO
+    QRY --> REPO
+    EVH --> AGG
+    INF --> REPO
+    INF --> CMD
+    AGG --> KER
+    CMD --> KER
+    INF --> KER
+```
+
+### Recorrido de un comando
+
+```mermaid
+sequenceDiagram
+    autonumber
+{{#if hasWebApi}}
+    participant C as Cliente HTTP
+    participant E as {{Entity}}Endpoints
+{{/if}}
+{{#unless hasWebApi}}
+    participant C as Navegador
+    participant E as {{EntityPlural}}.razor
+{{/unless}}
+    participant D as IDispatcher
+    participant B as Pipeline<br/>logging + validación
+    participant H as Register{{Entity}}Handler
+    participant A as {{Entity}} (agregado)
+    participant U as IUnitOfWork
+    participant P as Manejadores de eventos
+
+{{#if hasWebApi}}
+    C->>E: POST /api/{{entityRoute}}
+{{/if}}
+{{#unless hasWebApi}}
+    C->>E: alta desde /{{entityRoute}}
+{{/unless}}
+    E->>D: SendAsync(Register{{Entity}}Command)
+    D->>B: envuelve el handler
+    B->>B: valida forma del comando
+    B->>H: HandleAsync(command)
+    H->>A: {{Entity}}.Register(...)
+    Note over A: valida invariantes<br/>y registra {{Entity}}RegisteredDomainEvent
+    H->>U: SaveChangesAsync()
+    U->>P: publica los eventos acumulados
+    H-->>E: Result&lt;{{Entity}}Response&gt;
+    E-->>C: 201 Created / 400 / 409
+```
+
+La presentación no conoce `Register{{Entity}}Handler`. Sólo construye un mensaje y lo despacha:
+por eso **añadir un caso de uso no obliga a tocar la capa web**.
+
+---
+
+## 2. Estructura y responsabilidades: qué va en cada proyecto
+
+```text
+{{Solution}}/
+├── {{Solution}}.sln
+├── Directory.Build.props — Propiedades comunes: TargetFramework, Nullable, ImplicitUsings
+├── Directory.Packages.props — Versiones centralizadas de NuGet
+├── dotforge.json — Manifiesto: opciones con las que DotForge generó la solución
+├── README.md — Este documento
+├── src/
+│   ├── {{Solution}}.SharedKernel/ — bloques tácticos reutilizables
+│   │   ├── Entity.cs — Identidad e igualdad por Id
+│   │   ├── AggregateRoot.cs — Entidad + acumulación de eventos de dominio
+│   │   ├── ValueObject.cs — Igualdad estructural por componentes
+│   │   ├── IDomainEvent.cs — Contrato de evento (+ IDomainEventHandler)
+│   │   ├── Result.cs — Éxito o error explícito (Error, ErrorType)
+│   │   └── DomainException.cs — Violación de una invariante
+
+│   ├── {{Solution}}.Domain/ — el modelo de negocio
+│   │   └── {{EntityPlural}}/
+│   │       ├── {{Entity}}.cs — RAÍZ DE AGREGADO con sus invariantes
+│   │       ├── Sku.cs — Objeto de valor: identificador de catálogo
+│   │       ├── Money.cs — Objeto de valor: importe + moneda
+│   │       ├── Events/{{Entity}}Events.cs — Hechos del dominio, en pasado
+│   │       └── I{{Entity}}Repository.cs — Repositorio: lo define el DOMINIO
+
+│   ├── {{Solution}}.Application/ — casos de uso (CQRS)
+│   │   ├── Abstractions/Messaging.cs — ICommand, IQuery, handlers, IDispatcher, IPipelineBehavior, IValidator, IUnitOfWork, IDateTimeProvider
+│   │   ├── Dispatching/Dispatcher.cs — Resuelve el handler y encadena el pipeline
+│   │   ├── Behaviors/
+│   │   │   ├── LoggingBehavior.cs — Traza cada mensaje y su duración
+│   │   │   └── ValidationBehavior.cs — Ejecuta los IValidator antes del handler
+│   │   ├── {{EntityPlural}}/
+│   │   │   ├── Commands/ — Register · Amend · Withdraw (+ validador + handler)
+│   │   │   ├── Queries/{{Entity}}Queries.cs — List · GetById (+ handlers)
+│   │   │   ├── EventHandlers/ — Reacciones a los eventos de dominio
+│   │   │   └── {{Entity}}Response.cs — DTO de salida
+│   │   └── DependencyInjection.cs — AddApplication(): registro por reflexión
+
+│   ├── {{Solution}}.Infrastructure/ — detalles reemplazables
+│   │   ├── Persistence/
+│   │   │   ├── AppDbContext.cs — DbContext de EF Core
+│   │   │   ├── Configurations/ — Mapeo del agregado y sus objetos de valor
+│   │   │   ├── Repositories/ — Implementación de I{{Entity}}Repository
+│   │   │   ├── UnitOfWork.cs — Guarda y **publica los eventos acumulados**
+│   │   │   └── DatabaseInitializer.cs — Esquema + datos de ejemplo
+│   │   ├── Events/DomainEventPublisher.cs — Entrega cada evento a sus manejadores
+│   │   ├── Time/DateTimeProvider.cs — Implementación de IDateTimeProvider
+│   │   └── DependencyInjection.cs — AddInfrastructure()
+{{#if hasWebApi}}
+
+│   ├── {{Solution}}.WebApi/ — presentación HTTP
+│   │   ├── Endpoints/{{Entity}}Endpoints.cs — Construyen mensajes y los despachan
+│   │   ├── Extensions/ResultExtensions.cs — Result → 200/201/204/400/404/409
+│   │   ├── Program.cs — RAÍZ DE COMPOSICIÓN
+│   │   └── appsettings*.json — Configuración y cadena de conexión
+{{/if}}
+{{#if hasBlazor}}
+
+│   └── {{Solution}}.Blazor/ — presentación interactiva
+│       ├── Components/Pages/{{EntityPlural}}.razor — Listado + alta despachando mensajes
+│       ├── Program.cs — RAÍZ DE COMPOSICIÓN
+│       └── wwwroot/app.css — Estilos
+{{/if}}
+{{#if hasTests}}
+
+└── tests/
+    └── {{Solution}}.UnitTests/
+        ├── Domain/{{Entity}}AggregateTests.cs — Invariantes y eventos del agregado
+        ├── Application/{{Entity}}HandlerTests.cs — Handlers de comando y consulta con dobles
+        └── Fakes/Doubles.cs — Repositorio, unidad de trabajo y reloj de prueba
+{{/if}}
+```
+
+### 2.1 `{{Solution}}.SharedKernel` — el vocabulario común
+
+| ✅ DEBE estar aquí | ❌ TIENE PROHIBIDO estar aquí |
+|---|---|
+| Clases base tácticas: `Entity`, `AggregateRoot`, `ValueObject` | Reglas de un negocio concreto |
+| Contratos de evento (`IDomainEvent`, `IDomainEventHandler`) | Cualquier tecnología: EF Core, ASP.NET, HTTP |
+| `Result`, `Error`, `ErrorType` | Referencias a `Domain`, `Application` o `Infrastructure` |
+| `DomainException` | Tipos que sólo use un agregado |
+
+**Dependencias permitidas:** ninguna. Si un día tienes varios contextos delimitados, este proyecto
+es lo único que compartirán.
+
+### 2.2 `{{Solution}}.Domain` — el modelo
+
+| ✅ DEBE estar aquí | ❌ TIENE PROHIBIDO estar aquí |
+|---|---|
+| La raíz de agregado con métodos de negocio (`Register`, `Reprice`, `AdjustStock`) | `using Microsoft.EntityFrameworkCore` o atributos de EF |
+| Objetos de valor (`Sku`, `Money`) con su validación | `DbContext`, SQL, `DbSet`, cadenas de conexión |
+| Eventos de dominio, en **pasado** (`{{Entity}}RegisteredDomainEvent`) | Comandos y consultas (son de `Application`) |
+| **La interfaz del repositorio** del agregado | La implementación del repositorio |
+| Invariantes y factorías (`{{Entity}}.Register`) | `DateTimeOffset.UtcNow` (la hora llega como parámetro) |
+| Servicios de dominio, si una regla no cabe en un agregado | Orquestación entre agregados (eso es un caso de uso) |
+
+**Dependencias permitidas:** `{{Solution}}.SharedKernel`.
+
+> **Por qué el repositorio se declara aquí y no en `Application`:** en DDD el repositorio es parte
+> del lenguaje del dominio — "la colección de {{EntityPlural}}" —, no un detalle de orquestación.
+> La implementación, en cambio, es infraestructura pura.
+
+### 2.3 `{{Solution}}.Application` — los casos de uso
+
+| ✅ DEBE estar aquí | ❌ TIENE PROHIBIDO estar aquí |
+|---|---|
+| Comandos, consultas y sus handlers | Implementaciones de persistencia |
+| Validadores de **forma** del mensaje (`IValidator`) | Invariantes de negocio (van en el agregado) |
+| Comportamientos del pipeline (logging, validación, transacciones) | `DbContext`, EF Core, HttpClient |
+| Manejadores de eventos de dominio | Tipos de ASP.NET (`Results`, `IResult`) |
+| DTOs de salida (`{{Entity}}Response`) | Devolver la entidad de dominio hacia fuera |
+| Abstracciones que la aplicación necesita (`IUnitOfWork`, `IDateTimeProvider`) | `throw` como control de flujo esperado (usa `Result`) |
+
+**Dependencias permitidas:** `{{Solution}}.Domain` y `{{Solution}}.SharedKernel`.
+
+> **Validador vs invariante:** el validador comprueba que el mensaje **tiene sentido como
+> mensaje** ("el nombre no viene vacío"); el agregado comprueba que el sistema **queda en un
+> estado válido** ("el stock no puede quedar negativo"). No dupliques la segunda en el primero.
+
+### 2.4 `{{Solution}}.Infrastructure` — los detalles
+
+| ✅ DEBE estar aquí | ❌ TIENE PROHIBIDO estar aquí |
+|---|---|
+| `AppDbContext`, configuraciones y migraciones | Reglas de negocio o de aplicación |
+| Implementación de `I{{Entity}}Repository` | Interfaces que el dominio debería declarar |
+| `UnitOfWork` (guarda y publica eventos) y `DomainEventPublisher` | Decisiones de caso de uso |
+| `DateTimeProvider`, clientes HTTP, correo, colas | Tipos que la presentación deba conocer directamente |
+| `AddInfrastructure()` | Lógica que no se pueda sustituir por un doble en pruebas |
+
+**Dependencias permitidas:** `Application`, `Domain` y `SharedKernel`.
+
+### 2.5 Presentación
+
+| ✅ DEBE estar aquí | ❌ TIENE PROHIBIDO estar aquí |
+|---|---|
+| Endpoints{{#if hasBlazor}} y componentes `.razor`{{/if}} que **construyen y despachan mensajes** | Referencias a handlers concretos |
+| Mapeo `Result` → HTTP{{#if hasBlazor}} / mensaje en pantalla{{/if}} | Consultas LINQ contra `DbContext` |
+| Binding, rutas, `ProblemDetails`, OpenAPI, Serilog | Reglas de negocio o de aplicación |
+| `Program.cs`: `AddApplication()` + `AddInfrastructure()` | Instanciar repositorios o agregados a mano |
+
+**Dependencias permitidas:** `Application` e `Infrastructure` (**sólo** para registrar servicios).
+
+### 2.6 Tabla resumen de la regla de dependencia
+
+| Desde ↓ / Hacia → | SharedKernel | Domain | Application | Infrastructure | Presentación |
+|---|---|---|---|---|---|
+| **SharedKernel** | — | ❌ | ❌ | ❌ | ❌ |
+| **Domain** | ✅ | — | ❌ | ❌ | ❌ |
+| **Application** | ✅ | ✅ | — | ❌ | ❌ |
+| **Infrastructure** | ✅ | ✅ | ✅ | — | ❌ |
+| **Presentación** | ✅ | ✅ | ✅ | ⚠️ sólo en `Program.cs` | — |
+
+---
+
+## 3. Guía paso a paso: cómo añadir un caso de uso
+
+Caso real y completo: **"descatalogar un {{entity}}"** — retirarlo del catálogo dejando
+constancia del motivo, publicando un evento para que otras partes puedan reaccionar.
+
+El orden es siempre **de dentro hacia fuera**: agregado → evento → repositorio → comando →
+handler → persistencia → endpoint.
+
+### Paso 1 · Domain — el evento y el método del agregado
+
+`src/{{Solution}}.Domain/{{EntityPlural}}/Events/{{Entity}}Events.cs`
+
+```csharp
+public sealed record {{Entity}}DiscontinuedDomainEvent(
+    Guid {{Entity}}Id,
+    string Sku,
+    string Reason,
+    DateTimeOffset OccurredOnUtc) : IDomainEvent;
+```
+
+Los eventos se nombran **en pasado**: describen algo que ya pasó y es inmutable.
+
+`src/{{Solution}}.Domain/{{EntityPlural}}/{{Entity}}.cs`
+
+```csharp
+public DateTimeOffset? DiscontinuedAtUtc { get; private set; }
+
+public string? DiscontinuedReason { get; private set; }
+
+public bool IsDiscontinued => DiscontinuedAtUtc is not null;
+
+/// <summary>Descataloga el {{entity}}: valida la invariante y registra el hecho.</summary>
+public void Discontinue(string reason, DateTimeOffset nowUtc)
+{
+    DomainException.ThrowIf(string.IsNullOrWhiteSpace(reason), "El motivo es obligatorio.");
+    DomainException.ThrowIf(IsDiscontinued, "El {{entity}} ya estaba descatalogado.");
+
+    DiscontinuedAtUtc = nowUtc;
+    DiscontinuedReason = reason.Trim();
+    UpdatedAtUtc = nowUtc;
+
+    Raise(new {{Entity}}DiscontinuedDomainEvent(Id, Sku.Value, DiscontinuedReason, nowUtc));
+}
+```
+
+Tres detalles no negociables:
+
+1. **Setters privados.** El agregado es la única puerta de entrada al cambio.
+2. **`Raise(...)` dentro del método**, no en el handler: el evento es parte del hecho de negocio.
+3. **La hora entra como parámetro.** El dominio no llama al reloj.
+
+### Paso 2 · Domain — amplía el repositorio si hace falta
+
+`src/{{Solution}}.Domain/{{EntityPlural}}/I{{Entity}}Repository.cs`
+
+```csharp
+Task<IReadOnlyList<{{Entity}}>> ListDiscontinuedAsync(CancellationToken cancellationToken = default);
+```
+
+Un repositorio devuelve **agregados completos**, no proyecciones sueltas. Si sólo necesitas leer
+para pintar una pantalla, es una consulta (paso 4), no un método de repositorio.
+
+### Paso 3 · Application — el comando, su validador y su handler
+
+Un caso de uso = **un archivo**. Crea
+`src/{{Solution}}.Application/{{EntityPlural}}/Commands/Discontinue{{Entity}}.cs`:
+
+```csharp
+namespace {{Solution}}.Application.{{EntityPlural}}.Commands;
+
+using {{Solution}}.Application.Abstractions;
+using {{Solution}}.Domain.{{EntityPlural}};
+using {{Solution}}.SharedKernel;
+
+public sealed record Discontinue{{Entity}}Command(Guid Id, string Reason) : ICommand<{{Entity}}Response>;
+
+/// <summary>Validación de forma. Las invariantes las impone el agregado.</summary>
+public sealed class Discontinue{{Entity}}Validator : IValidator<Discontinue{{Entity}}Command>
+{
+    public IEnumerable<string> Validate(Discontinue{{Entity}}Command request)
+    {
+        if (request.Id == Guid.Empty) yield return "El identificador es obligatorio.";
+        if (string.IsNullOrWhiteSpace(request.Reason)) yield return "El motivo es obligatorio.";
+    }
+}
+
+public sealed class Discontinue{{Entity}}Handler : ICommandHandler<Discontinue{{Entity}}Command, {{Entity}}Response>
+{
+    private readonly I{{Entity}}Repository _repository;
+    private readonly IUnitOfWork _unitOfWork;
+    private readonly IDateTimeProvider _clock;
+
+    public Discontinue{{Entity}}Handler(
+        I{{Entity}}Repository repository,
+        IUnitOfWork unitOfWork,
+        IDateTimeProvider clock)
+    {
+        _repository = repository;
+        _unitOfWork = unitOfWork;
+        _clock = clock;
+    }
+
+    public async Task<Result<{{Entity}}Response>> HandleAsync(
+        Discontinue{{Entity}}Command command,
+        CancellationToken cancellationToken = default)
+    {
+        var {{entity}} = await _repository.GetByIdAsync(command.Id, cancellationToken);
+        if ({{entity}} is null)
+        {
+            return Result.Failure<{{Entity}}Response>(Error.NotFound($"el {{entity}} {command.Id}"));
+        }
+
+        try
+        {
+            {{entity}}.Discontinue(command.Reason, _clock.UtcNow);
+
+            // Al confirmar, la unidad de trabajo publica los eventos que el agregado acumuló.
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            return Result.Success({{Entity}}Response.From({{entity}}));
+        }
+        catch (DomainException ex)
+        {
+            return Result.Failure<{{Entity}}Response>(Error.Validation(ex.Message));
+        }
+    }
+}
+```
+
+**No hay que registrar nada:** `AddApplication()` descubre por reflexión el handler y el validador
+sobre el ensamblado de `Application`.
+
+### Paso 4 · Application — la consulta, si hace falta leer
+
+`src/{{Solution}}.Application/{{EntityPlural}}/Queries/{{Entity}}Queries.cs`
+
+```csharp
+public sealed record ListDiscontinued{{EntityPlural}}Query() : IQuery<IReadOnlyList<{{Entity}}Response>>;
+
+public sealed class ListDiscontinued{{EntityPlural}}Handler
+    : IQueryHandler<ListDiscontinued{{EntityPlural}}Query, IReadOnlyList<{{Entity}}Response>>
+{
+    private readonly I{{Entity}}Repository _repository;
+
+    public ListDiscontinued{{EntityPlural}}Handler(I{{Entity}}Repository repository) => _repository = repository;
+
+    public async Task<Result<IReadOnlyList<{{Entity}}Response>>> HandleAsync(
+        ListDiscontinued{{EntityPlural}}Query query,
+        CancellationToken cancellationToken = default)
+    {
+        var found = await _repository.ListDiscontinuedAsync(cancellationToken);
+        return Result.Success<IReadOnlyList<{{Entity}}Response>>(found.Select({{Entity}}Response.From).ToList());
+    }
+}
+```
+
+Una consulta **no** cambia estado, **no** publica eventos y **no** necesita `IUnitOfWork`. Si tu
+consulta llama a `SaveChangesAsync`, es un comando disfrazado.
+
+### Paso 5 · Application — reacciona al evento (opcional)
+
+`src/{{Solution}}.Application/{{EntityPlural}}/EventHandlers/{{Entity}}EventHandlers.cs`
+
+```csharp
+public sealed class {{Entity}}DiscontinuedHandler : IDomainEventHandler<{{Entity}}DiscontinuedDomainEvent>
+{
+    private readonly ILogger<{{Entity}}DiscontinuedHandler> _logger;
+
+    public {{Entity}}DiscontinuedHandler(ILogger<{{Entity}}DiscontinuedHandler> logger) => _logger = logger;
+
+    public Task HandleAsync({{Entity}}DiscontinuedDomainEvent domainEvent, CancellationToken cancellationToken = default)
+    {
+        _logger.LogWarning("{{Entity}} {Id} descatalogado: {Reason}", domainEvent.{{Entity}}Id, domainEvent.Reason);
+        return Task.CompletedTask;
+    }
+}
+```
+
+Aquí es donde se enganchan efectos secundarios (avisar a otro contexto, invalidar una caché,
+mandar un correo) **sin acoplar** el caso de uso original a ellos.
+
+### Paso 6 · Infrastructure — persistencia
+
+`src/{{Solution}}.Infrastructure/Persistence/Configurations/{{Entity}}Configuration.cs`
+
+```csharp
+builder.Property(x => x.DiscontinuedReason).HasMaxLength(200);
+builder.HasIndex(x => x.DiscontinuedAtUtc);
+```
+
+E implementa el método nuevo del repositorio en
+`src/{{Solution}}.Infrastructure/Persistence/Repositories/{{Entity}}Repository.cs`.
+
+{{#if useSqlite}}
+```bash
+dotnet ef migrations add Discontinue{{Entity}} --project src/{{Solution}}.Infrastructure --startup-project src/{{Solution}}.{{#if hasWebApi}}WebApi{{else}}Blazor{{/if}}
+```
+{{/if}}
+{{#if useInMemory}}
+Con el proveedor en memoria no hay migraciones: el esquema se deduce del modelo en cada arranque.
+{{/if}}
+
+### Paso 7 · Presentación — expón el caso de uso
+
+{{#if hasWebApi}}
+`src/{{Solution}}.WebApi/Endpoints/{{Entity}}Endpoints.cs`
+
+```csharp
+group.MapPost("/{id:guid}/discontinue", async (
+        Guid id,
+        Discontinue{{Entity}}Body body,
+        IDispatcher dispatcher,
+        CancellationToken cancellationToken) =>
+    (await dispatcher.SendAsync(new Discontinue{{Entity}}Command(id, body.Reason), cancellationToken))
+        .ToHttpResult())
+    .WithName("Discontinue{{Entity}}")
+    .WithSummary("Descataloga un {{entity}} sin borrarlo.");
+
+// Al final del archivo:
+public sealed record Discontinue{{Entity}}Body(string Reason);
+```
+
+El endpoint no conoce el handler: construye el mensaje y lo despacha. Ésa es la razón de ser del
+dispatcher.
+{{/if}}
+{{#if hasBlazor}}
+
+`src/{{Solution}}.Blazor/Components/Pages/{{EntityPlural}}.razor`
+
+```razor
+@inject IDispatcher Dispatcher
+
+<button class="danger" @onclick="() => DiscontinueAsync(item.Id)">Descatalogar</button>
+
+@code {
+    private async Task DiscontinueAsync(Guid id)
+    {
+        var result = await Dispatcher.SendAsync(new Discontinue{{Entity}}Command(id, "Retirado desde el panel"));
+        if (result.IsFailure) { _error = result.Error.Message; return; }
+        await ReloadAsync();
+    }
+}
+```
+{{/if}}
+
+{{#if hasTests}}
+### Paso 8 · Pruebas — agregado y handler
+
+`tests/{{Solution}}.UnitTests/Domain/{{Entity}}AggregateTests.cs`
+
+```csharp
+[Fact]
+public void Discontinue_registra_el_evento_de_dominio()
+{
+    var {{entity}} = {{Entity}}.Register("Teclado", "KB-1", 10m, 5, DateTimeOffset.UnixEpoch);
+
+    {{entity}}.Discontinue("Fin de vida", DateTimeOffset.UnixEpoch);
+
+    Assert.Contains({{entity}}.DomainEvents, e => e is {{Entity}}DiscontinuedDomainEvent);
+}
+```
+
+`tests/{{Solution}}.UnitTests/Application/{{Entity}}HandlerTests.cs`
+
+```csharp
+[Fact]
+public async Task Discontinue_devuelve_NotFound_si_no_existe()
+{
+    var sut = CreateSut();
+
+    var result = await sut.Handler.HandleAsync(new Discontinue{{Entity}}Command(Guid.NewGuid(), "motivo"));
+
+    Assert.True(result.IsFailure);
+    Assert.Equal(ErrorType.NotFound, result.Error.Type);
+}
+```
+
+Los dobles ya están en `Fakes/Doubles.cs`: repositorio en memoria, unidad de trabajo que cuenta
+llamadas y reloj congelado.
+{{/if}}
+
+### Checklist del caso de uso
+
+- [ ] El cambio de estado ocurre **dentro** del agregado, en un método con nombre de negocio.
+- [ ] El evento de dominio se nombra en pasado y se registra con `Raise(...)` dentro del agregado.
+- [ ] El comando es imperativo; la consulta, descriptiva y **sin efectos secundarios**.
+- [ ] El validador comprueba forma; el agregado comprueba invariantes. Sin duplicar.
+- [ ] El handler devuelve `Result`, nunca lanza para el flujo esperado.
+- [ ] `Application` no menciona EF Core ni ASP.NET.
+- [ ] La presentación sólo despacha mensajes: ni un `if` de negocio.
+{{#if hasTests}}- [ ] Hay prueba del agregado (invariante + evento) y del handler (casos de `Result`).{{/if}}
+- [ ] `dotnet build` sin advertencias{{#if hasTests}} y `dotnet test` en verde{{/if}}.
+
+---
+
+## 4. El ejemplo incluido, explicado
+
+### 4.1 `{{Entity}}` — la raíz de agregado (`Domain/{{EntityPlural}}`)
+
+```csharp
+public static {{Entity}} Register(string name, string sku, decimal price, int stock, DateTimeOffset nowUtc, string currency = Money.DefaultCurrency)
+```
+
+La factoría es **la única forma válida de traer un `{{Entity}}` al mundo**: normaliza el nombre,
+construye el `Sku` y el `Money`, valida el stock y registra `{{Entity}}RegisteredDomainEvent`.
+Después, el estado sólo cambia con `Rename`, `Reprice` y `AdjustStock`. `AdjustStock` es el
+ejemplo más didáctico: registra `{{Entity}}StockAdjustedDomainEvent` siempre y, **además**,
+`{{Entity}}OutOfStockDomainEvent` cuando el stock cruza de positivo a cero. Una regla de negocio
+real, expresada como evento.
+
+### 4.2 `Sku` y `Money` — objetos de valor (`Domain/{{EntityPlural}}`)
+
+`Sku.Of(...)` valida el formato y normaliza a mayúsculas; `Money.Of(...)` valida importe y moneda.
+Ambos son inmutables y comparan por valor (heredan de `ValueObject`). La diferencia con una
+entidad: dos `Money` de 10 EUR **son el mismo valor**; dos `{{Entity}}` con los mismos datos son
+{{entityPlural}} distintos porque tienen identidad propia.
+
+### 4.3 `AggregateRoot` y los eventos (`SharedKernel`)
+
+`AggregateRoot` acumula eventos en una lista interna (`Raise`) y los expone como sólo lectura.
+Nadie los publica desde el dominio: los publica la **unidad de trabajo** al confirmar, de modo que
+si la transacción falla, tampoco se publican. Ese detalle evita la clase de bug más difícil de
+diagnosticar: efectos secundarios de cambios que nunca llegaron a persistirse.
+
+### 4.4 `IDispatcher` y el pipeline (`Application/Dispatching`, `Application/Behaviors`)
+
+Esta solución **no usa MediatR** (pasó a licencia comercial): incluye un despachador propio, corto
+y legible. `Dispatcher` resuelve el handler del contenedor por tipo cerrado y envuelve la llamada
+con los `IPipelineBehavior` registrados, en orden de registro:
+
+```csharp
+services.AddTransient(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));   // más externo
+services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
+```
+
+- **`LoggingBehavior`**: traza cada mensaje, su resultado y su duración.
+- **`ValidationBehavior`**: ejecuta los `IValidator` del mensaje y corta con
+  `Error.Validation(...)` antes de llegar al handler.
+
+Añadir un comportamiento nuevo (transacciones, caché, autorización, reintentos) es añadir una
+clase y registrarla: **ningún handler se entera**.
+
+### 4.5 Registro por reflexión (`Application/DependencyInjection.cs`)
+
+`AddApplication()` recorre el ensamblado y registra todo lo que implemente `ICommandHandler<,>`,
+`IQueryHandler<,>`, `IValidator<>` o `IDomainEventHandler<>`. Consecuencia práctica: **añadir un
+caso de uso es añadir un archivo**, sin tocar la composición.
+
+### 4.6 `UnitOfWork` y `DomainEventPublisher` (`Infrastructure`)
+
+`UnitOfWork.SaveChangesAsync` recoge los agregados con eventos pendientes, guarda los cambios y
+después entrega cada evento a sus manejadores mediante `DomainEventPublisher`, limpiando la lista.
+Es el punto exacto donde el modelo se conecta con las reacciones.
+
+{{#if hasWebApi}}
+### 4.7 `{{Entity}}Endpoints` (`WebApi/Endpoints`)
+
+CRUD completo bajo `/api/{{entityRoute}}`, donde cada endpoint construye un mensaje
+(`Register{{Entity}}Command`, `List{{EntityPlural}}Query`, ...) y lo despacha. `ResultExtensions`
+traduce `ErrorType` a código HTTP. La documentación interactiva **Scalar** está en `/scalar/v1`.
+{{/if}}
+{{#if hasBlazor}}
+
+### 4.8 `{{EntityPlural}}.razor` (`Blazor/Components/Pages`)
+
+Listado y alta despachando los mismos mensajes que la API. Cero lógica duplicada entre front y
+backend.
+{{/if}}
+{{#if hasTests}}
+
+### 4.9 Las pruebas incluidas
+
+| Archivo | Qué demuestra |
+|---|---|
+| `Domain/{{Entity}}AggregateTests.cs` | Que las invariantes se cumplen y que los eventos se registran |
+| `Application/{{Entity}}HandlerTests.cs` | Que cada handler devuelve el `Result` correcto |
+| `Fakes/Doubles.cs` | Cómo sustituir repositorio, unidad de trabajo y reloj sin infraestructura |
+{{/if}}
+
+---
+
+## 5. Comandos útiles y pruebas
+
+Todos se ejecutan desde la raíz de la solución (donde está `{{Solution}}.sln`).
+En DotForge IDE tienes los mismos comandos en la paleta (`Ctrl/Cmd+Shift+P`) y en el menú
+**Ejecutar**; la terminal integrada se abre con `Ctrl/Cmd+J`.
+
+### Compilar
+
+```bash
+dotnet restore
+```
+
+```bash
+dotnet build
+```
+
+Objetivo: **0 errores y 0 advertencias**.
+
+{{#if hasTests}}
+### Probar
+
+```bash
+dotnet test
+```
+
+```bash
+dotnet test --filter "FullyQualifiedName~{{Entity}}AggregateTests"
+```
+
+```bash
+dotnet test --collect:"XPlat Code Coverage"
+```
+{{/if}}
+
+{{#if hasWebApi}}
+### Ejecutar la API
+
+```bash
+dotnet run --project src/{{Solution}}.WebApi
+```
+
+| Recurso | URL |
+|---|---|
+| Documentación interactiva (Scalar) | `https://localhost:{{ApiHttpsPort}}/scalar/v1` |
+| Documento OpenAPI | `https://localhost:{{ApiHttpsPort}}/openapi/v1.json` |
+| Salud del servicio | `https://localhost:{{ApiHttpsPort}}/health` |
+| CRUD de {{EntityPlural}} | `https://localhost:{{ApiHttpsPort}}/api/{{entityRoute}}` |
+| Perfil sólo HTTP | `http://localhost:{{ApiHttpPort}}` |
+
+```bash
+curl -k https://localhost:{{ApiHttpsPort}}/api/{{entityRoute}}
+```
+{{/if}}
+
+{{#if hasBlazor}}
+### Ejecutar la UI Blazor
+
+```bash
+dotnet run --project src/{{Solution}}.Blazor
+```
+
+Disponible en `https://localhost:{{BlazorHttpsPort}}` (o `http://localhost:{{BlazorHttpPort}}`).
+La página de {{EntityPlural}} está en `/{{entityRoute}}`.
+{{/if}}
+
+### Recarga en caliente
+
+```bash
+dotnet watch --project src/{{Solution}}.{{#if hasBlazor}}Blazor{{else}}WebApi{{/if}}
+```
+
+{{#if useSqlite}}
+### Base de datos
+
+Se crea `{{DbName}}` en la carpeta del proyecto de arranque y se siembra la primera vez. Para
+empezar de cero, borra el archivo.
+
+```bash
+dotnet tool install --global dotnet-ef
+```
+
+```bash
+dotnet ef migrations add NombreDeLaMigracion --project src/{{Solution}}.Infrastructure --startup-project src/{{Solution}}.{{#if hasWebApi}}WebApi{{else}}Blazor{{/if}}
+```
+
+```bash
+dotnet ef database update --project src/{{Solution}}.Infrastructure --startup-project src/{{Solution}}.{{#if hasWebApi}}WebApi{{else}}Blazor{{/if}}
+```
+{{/if}}
+{{#if useInMemory}}
+### Base de datos
+
+Estás usando el proveedor **en memoria**: los datos se pierden al parar la aplicación y se vuelven
+a sembrar en cada arranque. Para pasar a una base de datos real, cambia
+`options.UseInMemoryDatabase(...)` por `UseSqlite`/`UseNpgsql` en
+`src/{{Solution}}.Infrastructure/DependencyInjection.cs` y añade migraciones.
+{{/if}}
+
+### Crecer hacia varios contextos delimitados
+
+Cuando el modelo crezca, cada contexto delimitado se convierte en su propio trío
+`Domain` / `Application` / `Infrastructure`, y `{{Solution}}.SharedKernel` es **lo único** que
+comparten:
+
+```bash
+dotnet new classlib -o src/{{Solution}}.Billing.Domain
+```
+
+```bash
+dotnet sln add src/{{Solution}}.Billing.Domain
+```
+
+```bash
+dotnet add src/{{Solution}}.Billing.Domain reference src/{{Solution}}.SharedKernel
+```
+
+### Gestión de paquetes
+
+Versiones centralizadas en `Directory.Packages.props` (los `.csproj` referencian sin versión).
+
+```bash
+dotnet add src/{{Solution}}.Infrastructure package Npgsql.EntityFrameworkCore.PostgreSQL
+```
+
+```bash
+dotnet list package --outdated
+```
+
+---
+
+## 6. Errores frecuentes y cómo evitarlos
+
+| Síntoma | Por qué es un problema | Solución |
+|---|---|---|
+| Agregado anémico: sólo propiedades con `get; set;` | Las reglas se dispersan por los handlers y se duplican | Métodos con nombre de negocio y setters privados |
+| El handler modifica el agregado propiedad a propiedad | Se salta las invariantes: el agregado deja de garantizar nada | Invoca un método del agregado |
+| Publicar el evento desde el handler | Si la transacción falla, ya has notificado un hecho que no ocurrió | `Raise(...)` en el agregado; publica la unidad de trabajo al confirmar |
+| Eventos nombrados en imperativo (`Discontinue{{Entity}}Event`) | Confunde intención (comando) con hecho (evento) | Nómbralos en pasado: `{{Entity}}DiscontinuedDomainEvent` |
+| Una consulta que escribe | Rompe CQRS y hace impredecible la lectura | Si cambia estado, es un comando |
+| Repetir en el validador las invariantes del agregado | Dos sitios que envejecen por separado | Validador: forma. Agregado: estado válido |
+| Agregados gigantes que abarcan medio dominio | Contención, transacciones largas y consistencia imposible | Un agregado = una frontera de consistencia; entre agregados, referencia por Id y eventos |
+| Modificar dos agregados en la misma transacción | Acopla dos fronteras de consistencia | Un agregado por transacción; coordina con eventos |
+| Devolver la entidad de dominio desde la API | El contrato HTTP queda atado al modelo interno | Devuelve `{{Entity}}Response` |
+| `DateTimeOffset.UtcNow` dentro del dominio | Pruebas intermitentes | Inyecta `IDateTimeProvider` y pasa la hora al agregado |
+
+### Para seguir leyendo
+
+- Eric Evans, *Domain-Driven Design* — el libro azul (modelo, lenguaje ubicuo, contextos).
+- Vaughn Vernon, *Implementing Domain-Driven Design* — el rojo, más práctico; reglas de agregados.
+- El manifiesto de esta solución está en `dotforge.json`: registra con qué opciones se generó.
+
+---
+
+<sub>Generado por **DotForge IDE** · DDD + CQRS · `{{Framework}}` · {{Year}}</sub>

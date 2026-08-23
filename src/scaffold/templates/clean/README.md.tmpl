@@ -1,0 +1,780 @@
+# {{Solution}}
+
+> Solución **Clean Architecture** generada con **DotForge IDE**.
+> Este documento no es un texto de relleno: explica la arquitectura que tienes delante, dónde va
+> cada tipo de código, cómo añadir una funcionalidad nueva sin romper las reglas y qué comandos
+> usar. Léelo entero una vez; luego vuelve a la sección 3 cada vez que abras una tarea.
+
+| | |
+|---|---|
+| **Arquitectura** | Clean Architecture (Robert C. Martin) |
+| **Framework objetivo** | `{{Framework}}` |
+| **Presentación** | {{#if hasBoth}}Web API minimal + Blazor interactivo{{else}}{{#if hasWebApi}}Web API minimal{{/if}}{{#if hasBlazor}}Blazor Server interactivo{{/if}}{{/if}} |
+| **Persistencia** | EF Core sobre `{{DbProvider}}` |
+| **Entidad de ejemplo** | `{{Entity}}` (plural `{{EntityPlural}}`, {{#if hasWebApi}}ruta `/api/{{entityRoute}}`{{else}}página `/{{entityRoute}}`{{/if}}) |
+| **Pruebas** | {{#if hasTests}}xUnit en `tests/{{Solution}}.UnitTests`{{else}}no generadas (`--no-tests`){{/if}} |
+
+---
+
+## Índice
+
+1. [La arquitectura en dos minutos](#1-la-arquitectura-en-dos-minutos)
+2. [Estructura y responsabilidades: qué va en cada capa](#2-estructura-y-responsabilidades-qué-va-en-cada-capa)
+3. [Guía paso a paso: cómo añadir una funcionalidad](#3-guía-paso-a-paso-cómo-añadir-una-funcionalidad)
+4. [El ejemplo incluido, explicado](#4-el-ejemplo-incluido-explicado)
+5. [Comandos útiles y pruebas](#5-comandos-útiles-y-pruebas)
+6. [Errores frecuentes y cómo evitarlos](#6-errores-frecuentes-y-cómo-evitarlos)
+
+---
+
+## 1. La arquitectura en dos minutos
+
+Clean Architecture organiza el código en **círculos concéntricos**. En el centro están las reglas
+de negocio, que no saben nada del mundo exterior; en el borde están los detalles (base de datos,
+HTTP, UI, relojes, ficheros), que son intercambiables.
+
+Todo se sostiene sobre **una sola regla**, la *regla de dependencia*:
+
+> **El código fuente sólo puede apuntar hacia dentro.** Una capa interior nunca puede nombrar a
+> una exterior: ni con un `using`, ni con una referencia de proyecto, ni con un tipo en una firma.
+
+Cuando una capa interior necesita algo del exterior (guardar en base de datos, saber la hora,
+mandar un correo) **no lo llama: lo declara** como una interfaz —un *puerto*— y deja que la capa
+exterior la implemente. Esto se llama *inversión de dependencias*, y es lo que da la vuelta a la
+flecha: `Infrastructure` depende de `Application`, y no al revés, aunque en tiempo de ejecución
+sea `Infrastructure` quien hace el trabajo.
+
+### Qué te llevas a cambio
+
+| Beneficio | Por qué ocurre aquí |
+|---|---|
+| **Desacoplamiento** | `{{Solution}}.Domain` no referencia ningún paquete NuGet de infraestructura. Cambiar {{#if useSqlite}}SQLite por PostgreSQL{{else}}el proveedor en memoria por PostgreSQL{{/if}} toca **un** proyecto. |
+| **Testeabilidad** | Los casos de uso dependen de interfaces (`I{{Entity}}Repository`, `IUnitOfWork`, `IClock`). En pruebas se sustituyen por dobles en memoria: sin base de datos, sin servidor, en milisegundos. |
+| **Mantenibilidad** | Cada archivo tiene un sitio previsible. Al abrir una tarea sabes de antemano qué carpetas vas a tocar (sección 3). |
+| **Independencia de la UI** | {{#if hasBoth}}La Web API y Blazor consumen **los mismos** casos de uso. Añadir un tercer front (móvil, CLI, worker) no duplica lógica.{{else}}Los casos de uso no conocen HTTP. Añadir una segunda presentación no duplica lógica.{{/if}} |
+| **Decisiones aplazables** | El motor de base de datos, el proveedor de correo o el framework web se eligen en la raíz de composición, en `Program.cs`, y no contaminan el resto. |
+
+### Diagrama de dependencias
+
+Las flechas se leen **"depende de" / "compila contra"**. Fíjate en que todas apuntan hacia el
+centro, y en que ninguna sale de `Domain`.
+
+```mermaid
+flowchart TD
+    subgraph PRES["4 · Presentación (raíz de composición)"]
+{{#if hasWebApi}}
+        API["{{Solution}}.WebApi<br/>minimal API + OpenAPI"]
+{{/if}}
+{{#if hasBlazor}}
+        BLZ["{{Solution}}.Blazor<br/>componentes interactivos"]
+{{/if}}
+    end
+
+    subgraph INFRA["3 · Infrastructure (detalles)"]
+        INF["{{Solution}}.Infrastructure<br/>EF Core · repositorios · reloj"]
+    end
+
+    subgraph APP["2 · Application (casos de uso)"]
+        APPP["{{Solution}}.Application<br/>servicios · DTOs · puertos · Result"]
+    end
+
+    subgraph DOM["1 · Domain (reglas de negocio)"]
+        DOMP["{{Solution}}.Domain<br/>entidades · objetos de valor · invariantes"]
+    end
+
+{{#if hasWebApi}}
+    API --> APPP
+    API -. "sólo para registrar servicios" .-> INF
+{{/if}}
+{{#if hasBlazor}}
+    BLZ --> APPP
+    BLZ -. "sólo para registrar servicios" .-> INF
+{{/if}}
+    INF --> APPP
+    INF --> DOMP
+    APPP --> DOMP
+
+    style DOM stroke-width:2px
+```
+
+`{{Solution}}.Domain` es el único proyecto del que **no sale ninguna flecha**: no depende de nada.
+
+En tiempo de ejecución el flujo va al revés de lo que sugiere la referencia de proyectos: la
+implementación concreta entra por inyección de dependencias.
+
+```mermaid
+sequenceDiagram
+    autonumber
+{{#if hasWebApi}}
+    participant C as Cliente HTTP
+    participant E as {{Entity}}Endpoints<br/>(WebApi)
+{{/if}}
+{{#unless hasWebApi}}
+    participant C as Navegador
+    participant E as {{EntityPlural}}.razor<br/>(Blazor)
+{{/unless}}
+    participant S as {{Entity}}Service<br/>(Application)
+    participant D as {{Entity}}<br/>(Domain)
+    participant R as {{Entity}}Repository<br/>(Infrastructure)
+    participant DB as Base de datos
+
+{{#if hasWebApi}}
+    C->>E: POST /api/{{entityRoute}}
+{{/if}}
+{{#unless hasWebApi}}
+    C->>E: alta desde /{{entityRoute}}
+{{/unless}}
+    E->>S: CreateAsync(Create{{Entity}}Request)
+    S->>R: SkuExistsAsync(sku)
+    R-->>S: false
+    S->>D: {{Entity}}.Create(nombre, sku, precio, stock)
+    Note over D: valida invariantes<br/>o lanza DomainException
+    D-->>S: instancia válida
+    S->>R: AddAsync + SaveChangesAsync
+    R->>DB: INSERT
+    S-->>E: Result&lt;{{Entity}}Dto&gt;
+    E-->>C: 201 Created / 400 / 409
+```
+
+El servicio nunca ve `DbContext`, y la entidad nunca ve `HttpContext`. Ese es el objetivo.
+
+---
+
+## 2. Estructura y responsabilidades: qué va en cada capa
+
+```text
+{{Solution}}/
+├── {{Solution}}.sln
+├── Directory.Build.props — Propiedades comunes: TargetFramework, Nullable, ImplicitUsings
+├── Directory.Packages.props — Versiones centralizadas de NuGet (Central Package Management)
+├── dotforge.json — Manifiesto: con qué opciones generó DotForge esta solución
+├── README.md — Este documento
+├── src/
+│   ├── {{Solution}}.Domain/ — capa 1, el núcleo
+│   │   ├── Common/
+│   │   │   ├── BaseEntity.cs — Identidad y comparación por Id
+│   │   │   └── DomainException.cs — Violación de una invariante de negocio
+│   │   ├── Entities/
+│   │   │   └── {{Entity}}.cs — Entidad de ejemplo con sus reglas
+│   │   └── ValueObjects/
+│   │       └── Money.cs — Importe + moneda, inmutable y validado
+
+│   ├── {{Solution}}.Application/ — capa 2, los casos de uso
+│   │   ├── Abstractions/
+│   │   │   ├── I{{Entity}}Repository.cs — PUERTO de persistencia (lo implementa Infrastructure)
+│   │   │   ├── IUnitOfWork.cs — PUERTO de confirmación transaccional
+│   │   │   └── IClock.cs — PUERTO de tiempo (hace deterministas las pruebas)
+│   │   ├── Common/
+│   │   │   └── Result.cs — Éxito o error explícito, sin excepciones de control
+│   │   ├── {{EntityPlural}}/
+│   │   │   ├── I{{Entity}}Service.cs — Contrato de los casos de uso
+│   │   │   ├── {{Entity}}Service.cs — Orquestación de los casos de uso
+│   │   │   └── {{Entity}}Dto.cs — DTO + Create/Update requests
+│   │   └── DependencyInjection.cs — AddApplication()
+
+│   ├── {{Solution}}.Infrastructure/ — capa 3, los detalles reemplazables
+│   │   ├── Persistence/
+│   │   │   ├── AppDbContext.cs — DbContext de EF Core
+│   │   │   ├── Configurations/ — Mapeo por entidad (IEntityTypeConfiguration)
+│   │   │   ├── Repositories/ — Implementación de los puertos de repositorio
+│   │   │   ├── UnitOfWork.cs — Implementación de IUnitOfWork
+│   │   │   └── DatabaseInitializer.cs — Creación del esquema + datos de ejemplo
+│   │   ├── Time/SystemClock.cs — Implementación de IClock
+│   │   └── DependencyInjection.cs — AddInfrastructure()
+{{#if hasWebApi}}
+
+│   ├── {{Solution}}.WebApi/ — capa 4, presentación HTTP
+│   │   ├── Endpoints/
+│   │   │   └── {{Entity}}Endpoints.cs — Minimal APIs agrupadas en /api/{{entityRoute}}
+│   │   ├── Extensions/
+│   │   │   └── ResultExtensions.cs — Result → 200/201/400/404/409 + ProblemDetails
+│   │   ├── Program.cs — RAÍZ DE COMPOSICIÓN: aquí se enchufa todo
+│   │   └── appsettings*.json — Configuración y cadena de conexión
+{{/if}}
+{{#if hasBlazor}}
+
+│   └── {{Solution}}.Blazor/ — capa 4, presentación interactiva
+│       ├── Components/
+│       │   ├── Pages/{{EntityPlural}}.razor — Listado + alta, consumiendo I{{Entity}}Service
+│       │   ├── Layout/ — MainLayout y NavMenu
+│       │   └── Routes.razor, App.razor — Enrutado y documento raíz
+│       ├── Program.cs — RAÍZ DE COMPOSICIÓN de la app Blazor
+│       └── wwwroot/app.css — Estilos
+{{/if}}
+{{#if hasTests}}
+
+└── tests/
+    └── {{Solution}}.UnitTests/
+        ├── Domain/{{Entity}}Tests.cs — Invariantes de la entidad
+        ├── Application/{{Entity}}ServiceTests.cs — Casos de uso con dobles
+        └── Fakes/InMemory{{Entity}}Repository.cs — Doble del puerto, sin EF Core
+{{/if}}
+```
+
+### 2.1 `{{Solution}}.Domain` — el núcleo
+
+**Contiene las reglas que serían ciertas aunque el software no existiera.**
+
+| ✅ DEBE estar aquí | ❌ TIENE PROHIBIDO estar aquí |
+|---|---|
+| Entidades con comportamiento (`{{Entity}}.Create`, `AdjustStock`) | `using Microsoft.EntityFrameworkCore` o cualquier atributo de EF |
+| Objetos de valor inmutables (`Money`) | `DbContext`, `DbSet`, cadenas de conexión, SQL |
+| Invariantes y validaciones de negocio | `HttpContext`, `IActionResult`, rutas, códigos HTTP |
+| Excepciones de dominio (`DomainException`) | `DateTime.Now` disperso (el tiempo entra como parámetro o por `IClock`) |
+| Enumeraciones y tipos del lenguaje ubicuo | Referencias a `Application`, `Infrastructure` o presentación |
+| Eventos de dominio (si los añades) | Serialización, JSON, DTOs de transporte |
+
+**Dependencias permitidas:** ninguna. Su `.csproj` no tiene ni una sola `ProjectReference`, y sólo
+usa la BCL. Ésa es la comprobación más rápida de que la arquitectura sigue sana.
+
+> **Regla práctica:** si una clase de `Domain` necesita saber *dónde* se guardan los datos, la
+> regla está mal colocada. Lo que necesita saber es *qué es válido*.
+
+### 2.2 `{{Solution}}.Application` — los casos de uso
+
+**Contiene la orquestación: qué pasos hay que dar para satisfacer una intención del usuario.**
+
+| ✅ DEBE estar aquí | ❌ TIENE PROHIBIDO estar aquí |
+|---|---|
+| Servicios de caso de uso (`{{Entity}}Service`) | Implementaciones concretas de persistencia |
+| **Puertos** como interfaces (`I{{Entity}}Repository`, `IUnitOfWork`, `IClock`) | `DbContext`, EF Core, HttpClient, SMTP, ficheros |
+| DTOs de entrada y salida (`{{Entity}}Dto`, `Create{{Entity}}Request`) | Tipos de ASP.NET (`Results`, `IResult`, `ControllerBase`) |
+| Reglas de aplicación (unicidad de SKU, autorización funcional) | Reglas de negocio propias de la entidad (van en `Domain`) |
+| Traducción de `DomainException` a `Result` con su `Error` | `throw` como mecanismo de control de flujo esperado |
+| Mapeo entidad → DTO | Marcado HTML, componentes Razor |
+
+**Dependencias permitidas:** `{{Solution}}.Domain` y abstracciones de la plataforma
+(`Microsoft.Extensions.Logging.Abstractions`, `Microsoft.Extensions.DependencyInjection.Abstractions`).
+
+> **Por qué el puerto vive aquí y no en `Infrastructure`:** quien declara la necesidad es quien
+> define el contrato. Si `I{{Entity}}Repository` viviera en `Infrastructure`, `Application`
+> tendría que referenciarla y la flecha apuntaría hacia fuera.
+
+### 2.3 `{{Solution}}.Infrastructure` — los detalles
+
+**Contiene todo lo que podrías querer cambiar sin cambiar el negocio.**
+
+| ✅ DEBE estar aquí | ❌ TIENE PROHIBIDO estar aquí |
+|---|---|
+| `AppDbContext`, configuraciones y migraciones de EF Core | Reglas de negocio o validaciones de invariantes |
+| Implementaciones de los puertos (`{{Entity}}Repository`, `UnitOfWork`, `SystemClock`) | Interfaces que `Application` debería declarar |
+| Clientes HTTP, colas, correo, almacenamiento de ficheros | Decisiones de caso de uso ("si existe el SKU, conflicto") |
+| `DatabaseInitializer` y datos de ejemplo | Tipos que la presentación deba conocer directamente |
+| `AddInfrastructure()` con el registro de servicios | Lógica que no se pueda sustituir por un doble en pruebas |
+
+**Dependencias permitidas:** `{{Solution}}.Application` y `{{Solution}}.Domain`.
+Nadie depende de `Infrastructure` salvo la raíz de composición.
+
+### 2.4 Presentación — la raíz de composición
+
+{{#if hasWebApi}}
+**`{{Solution}}.WebApi`**: traduce HTTP a llamadas de caso de uso y `Result` a códigos de estado.
+{{/if}}
+{{#if hasBlazor}}
+**`{{Solution}}.Blazor`**: renderiza estado y captura interacción; invoca los mismos casos de uso.
+{{/if}}
+
+| ✅ DEBE estar aquí | ❌ TIENE PROHIBIDO estar aquí |
+|---|---|
+| Definición de endpoints{{#if hasBlazor}} y componentes `.razor`{{/if}} | Consultas LINQ contra `DbContext` |
+| Validación de forma del transporte (tipos de ruta, binding) | Reglas de negocio ("el stock no puede ser negativo") |
+| Mapeo `Result` → HTTP / mensajes de UI | Instanciar repositorios a mano |
+| `Program.cs`: **único** sitio donde se decide la implementación concreta de cada puerto | Lógica que quisieras reutilizar desde otra presentación |
+| Configuración, Serilog, OpenAPI, manejo de errores | Acceso directo a la base de datos |
+
+**Dependencias permitidas:** `Application` (para usar los casos de uso) e `Infrastructure`
+(**sólo** para la llamada `AddInfrastructure(...)` en `Program.cs`).
+
+### 2.5 Tabla resumen de la regla de dependencia
+
+| Desde ↓ / Hacia → | Domain | Application | Infrastructure | Presentación |
+|---|---|---|---|---|
+| **Domain** | — | ❌ | ❌ | ❌ |
+| **Application** | ✅ | — | ❌ | ❌ |
+| **Infrastructure** | ✅ | ✅ | — | ❌ |
+| **Presentación** | ✅ | ✅ | ⚠️ sólo en `Program.cs` | — |
+
+**Cómo comprobarlo sin leer todo el código:** abre `src/{{Solution}}.Domain/{{Solution}}.Domain.csproj`.
+Si algún día aparece ahí una `ProjectReference` o un `PackageReference` a EF Core o ASP.NET,
+la arquitectura se ha roto.
+
+---
+
+## 3. Guía paso a paso: cómo añadir una funcionalidad
+
+Vamos con un caso real y completo: **"descatalogar un {{entity}}"** — marcarlo como no
+disponible sin borrarlo, dejando registrada la fecha y el motivo.
+
+El orden importa: **siempre de dentro hacia fuera**. Si empiezas por el endpoint, acabarás
+metiendo lógica donde no toca.
+
+### Paso 1 · Domain — expresa la regla de negocio
+
+`src/{{Solution}}.Domain/Entities/{{Entity}}.cs`
+
+```csharp
+public DateTimeOffset? DiscontinuedAtUtc { get; private set; }
+
+public string? DiscontinuedReason { get; private set; }
+
+public bool IsDiscontinued => DiscontinuedAtUtc is not null;
+
+/// <summary>Descataloga el {{entity}}. Es idempotente por diseño: descatalogar dos veces no rompe nada.</summary>
+public void Discontinue(string reason, DateTimeOffset nowUtc)
+{
+    DomainException.ThrowIf(string.IsNullOrWhiteSpace(reason), "El motivo es obligatorio.");
+    DomainException.ThrowIf(IsDiscontinued, "El {{entity}} ya estaba descatalogado.");
+
+    DiscontinuedAtUtc = nowUtc;
+    DiscontinuedReason = reason.Trim();
+}
+```
+
+Fíjate en tres cosas:
+
+1. **El setter es privado.** Nadie fuera de la entidad puede dejarla en un estado imposible.
+2. **El método tiene nombre de negocio** (`Discontinue`), no de dato (`SetDiscontinuedAt`).
+3. **La hora entra como parámetro.** La entidad no llama a `DateTimeOffset.UtcNow`, así la prueba
+   puede congelar el tiempo.
+
+{{#if hasTests}}
+Escribe ya la prueba, antes de seguir hacia fuera:
+
+```csharp
+[Fact]
+public void Discontinue_marca_la_fecha_y_el_motivo()
+{
+    var {{entity}} = {{Entity}}.Create("Teclado", "KB-1", 10m, 5);
+
+    {{entity}}.Discontinue("Fin de vida del proveedor", DateTimeOffset.UnixEpoch);
+
+    Assert.True({{entity}}.IsDiscontinued);
+    Assert.Equal("Fin de vida del proveedor", {{entity}}.DiscontinuedReason);
+}
+```
+{{/if}}
+
+### Paso 2 · Application — declara lo que el caso de uso necesita
+
+¿Hace falta un puerto nuevo? **Sólo si necesitas hablar con el exterior de una forma que aún no
+existe.** Aquí no: `I{{Entity}}Repository` ya sabe buscar por id y `IUnitOfWork` ya sabe confirmar.
+
+Si tu caso de uso sí necesitara algo nuevo (mandar un correo, publicar un evento), lo declararías
+como interfaz en `src/{{Solution}}.Application/Abstractions/`:
+
+```csharp
+namespace {{Solution}}.Application.Abstractions;
+
+/// <summary>Puerto de notificación. Lo implementa Infrastructure; Application sólo lo usa.</summary>
+public interface I{{Entity}}Notifier
+{
+    Task NotifyDiscontinuedAsync(Guid id, string reason, CancellationToken cancellationToken = default);
+}
+```
+
+### Paso 3 · Application — escribe el caso de uso
+
+`src/{{Solution}}.Application/{{EntityPlural}}/I{{Entity}}Service.cs`
+
+```csharp
+Task<Result> DiscontinueAsync(Guid id, string reason, CancellationToken cancellationToken = default);
+```
+
+`src/{{Solution}}.Application/{{EntityPlural}}/{{Entity}}Service.cs`
+
+```csharp
+public async Task<Result> DiscontinueAsync(Guid id, string reason, CancellationToken cancellationToken = default)
+{
+    var existing = await _repository.GetByIdAsync(id, cancellationToken);
+    if (existing is null)
+    {
+        return Result.Failure(Error.NotFound($"el {{entity}} {id}"));
+    }
+
+    try
+    {
+        existing.Discontinue(reason, _clock.UtcNow);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("{{Entity}} {Id} descatalogado: {Reason}", id, reason);
+        return Result.Success();
+    }
+    catch (DomainException ex)
+    {
+        // La excepción de dominio es un fallo esperado: se traduce a Result, no se propaga.
+        return Result.Failure(Error.Validation(ex.Message));
+    }
+}
+```
+
+Reparte la responsabilidad así: **la entidad decide si es válido; el servicio decide qué se hace
+con esa respuesta.** El servicio no reimplementa la regla.
+
+### Paso 4 · Infrastructure — implementa lo que haga falta
+
+Si has añadido campos nuevos, actualiza el mapeo en
+`src/{{Solution}}.Infrastructure/Persistence/Configurations/{{Entity}}Configuration.cs`:
+
+```csharp
+builder.Property(x => x.DiscontinuedReason).HasMaxLength(200);
+builder.HasIndex(x => x.DiscontinuedAtUtc);
+```
+
+{{#if useSqlite}}
+Y genera la migración (desde la raíz de la solución):
+
+```bash
+dotnet ef migrations add Discontinue{{Entity}} --project src/{{Solution}}.Infrastructure --startup-project src/{{Solution}}.{{#if hasWebApi}}WebApi{{else}}Blazor{{/if}}
+```
+
+> La solución arranca con `EnsureCreated` para que funcione a la primera. En cuanto el esquema
+> empiece a evolucionar, cámbialo por migraciones en `DatabaseInitializer`.
+{{/if}}
+{{#if useInMemory}}
+Con el proveedor en memoria no hay migraciones: el esquema se deduce del modelo en cada arranque.
+Cuando pases a una base de datos real, añade migraciones de EF Core.
+{{/if}}
+
+Si en el paso 2 declaraste un puerto nuevo, impleméntalo aquí y regístralo en
+`src/{{Solution}}.Infrastructure/DependencyInjection.cs`:
+
+```csharp
+services.AddScoped<I{{Entity}}Notifier, Email{{Entity}}Notifier>();
+```
+
+### Paso 5 · Presentación — expón la funcionalidad
+
+{{#if hasWebApi}}
+`src/{{Solution}}.WebApi/Endpoints/{{Entity}}Endpoints.cs`
+
+```csharp
+group.MapPost("/{id:guid}/discontinue", async (
+        Guid id,
+        Discontinue{{Entity}}Body body,
+        I{{Entity}}Service service,
+        CancellationToken cancellationToken) =>
+    (await service.DiscontinueAsync(id, body.Reason, cancellationToken)).ToHttpResult())
+    .WithName("Discontinue{{Entity}}")
+    .WithSummary("Descataloga un {{entity}} sin borrarlo.");
+
+// Al final del archivo:
+public sealed record Discontinue{{Entity}}Body(string Reason);
+```
+
+El endpoint hace exactamente dos cosas: traducir la petición a una llamada de caso de uso y
+traducir el `Result` a HTTP. Cualquier `if` de negocio que aparezca aquí está mal ubicado.
+{{/if}}
+{{#if hasBlazor}}
+
+`src/{{Solution}}.Blazor/Components/Pages/{{EntityPlural}}.razor`
+
+```razor
+<button class="danger" @onclick="() => DiscontinueAsync(item.Id)">Descatalogar</button>
+
+@code {
+    private async Task DiscontinueAsync(Guid id)
+    {
+        var result = await Service.DiscontinueAsync(id, "Retirado desde el panel");
+        if (result.IsFailure)
+        {
+            _error = result.Error.Message;
+            return;
+        }
+
+        await ReloadAsync();
+    }
+}
+```
+
+El componente inyecta `I{{Entity}}Service` y llama al caso de uso directamente: al vivir en el
+mismo proceso, no hay ningún `HttpClient` intermedio ni serialización innecesaria.
+{{/if}}
+
+{{#if hasTests}}
+### Paso 6 · Pruebas — cierra el ciclo
+
+`tests/{{Solution}}.UnitTests/Application/{{Entity}}ServiceTests.cs`
+
+```csharp
+[Fact]
+public async Task DiscontinueAsync_devuelve_NotFound_si_no_existe()
+{
+    var sut = CreateSut();
+
+    var result = await sut.Service.DiscontinueAsync(Guid.NewGuid(), "motivo");
+
+    Assert.True(result.IsFailure);
+    Assert.Equal(ErrorType.NotFound, result.Error.Type);
+}
+```
+
+No hace falta base de datos: `InMemory{{Entity}}Repository` implementa el puerto. Si necesitas un
+doble nuevo, añádelo en `tests/{{Solution}}.UnitTests/Fakes/`.
+{{/if}}
+
+### Checklist de la funcionalidad
+
+- [ ] La regla de negocio vive en `Domain`, en un método con nombre de negocio.
+- [ ] Ninguna propiedad nueva tiene setter público.
+- [ ] El caso de uso devuelve `Result`, no lanza excepciones para el flujo esperado.
+- [ ] `Application` sólo habla con interfaces; ningún `using` de EF Core ni de ASP.NET.
+- [ ] La implementación concreta se registra en `DependencyInjection.cs`, no se instancia a mano.
+- [ ] La presentación no contiene ni un `if` de negocio.
+{{#if hasTests}}- [ ] Hay una prueba de la invariante en `Domain` y otra del caso de uso en `Application`.{{/if}}
+- [ ] `dotnet build` sin advertencias{{#if hasTests}} y `dotnet test` en verde{{/if}}.
+
+---
+
+## 4. El ejemplo incluido, explicado
+
+La solución no viene vacía: trae un CRUD completo y funcional de `{{EntityPlural}}` que puedes
+ejecutar ahora mismo y usar como plantilla mental.
+
+### 4.1 `{{Entity}}` — entidad con invariantes (`Domain/Entities`)
+
+```csharp
+public static {{Entity}} Create(string name, string sku, decimal price, int stock, string currency = Money.DefaultCurrency)
+```
+
+Sólo se puede crear un `{{Entity}}` a través de este método de factoría, que normaliza el nombre,
+valida el SKU (letras, dígitos, `-` y `_`, en mayúsculas) y rechaza stock negativo. El estado
+posterior cambia mediante `Rename`, `ChangePrice` y `AdjustStock`; cada uno vuelve a validar y
+actualiza `UpdatedAtUtc`. **No hay setters públicos**: por eso es imposible construir un
+`{{Entity}}` inválido desde otra capa.
+
+### 4.2 `Money` — objeto de valor (`Domain/ValueObjects`)
+
+Importe + moneda, inmutable, con igualdad por valor y validación en la creación (`Money.Of`).
+Se mapea como *owned type* de EF Core: en la tabla son dos columnas, en el código es un concepto.
+Es el ejemplo canónico de **por qué un `decimal` suelto no es suficiente**: un importe sin moneda
+es un dato incompleto que tarde o temprano se suma con otro que no debía.
+
+### 4.3 `Result` y `Error` — errores sin excepciones (`Application/Common`)
+
+```csharp
+return Result.Failure<{{Entity}}Dto>(Error.Conflict($"Ya existe un {{entity}} con el SKU '{request.Sku}'."));
+```
+
+Un fallo *esperado* (no encontrado, conflicto, validación) no es una excepción: es un resultado
+posible del caso de uso, y viaja como valor de retorno. Ventajas: la firma del método dice la
+verdad, el compilador te obliga a mirarlo, y no pagas el coste de excepciones en el flujo normal.
+`ResultExtensions` en la Web API traduce cada `ErrorType` a su código HTTP.
+
+### 4.4 Los puertos (`Application/Abstractions`)
+
+| Puerto | Para qué | Implementación |
+|---|---|---|
+| `I{{Entity}}Repository` | Listar, buscar, comprobar SKU, añadir, eliminar | `Infrastructure/Persistence/Repositories/{{Entity}}Repository.cs` |
+| `IUnitOfWork` | Confirmar los cambios como una unidad | `Infrastructure/Persistence/UnitOfWork.cs` |
+| `IClock` | Obtener la hora actual | `Infrastructure/Time/SystemClock.cs` |
+
+`IClock` parece exagerado hasta la primera prueba que depende de una fecha. Con él, congelas el
+tiempo y el test deja de ser intermitente.
+
+### 4.5 `{{Entity}}Service` — el caso de uso (`Application/{{EntityPlural}}`)
+
+Orquesta: consulta el repositorio, aplica reglas de **aplicación** (unicidad del SKU), delega las
+reglas de **negocio** en la entidad, captura `DomainException` y la convierte en `Result`, y
+confirma con `IUnitOfWork`. Léelo entero: es el patrón que vas a repetir en cada funcionalidad.
+
+### 4.6 Composición (`Infrastructure/DependencyInjection.cs` + `Program.cs`)
+
+`AddApplication()` registra los servicios de caso de uso; `AddInfrastructure(configuration)`
+decide {{#if useSqlite}}que la persistencia es SQLite (`{{DbName}}`){{else}}que la persistencia es
+el proveedor en memoria{{/if}} y enchufa cada puerto con su implementación. **Cambiar de motor de
+base de datos es cambiar esa línea.**
+
+{{#if hasWebApi}}
+### 4.7 `{{Entity}}Endpoints` — minimal API (`WebApi/Endpoints`)
+
+Un `MapGroup("/api/{{entityRoute}}")` con los cinco verbos del CRUD. Cada endpoint recibe
+`I{{Entity}}Service` por inyección de parámetros y devuelve el `Result` traducido. Además,
+`Program.cs` monta Serilog, ProblemDetails, OpenAPI y la interfaz **Scalar** en `/scalar/v1`.
+{{/if}}
+{{#if hasBlazor}}
+
+### 4.8 `{{EntityPlural}}.razor` — UI interactiva (`Blazor/Components/Pages`)
+
+Listado con filtro y formulario de alta con `EditForm` y validación. Inyecta `I{{Entity}}Service`
+y muestra los errores del `Result` sin traducirlos dos veces. Modo de render `InteractiveServer`.
+{{/if}}
+{{#if hasTests}}
+
+### 4.9 Las pruebas incluidas
+
+| Archivo | Qué demuestra |
+|---|---|
+| `Domain/{{Entity}}Tests.cs` | Que las invariantes se cumplen: SKU inválido, stock negativo, normalización |
+| `Application/{{Entity}}ServiceTests.cs` | Que el caso de uso devuelve el `Result` correcto en cada escenario |
+| `Fakes/InMemory{{Entity}}Repository.cs` | Que el puerto se puede sustituir por completo: **cero infraestructura en las pruebas** |
+{{/if}}
+
+---
+
+## 5. Comandos útiles y pruebas
+
+Todos se ejecutan desde la raíz de la solución (donde está `{{Solution}}.sln`).
+En DotForge IDE tienes los mismos comandos en la paleta (`Ctrl/Cmd+Shift+P`) y en el menú
+**Ejecutar**; la terminal integrada se abre con `Ctrl/Cmd+J`.
+
+### Compilar
+
+```bash
+dotnet restore
+```
+
+```bash
+dotnet build
+```
+
+Compila los {{#if hasTests}}proyectos y las pruebas{{else}}proyectos{{/if}} con el SDK de
+`{{Framework}}`. El objetivo es **0 errores y 0 advertencias**: las advertencias de hoy son los
+errores de dentro de tres meses.
+
+{{#if hasTests}}
+### Probar
+
+```bash
+dotnet test
+```
+
+```bash
+dotnet test --logger "console;verbosity=detailed"
+```
+
+```bash
+dotnet test --filter "FullyQualifiedName~{{Entity}}Tests"
+```
+
+Para cobertura:
+
+```bash
+dotnet test --collect:"XPlat Code Coverage"
+```
+{{/if}}
+
+{{#if hasWebApi}}
+### Ejecutar la API
+
+```bash
+dotnet run --project src/{{Solution}}.WebApi
+```
+
+| Recurso | URL |
+|---|---|
+| Documentación interactiva (Scalar) | `https://localhost:{{ApiHttpsPort}}/scalar/v1` |
+| Documento OpenAPI | `https://localhost:{{ApiHttpsPort}}/openapi/v1.json` |
+| Salud del servicio | `https://localhost:{{ApiHttpsPort}}/health` |
+| CRUD de {{EntityPlural}} | `https://localhost:{{ApiHttpsPort}}/api/{{entityRoute}}` |
+| Perfil sólo HTTP | `http://localhost:{{ApiHttpPort}}` |
+
+Prueba rápida desde la terminal:
+
+```bash
+curl -k https://localhost:{{ApiHttpsPort}}/api/{{entityRoute}}
+```
+
+```bash
+curl -k -X POST https://localhost:{{ApiHttpsPort}}/api/{{entityRoute}} -H "Content-Type: application/json" -d "{\"name\":\"Teclado\",\"sku\":\"KB-99\",\"price\":49.9,\"stock\":10,\"currency\":\"EUR\"}"
+```
+{{/if}}
+
+{{#if hasBlazor}}
+### Ejecutar la UI Blazor
+
+```bash
+dotnet run --project src/{{Solution}}.Blazor
+```
+
+Disponible en `https://localhost:{{BlazorHttpsPort}}` (o `http://localhost:{{BlazorHttpPort}}`).
+La página de {{EntityPlural}} está en `/{{entityRoute}}`.
+{{/if}}
+
+### Recarga en caliente
+
+```bash
+dotnet watch --project src/{{Solution}}.{{#if hasBlazor}}Blazor{{else}}WebApi{{/if}}
+```
+
+Recompila y aplica los cambios sin reiniciar. Si un cambio no es aplicable en caliente (cambiar
+una firma, añadir un tipo), `dotnet watch` avisa y reinicia.
+
+{{#if useSqlite}}
+### Base de datos
+
+La solución crea `{{DbName}}` en la carpeta del proyecto de arranque y la siembra con datos de
+ejemplo la primera vez. Para empezar de cero, borra el archivo y vuelve a ejecutar.
+
+```bash
+dotnet tool install --global dotnet-ef
+```
+
+```bash
+dotnet ef migrations add NombreDeLaMigracion --project src/{{Solution}}.Infrastructure --startup-project src/{{Solution}}.{{#if hasWebApi}}WebApi{{else}}Blazor{{/if}}
+```
+
+```bash
+dotnet ef database update --project src/{{Solution}}.Infrastructure --startup-project src/{{Solution}}.{{#if hasWebApi}}WebApi{{else}}Blazor{{/if}}
+```
+{{/if}}
+{{#if useInMemory}}
+### Base de datos
+
+Estás usando el proveedor **en memoria**: los datos se pierden al parar la aplicación y se
+vuelven a sembrar en cada arranque. Es ideal para probar y para las pruebas automatizadas, pero
+no soporta transacciones ni SQL real. Para pasar a una base de datos real, cambia
+`options.UseInMemoryDatabase(...)` por `UseSqlite`/`UseSqlServer`/`UseNpgsql` en
+`src/{{Solution}}.Infrastructure/DependencyInjection.cs` y añade migraciones.
+{{/if}}
+
+### Gestión de paquetes
+
+Las versiones están centralizadas en `Directory.Packages.props`
+(*Central Package Management*): en los `.csproj` se referencia el paquete **sin** versión.
+
+```bash
+dotnet add src/{{Solution}}.Infrastructure package Npgsql.EntityFrameworkCore.PostgreSQL
+```
+
+```bash
+dotnet list package --outdated
+```
+
+En DotForge IDE, el panel **NuGet** de la barra lateral hace lo mismo de forma visual.
+
+### Añadir un proyecto a la solución
+
+```bash
+dotnet new classlib -o src/{{Solution}}.Reporting
+```
+
+```bash
+dotnet sln add src/{{Solution}}.Reporting
+```
+
+Antes de añadirlo, decide **en qué capa** vive y qué puede referenciar (sección 2.5).
+
+---
+
+## 6. Errores frecuentes y cómo evitarlos
+
+| Síntoma | Por qué es un problema | Solución |
+|---|---|---|
+| `Domain` acaba referenciando EF Core "sólo para un atributo" | Rompe la regla de dependencia: el núcleo pasa a depender de un detalle | Configura el mapeo en `Infrastructure/Persistence/Configurations` con la API fluida |
+| Entidades anémicas: sólo propiedades con `get; set;` | Las reglas se dispersan por servicios y se duplican | Métodos con nombre de negocio y setters privados |
+| Lógica de negocio en el endpoint{{#if hasBlazor}} o en el componente Razor{{/if}} | No se puede reutilizar ni probar sin levantar el servidor | Muévela al servicio de aplicación o a la entidad |
+| `Application` recibe un `DbContext` | La capa de casos de uso queda atada a EF Core | Declara un puerto e impleméntalo en `Infrastructure` |
+| Excepciones para el flujo esperado ("no encontrado") | Firmas que mienten y coste innecesario | `Result` + `Error.NotFound(...)` |
+| `DateTime.Now` dentro del dominio | Pruebas intermitentes e imposibles de congelar | Inyecta `IClock` o pasa la hora como parámetro |
+| DTOs de la API reutilizados como entidades | Un cambio de contrato HTTP obliga a cambiar el modelo de negocio | Mantén DTOs en `Application` y entidades en `Domain` |
+| Un puerto por cada método del repositorio | Explosión de interfaces sin ganancia | Un puerto por concepto, con los métodos que el caso de uso necesita |
+
+### Para seguir leyendo
+
+- Robert C. Martin, *Clean Architecture* — el origen de la regla de dependencia.
+- Documentación de .NET: arquitectura de aplicaciones .NET y minimal APIs.
+- El manifiesto de esta solución está en `dotforge.json`: registra con qué opciones se generó.
+
+---
+
+<sub>Generado por **DotForge IDE** · Clean Architecture · `{{Framework}}` · {{Year}}</sub>
