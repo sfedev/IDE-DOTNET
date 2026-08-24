@@ -5,12 +5,23 @@
  * Los iconos de los paquetes se dibujan localmente (inicial sobre un cuadro) en lugar de
  * descargarse: así el panel no revela a terceros qué está buscando el usuario.
  */
-import type { NuGetSearchResult, ProjectInfo, SolutionInfo } from '../../shared/contracts.js';
+import type { AuditReport, NuGetSearchResult, ProjectInfo, SolutionInfo, VulnerablePackage } from '../../shared/contracts.js';
+import { countBySeverity, describeAudit, SEVERITY_LABEL } from '../../shared/nuget-audit.js';
 import { byId, clear, compactNumber, debounce, el } from '../dom.js';
+import { icon } from '../icons.js';
 
 export interface NuGetHost {
   notify(message: string, level: 'info' | 'ok' | 'warn' | 'error'): void;
   reloadSolution(): void;
+  /** Abre el aviso de seguridad en el navegador del sistema. */
+  openUrl(url: string): void;
+  /**
+   * La auditoría ha terminado: el número de paquetes con aviso ha cambiado.
+   *
+   * Lo escucha la barra de actividad, que pinta ese número como insignia sobre el icono de NuGet.
+   * Sin este aviso la insignia sólo aparecía al repintar la barra por otro motivo.
+   */
+  vulnerabilitiesChanged(): void;
 }
 
 export class NuGetView {
@@ -25,6 +36,11 @@ export class NuGetView {
   private error: string | null = null;
   private readonly versionChoice = new Map<string, string>();
 
+  /** Última auditoría de seguridad. Null si no se ha ejecutado en esta solución. */
+  private auditReport: AuditReport | null = null;
+  private auditing = false;
+  private auditOpen = true;
+
   private readonly runSearch = debounce(() => void this.performSearch(), 320);
 
   constructor(private readonly host: NuGetHost) {}
@@ -32,7 +48,48 @@ export class NuGetView {
   setSolution(solution: SolutionInfo | null): void {
     this.solution = solution;
     this.selectedProjectPath = solution?.projects[0]?.path ?? null;
+    // La auditoría es de la solución que se cierra: no vale para la siguiente.
+    this.auditReport = null;
     this.render();
+  }
+
+  /** Número de paquetes con aviso. Lo usa la insignia de la barra de actividad. */
+  vulnerableCount(): number {
+    return this.auditReport?.packages.length ?? 0;
+  }
+
+  /**
+   * Ejecuta `dotnet list package --vulnerable` sobre la solución.
+   *
+   * No se lanza sola al abrir la solución: consulta la red y puede restaurar, así que arrancar el
+   * IDE no debería costar eso. Se pide desde el botón, la paleta o el menú.
+   */
+  async audit(): Promise<void> {
+    if (this.auditing) return;
+    if (this.solution === null) {
+      this.host.notify('Abre una solución para auditar sus paquetes.', 'warn');
+      return;
+    }
+
+    this.auditing = true;
+    this.auditOpen = true;
+    this.render();
+
+    try {
+      this.auditReport = await window.dotforge.nuget.audit(null);
+
+      const report = this.auditReport;
+      this.host.notify(
+        describeAudit(report),
+        report.error !== null ? 'warn' : report.packages.length > 0 ? 'error' : 'ok',
+      );
+    } catch (error) {
+      this.host.notify(`No se ha podido auditar: ${error instanceof Error ? error.message : String(error)}`, 'error');
+    } finally {
+      this.auditing = false;
+      this.render();
+      this.host.vulnerabilitiesChanged();
+    }
   }
 
   focusProject(project: ProjectInfo): void {
@@ -101,6 +158,7 @@ export class NuGetView {
       return;
     }
 
+    container.appendChild(this.renderAudit());
     container.appendChild(this.query.trim() === '' ? this.renderInstalled() : this.renderResults());
   }
 
@@ -153,6 +211,152 @@ export class NuGetView {
     );
 
     return el('div', { className: 'nuget-search' }, input, prerelease);
+  }
+
+  /**
+   * Sección de seguridad.
+   *
+   * Está siempre visible aunque no se haya auditado: es la forma de que alguien descubra que el
+   * IDE puede hacerlo. Sin auditar dice qué va a ejecutar; auditada, enseña lo que hay.
+   */
+  private renderAudit(): HTMLElement {
+    const report = this.auditReport;
+    const section = el('div', { className: 'nuget-audit' });
+
+    const counts = report === null ? null : countBySeverity(report.packages);
+
+    const head = el(
+      'div',
+      { className: 'nuget-audit-head' },
+      el(
+        'button',
+        {
+          className: 'nuget-audit-toggle',
+          on: {
+            click: () => {
+              this.auditOpen = !this.auditOpen;
+              this.render();
+            },
+          },
+        },
+        icon(this.auditOpen ? 'chevron-down' : 'chevron-right', { size: 13 }),
+        icon('shield', { size: 14 }),
+        el('span', { text: 'Seguridad' }),
+        report === null || report.packages.length === 0
+          ? null
+          : el('span', { className: 'nuget-audit-count', text: String(report.packages.length) }),
+      ),
+      el(
+        'button',
+        {
+          className: 'btn small',
+          disabled: this.auditing || this.solution === null,
+          title: 'dotnet list package --vulnerable --include-transitive',
+          on: { click: () => void this.audit() },
+        },
+        this.auditing ? el('span', { className: 'spinner' }) : icon('refresh', { size: 13 }),
+        el('span', { text: this.auditing ? 'Analizando…' : 'Analizar' }),
+      ),
+    );
+
+    section.appendChild(head);
+    if (!this.auditOpen) return section;
+
+    if (this.auditing) {
+      section.appendChild(el('div', { className: 'empty-state', text: 'Consultando los avisos de seguridad…' }));
+      return section;
+    }
+
+    if (report === null) {
+      section.appendChild(
+        el('div', {
+          className: 'package-meta',
+          text: 'Sin analizar. Cruza los paquetes restaurados con los avisos de GitHub Security Advisories.',
+        }),
+      );
+      return section;
+    }
+
+    if (report.error !== null) {
+      section.appendChild(el('div', { className: 'notice warn', text: report.error }));
+      return section;
+    }
+
+    if (report.packages.length === 0) {
+      section.appendChild(
+        el(
+          'div',
+          { className: 'notice ok' },
+          icon('check', { size: 14 }),
+          el('span', { text: 'Sin vulnerabilidades conocidas en los paquetes restaurados.' }),
+        ),
+      );
+      return section;
+    }
+
+    if (counts !== null) {
+      const pills = el('div', { className: 'nuget-audit-pills' });
+      for (const severity of ['critical', 'high', 'moderate', 'low', 'unknown'] as const) {
+        if (counts[severity] === 0) continue;
+        pills.appendChild(
+          el('span', {
+            className: `severity-pill ${severity}`,
+            text: `${SEVERITY_LABEL[severity]}: ${counts[severity]}`,
+          }),
+        );
+      }
+      section.appendChild(pills);
+    }
+
+    if (report.degraded) {
+      section.appendChild(
+        el('div', {
+          className: 'package-meta',
+          text: 'Leído de la tabla de texto: tu SDK no admite --format json, así que puede faltar detalle.',
+        }),
+      );
+    }
+
+    for (const entry of report.packages) section.appendChild(this.renderVulnerable(entry));
+
+    return section;
+  }
+
+  private renderVulnerable(entry: VulnerablePackage): HTMLElement {
+    const advisories = el('div', { className: 'vuln-advisories' });
+
+    for (const vulnerability of entry.vulnerabilities) {
+      advisories.appendChild(
+        el(
+          'button',
+          {
+            className: 'vuln-link',
+            title: vulnerability.advisoryUrl,
+            on: { click: () => this.host.openUrl(vulnerability.advisoryUrl) },
+          },
+          icon('external-link', { size: 12 }),
+          el('span', { text: vulnerability.identifier ?? 'Aviso' }),
+        ),
+      );
+    }
+
+    return el(
+      'div',
+      { className: `vuln-row ${entry.worst}` },
+      el(
+        'div',
+        { className: 'vuln-title' },
+        el('span', { className: `severity-pill ${entry.worst}`, text: SEVERITY_LABEL[entry.worst] }),
+        el('span', { className: 'package-id', text: entry.id }),
+        el('span', { className: 'package-version', text: entry.resolvedVersion }),
+        entry.transitive ? el('span', { className: 'vuln-transitive', text: 'transitivo' }) : null,
+      ),
+      el('div', {
+        className: 'package-meta',
+        text: `${entry.projectName}${entry.framework === null ? '' : ` · ${entry.framework}`}`,
+      }),
+      advisories,
+    );
   }
 
   private renderInstalled(): HTMLElement {

@@ -14,6 +14,12 @@ Su módulo estrella es el **Scaffolding Wizard**: un generador de arquitecturas 
 que produce soluciones .NET **compilables y ejecutables** siguiendo Clean Architecture,
 Arquitectura Hexagonal (Ports & Adapters) o Domain-Driven Design + CQRS.
 
+Desde la v1.9.0 incluye un **explorador visual de pruebas** (árbol proyecto → clase → prueba con
+lentes de código sobre cada `[Fact]` y `[Theory]`, resultados leídos del TRX y fallos en el panel de
+problemas), **resaltado semántico de C# estilo Visual Studio** alimentado por la clasificación de
+Roslyn, un **monitor de rendimiento** con los contadores del runtime, **túneles públicos** hacia el
+puerto local para probar webhooks, y **auditoría de vulnerabilidades** de los paquetes NuGet.
+
 Desde la v1.8.0 incluye un **panel de contenedores y Docker Compose**: los servicios de apoyo del
 proyecto (SQL Server, Redis, RabbitMQ, Seq…) con su estado, sus puertos y los botones para
 levantarlos, bajarlos y ver su registro sin salir del IDE.
@@ -69,6 +75,11 @@ IDE-DOTNET/
 │   │   ├── architecture-rules.ts # * Linter de capas: dependencias permitidas y paquetes (puro)
 │   │   ├── docker.ts           # * Modelo de Docker: contenedores, puertos y servicios de apoyo (puro)
 │   │   ├── compose.ts          # * YAML mínimo de docker-compose.yml + cruce con el motor (puro)
+│   │   ├── semantic-tokens.ts  # * Tokens semánticos de LSP: descodificación y ámbitos (puro)
+│   │   ├── test-explorer.ts    # * Pruebas: descubrimiento por texto, filtros y resultados (puro)
+│   │   ├── dev-tunnel.ts       # * Túneles: argumentos y reconocimiento de la URL pública (puro)
+│   │   ├── perf-counters.ts    # * dotnet-counters: dos generaciones de contadores (puro)
+│   │   ├── nuget-audit.ts      # * dotnet list package --vulnerable: JSON y tabla (puro)
 │   │   └── dotnet-verbosity.ts # * Nivel de salida de la CLI -> argumentos y variables (puro)
 │   ├── scaffold/           # * MODULO ESTRELLA: generador de arquitecturas (Node puro)
 │   │   ├── engine.ts           # Micro motor de plantillas {{token}}
@@ -87,7 +98,9 @@ IDE-DOTNET/
 │   │   │                       # git-service.ts (estado y operaciones de control de fuentes),
 │   │   │                       # efcore-service.ts (dotnet ef + migraciones del disco),
 │   │   │                       # http-client-service.ts (envío real de las peticiones .http),
-│   │   │                       # docker-service.ts (estado del motor), node-scripts.ts (package.json)
+│   │   │                       # docker-service.ts (estado del motor), node-scripts.ts (package.json),
+│   │   │                       # test-service.ts (descubrimiento, dotnet test y lectura del TRX),
+│   │   │                       # tunnel-service.ts (devtunnel/ngrok), metrics-service.ts (contadores)
 │   │   │   └── ai/             # * Asistente de IA: proveedores, streaming y claves cifradas
 │   │   │       ├── request-builder.ts  # Petición HTTP por proveedor (puro)
 │   │   │       ├── stream-parser.ts    # SSE/NDJSON -> deltas (puro)
@@ -110,7 +123,8 @@ IDE-DOTNET/
 │       ├── views/              # explorer, editor, nuget, panel, palette, statusbar, settings,
 │       │                       # welcome, wizard, debug, startup-bar, ai-chat, ai-inline, git,
 │       │                       # efcore (panel de base de datos), http (cliente del panel inferior),
-│       │                       # containers (contenedores y Docker Compose)
+│       │                       # containers (contenedores y Docker Compose),
+│       │                       # tests (explorador de pruebas), metrics (monitor de rendimiento)
 │       └── styles/             # theme.css (tokens), layout.css, components.css
 ├── resources/              # Iconos multirresolución, branding
 ├── scripts/                # Build, generación de iconos, fetch de toolchain, verificación
@@ -197,7 +211,8 @@ npx electron . --smoke-test
 - `--ui=<vista>` — abre una vista antes de la captura pulsando los mismos controles que pulsaría
   un usuario (`wizard`, `settings`, `nuget`, `debug`, `ai`, `terminal`, `palette`, `light`,
   `nesting`, `startup`, `startup-dialog`, `terminal-suggest`, `git`, `git-diff`, `startup-play`,
-  `startup-run-mode`, `ai-toggle`, `efcore`, `http`, `logs`, `startup-logs`, `containers`).
+  `startup-run-mode`, `ai-toggle`, `efcore`, `http`, `logs`, `startup-logs`, `containers`,
+  `tests`, `tests-run`, `metrics`, `audit`).
 - `--ui-wait=<ms>` — cuánto se espera antes de **pulsar** la acción de `--ui=`. Los 3,2 s por
   defecto no bastan si se arranca con una solución abierta: la interfaz todavía está cargando
   Monaco y el control que hay que pulsar aún no existe.
@@ -205,7 +220,10 @@ npx electron . --smoke-test
   (`--screenshot=`). Sin esto no se puede comprobar nada que tarde, como que `dotnet run` arranque
   y anuncie su puerto.
 - `--probe=<expresión>` — evalúa una expresión en el renderer y la imprime. Es la forma de zanjar
-  una duda sobre CSS: leer el valor calculado en vez de interpretar una captura.
+  una duda sobre CSS: leer el valor calculado en vez de interpretar una captura. **La expresión
+  puede ser asíncrona**: se envuelve en `Promise.resolve`, así que sirve igual para medir el DOM que
+  para hacer una llamada IPC (`--probe="window.dotforge.lsp.legend()"`) y ver qué contesta de verdad
+  el proceso principal.
 - `node scripts/read-pixels.mjs <png> <x,y>…` — decodifica una captura y dice el color exacto de
   esos píxeles. Es la segunda opinión cuando `--probe=` y lo que se ve no parecen coincidir.
 - `--open=<ruta>` o un argumento posicional — abre una carpeta o un archivo al arrancar.
@@ -306,6 +324,54 @@ npx electron . --smoke-test
   asistente de IA.
 - `docker compose up` se lanza **siempre con `-d`**: un compose en primer plano dentro de un panel
   que no es un terminal deja un proceso que no se puede parar con Ctrl+C.
+
+### Explorador de pruebas (`src/main/services/test-service.ts`, `src/shared/test-explorer.ts`)
+
+- **Se descubre leyendo el código, no compilando** (ADR-037). `dotnet test --list-tests` exige un
+  build completo; el árbol tiene que estar lleno al abrir la solución y la lente tiene que aparecer
+  sobre el `[Fact]` que se está escribiendo. Se reconocen xUnit, NUnit y MSTest.
+- **Los resultados salen del TRX** (ADR-036), nunca de la consola: los estados de la consola están
+  traducidos al idioma del sistema. El nombre bueno está en `TestDefinitions`, no en `testName` —en
+  una `[Theory]` ese campo trae los argumentos del caso—, y hay que descodificar las referencias
+  numéricas (`&#xD;&#xA;`) o la traza sale con ellas incrustadas.
+- El filtro de VSTest lo **reconstruye el proceso principal** a partir de identificadores validados
+  contra la forma de un nombre cualificado de C#: la cadena del renderer no entra en un `argv`.
+- Los fallos van al panel de problemas con su propia lista: una compilación correcta no arregla una
+  prueba que falla, así que no puede borrar su problema.
+
+### Tokens semánticos (`src/shared/semantic-tokens.ts`)
+
+- **Las listas de capacidades no pueden ir vacías.** Para LSP, `tokenTypes: []` significa "no
+  entiendo ningún tipo de token", y un servidor correcto no manda ninguno.
+- **Se descodifica con la leyenda del servidor, no con la nuestra.** Los datos son índices dentro de
+  la leyenda que publica él, y Roslyn manda la suya con nombres propios (`class name`,
+  `keyword - control`, `xml doc comment - text`). Se normalizan por forma, no enumerando variantes.
+- **Un tipo que no se reconoce devuelve `null` y conserva el color de la gramática.** Apagar un
+  trozo del editor por una clasificación exótica es peor que no colorearla.
+- Monaco pide los tokens **una vez por versión del documento**: el proveedor expone `onDidChange` y
+  se dispara al llegar la leyenda y al recibir `workspace/projectInitializationComplete`.
+- A Roslyn hay que **abrirle la solución** con `solution/open` (ADR-039). Sin eso responde `null` a
+  todo con el estado en "listo".
+
+### Monitor de rendimiento (`src/shared/perf-counters.ts`)
+
+- **`collect --format csv`, no `monitor`** (ADR-038): `monitor` necesita una consola de verdad y
+  revienta con la salida redirigida. El CSV se lee de forma incremental, hasta el último salto de
+  línea: media fila es un número partido por la mitad.
+- **Dos generaciones de nombres.** Los EventCounters clásicos (`CPU Usage`, `GC Heap Size`) y las
+  métricas del `Meter` de `System.Runtime` que los sustituyen desde .NET 9
+  (`dotnet.process.cpu.time`, `dotnet.gc.collections[gc.heap.generation=gen0]`). Con sólo las
+  primeras el panel se queda vacío en net9.0 y net10.0.
+- El intervalo se lee de la unidad (`By / 2 sec`), que es lo que permite convertir un acumulado en
+  una tasa sin saber con qué frecuencia se pidió la sesión.
+
+### Auditoría de NuGet (`src/shared/nuget-audit.ts`)
+
+- **Se lee `--format json`**, y la tabla sólo como camino degradado y marcado como tal: sus
+  cabeceras y sus niveles de gravedad están traducidos.
+- En la tabla, "transitivo" se decide **contando columnas** (un directo trae versión pedida y
+  resuelta; un transitivo sólo la resuelta), no buscando la palabra en la cabecera.
+- Los transitivos se enseñan: la vulnerabilidad casi nunca está en el paquete que se instaló.
 
 ### Visor de registro (`src/shared/log-events.ts`)
 
@@ -514,6 +580,24 @@ npm run fetch:toolchain -- --platform win32 --arch x64
   quería decir "Monaco no está dentro" y lo que decía era "el renderer no ha crecido": se puso en
   rojo al añadir dos vistas legítimas. Ahora compara el bundle con la carpeta `vendor/monaco` que
   dice no incrustar, que es la propiedad de verdad.
+- **Un servidor que dice "listo" no dice que sepa nada.** `Microsoft.CodeAnalysis.LanguageServer`
+  completa el handshake y luego devuelve `null` a hover, completado, símbolos y tokens si no se le
+  ha mandado `solution/open`. Y si su gráfico MEF falla, muere **después** de contestar a
+  `initialize`. Su stderr va ahora a la consola del proceso principal: un proveedor que devuelve
+  siempre vacío es indistinguible de uno que funciona si nadie mira el error.
+- **Monaco pide los tokens semánticos una sola vez** por versión del documento. Si la primera
+  respuesta llega vacía —el servidor todavía está cargando la solución—, el archivo se queda con los
+  colores de la gramática hasta que se escriba en él. Hace falta `onDidChange` en el proveedor.
+- **`semanticHighlighting.enabled` hay que encenderlo.** Su valor por defecto es
+  `configuredByTheme`, y un tema definido con `defineTheme` no lo activa: el proveedor se registra,
+  el servidor responde y no se ve absolutamente nada.
+- **`dotnet-counters monitor` revienta con la salida redirigida** (`NullReferenceException` antes
+  del primer valor). Para leerlo desde un programa hay que usar `collect --format csv`.
+- **Los contadores cambiaron de nombre en .NET 9.** Buscar `CPU Usage` en una aplicación net9.0 o
+  net10.0 no encuentra nada: ahora es `dotnet.process.cpu.time`, en segundos por intervalo y con el
+  número de núcleos en su propio contador.
+- **El TRX escribe los saltos de línea como `&#xD;&#xA;`.** El parser de XML traduce las entidades
+  con nombre, no las referencias numéricas, así que la traza de un fallo sale con ellas dentro.
 - **`dotnet watch` no tiene `--verbosity`.** Tiene `--verbose`, y va antes del subcomando; todo lo
   que va detrás se lo pasa a la aplicación hija, así que la bandera equivocada llega como argumento
   de la aplicación en vez de fallar.

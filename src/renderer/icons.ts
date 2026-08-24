@@ -328,6 +328,41 @@ const ICONS = {
     { p: 'm15.6 7.6 2.2 2.2' },
     { p: 'm18.6 4.6 2.2 2.2' },
   ],
+
+  // ---------------------------------------------------------------------------------------
+  // Fase 15: rendimiento, seguridad y túnel
+  // ---------------------------------------------------------------------------------------
+
+  /**
+   * Aguja sobre arco: la marca universal de "cuánto está gastando esto". Se dibuja sólo el
+   * semicírculo superior porque a 16 px un dial completo se convierte en un círculo con una raya.
+   */
+  gauge: [
+    { p: 'M3.6 17.4a9 9 0 1 1 16.8 0' },
+    { p: 'm12 17.4 4.2-6' },
+    { fc: [12, 17.6, 1.4] },
+  ],
+
+  /**
+   * Escudo con marca: la auditoría de paquetes. La marca de dentro es lo que distingue "seguro"
+   * de "hay algo"; el color de la insignia hace el resto.
+   */
+  shield: [
+    { p: 'M12 2.9 4.6 6v6.1c0 4.4 3.1 7.6 7.4 9 4.3-1.4 7.4-4.6 7.4-9V6Z' },
+    { p: 'm8.9 11.9 2.2 2.2 4-4.3' },
+  ],
+
+  /**
+   * Puerto local que sale a internet: un globo con una flecha entrando. Es la acción, no el
+   * objeto, que es lo que se pulsa en la barra superior.
+   */
+  tunnel: [
+    { c: [8.6, 12, 5.6] },
+    { p: 'M3 12h11.2' },
+    { p: 'M8.6 6.4a12 12 0 0 1 0 11.2' },
+    { p: 'M8.6 6.4a12 12 0 0 0 0 11.2' },
+    { p: 'M16.4 8.4 20.6 12l-4.2 3.6' },
+  ],
 } satisfies Record<string, Shape[]>;
 
 export interface IconOptions {

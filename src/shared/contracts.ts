@@ -91,11 +91,44 @@ export type {
   HttpResponseResult,
   ResolvedHttpRequest,
 } from './http-file.js';
+
+// Fase 15: explorador de pruebas, túneles, métricas, auditoría de NuGet y tokens semánticos.
+// Sus modelos son puros y viven en su propio archivo; su superficie IPC es parte del contrato.
+export type {
+  TestCase,
+  TestFramework,
+  TestKind,
+  TestResult,
+  TestRunSummary,
+  TestStatus,
+} from './test-explorer.js';
+export type { TunnelState, TunnelTool } from './dev-tunnel.js';
+export type {
+  CounterSample,
+  DotnetProcess,
+  MetricId,
+  MetricsEvent,
+  MetricsSnapshot,
+  MetricsState,
+  MetricsStatus,
+} from './perf-counters.js';
+export type {
+  AuditReport,
+  PackageVulnerability,
+  VulnerablePackage,
+  VulnerabilitySeverity,
+} from './nuget-audit.js';
+export type { SemanticTokensLegend } from './semantic-tokens.js';
 import type { EfMigrationList, EfDbContext, EfOperation, EfOperationOptions } from './efcore.js';
 import type { DatabaseSchema } from './efcore-schema.js';
 import type { HttpResponseResult, ResolvedHttpRequest } from './http-file.js';
 import type { ComposeAction, ComposeFile, ContainerAction } from './compose.js';
 import type { DockerContainer, DockerImage } from './docker.js';
+import type { TestCase, TestRunSummary } from './test-explorer.js';
+import type { TunnelTool } from './dev-tunnel.js';
+import type { DotnetProcess, MetricsEvent, MetricsState } from './perf-counters.js';
+import type { AuditReport } from './nuget-audit.js';
+import type { SemanticTokensLegend } from './semantic-tokens.js';
 import type { ConnectionStringInfo } from './efcore.js';
 
 // ---------------------------------------------------------------------------------------------
@@ -411,6 +444,24 @@ export interface DockerEngineState {
   images: DockerImage[];
 }
 
+/**
+ * Petición de ejecución de pruebas.
+ *
+ * Un solo canal para los tres casos —una prueba, una clase, todo— porque los tres son lo mismo con
+ * distinto filtro. El filtro lo construye el renderer con el modelo puro, y el proceso principal
+ * lo valida antes de meterlo en un `argv`.
+ */
+export interface TestRunRequest {
+  /** `.sln` o `.csproj` sobre el que ejecutar. */
+  target: string;
+  /** Nombres completamente cualificados. Vacío ejecuta todas las pruebas del objetivo. */
+  ids?: string[];
+  /** Clase entera, como alternativa a la lista de nombres. */
+  classId?: string | null;
+  /** Etiqueta del canal de salida. */
+  label?: string;
+}
+
 export interface AppInfo {
   name: string;
   version: string;
@@ -539,12 +590,26 @@ export const IPC = {
   nugetVersions: 'nuget:versions',
   nugetInstall: 'nuget:install',
   nugetUninstall: 'nuget:uninstall',
+  nugetAudit: 'nuget:audit',
+
+  testsDiscover: 'tests:discover',
+  testsRun: 'tests:run',
+  testsResults: 'tests:results',
+
+  tunnelTools: 'tunnel:tools',
+  tunnelStart: 'tunnel:start',
+
+  metricsState: 'metrics:state',
+  metricsProcesses: 'metrics:processes',
+  metricsStart: 'metrics:start',
+  metricsStop: 'metrics:stop',
 
   lspState: 'lsp:state',
   lspStart: 'lsp:start',
   lspStop: 'lsp:stop',
   lspRequest: 'lsp:request',
   lspNotify: 'lsp:notify',
+  lspLegend: 'lsp:legend',
 
   debugState: 'debug:state',
   debugStart: 'debug:start',
@@ -578,6 +643,7 @@ export const IPC_EVENTS = {
   debugOutput: 'event:debug-output',
   aiDelta: 'event:ai-delta',
   aiEnd: 'event:ai-end',
+  metricsSample: 'event:metrics-sample',
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];
@@ -596,6 +662,13 @@ export type MenuCommand =
   | 'view.explorer'
   | 'view.source-control'
   | 'view.nuget'
+  | 'nuget.audit'
+  | 'view.tests'
+  | 'tests.run-all'
+  | 'tests.run-file'
+  | 'view.metrics'
+  | 'tunnel.create'
+  | 'tunnel.stop'
   | 'view.efcore'
   | 'view.containers'
   | 'docker.compose-up'
@@ -777,6 +850,48 @@ export interface DotForgeApi {
     versions(packageId: string, includePrerelease: boolean): Promise<string[]>;
     install(projectPath: string, packageId: string, version?: string): Promise<DotnetTaskStarted>;
     uninstall(projectPath: string, packageId: string): Promise<DotnetTaskStarted>;
+    /**
+     * Vulnerabilidades conocidas de los paquetes restaurados (`dotnet list package --vulnerable`).
+     * Sin objetivo se audita la solución entera. Un fallo se devuelve en `error`, no se lanza.
+     */
+    audit(target?: string | null): Promise<AuditReport>;
+  };
+
+  /**
+   * Explorador de pruebas.
+   *
+   * El descubrimiento lee el código fuente y no compila nada; la ejecución devuelve una tarea,
+   * porque su salida va al panel y hay que poder cancelarla. Los resultados se piden aparte
+   * cuando la tarea termina: salen del TRX, que es la única fuente que no depende del idioma.
+   */
+  tests: {
+    discover(): Promise<TestCase[]>;
+    run(request: TestRunRequest): Promise<DotnetTaskStarted>;
+    results(taskId: string): Promise<TestRunSummary>;
+  };
+
+  /**
+   * Túnel público hacia un puerto local.
+   *
+   * `tools()` dice qué hay instalado —lista vacía es un estado normal, no un error— y `start()`
+   * devuelve una tarea de larga duración: se para cancelándola, como cualquier proceso.
+   */
+  tunnel: {
+    tools(): Promise<TunnelTool[]>;
+    start(tool: TunnelTool, port: number): Promise<DotnetTaskStarted>;
+  };
+
+  /**
+   * Monitor de rendimiento sobre un proceso .NET vivo.
+   *
+   * Las muestras llegan por el evento `onMetricsSample`, no como respuesta: son un flujo continuo
+   * mientras dure la sesión.
+   */
+  metrics: {
+    state(): Promise<MetricsState>;
+    processes(): Promise<DotnetProcess[]>;
+    start(pid: number, processName?: string | null): Promise<MetricsState>;
+    stop(): Promise<void>;
   };
   lsp: {
     state(): Promise<LspState>;
@@ -784,6 +899,13 @@ export interface DotForgeApi {
     stop(): Promise<void>;
     request(method: string, params: unknown): Promise<unknown>;
     notify(method: string, params: unknown): Promise<void>;
+    /**
+     * Leyenda de tokens semánticos que publicó el servidor al inicializarse.
+     *
+     * Hace falta para descodificar `textDocument/semanticTokens/full`: los datos son índices
+     * dentro de **su** leyenda, no de la nuestra. Null si el servidor no los ofrece.
+     */
+    legend(): Promise<SemanticTokensLegend | null>;
   };
   debug: {
     state(): Promise<DebugState>;
@@ -829,6 +951,7 @@ export interface DotForgeApi {
     onDebugOutput(handler: (payload: { category: string; text: string }) => void): () => void;
     onAiDelta(handler: (payload: AiStreamDelta) => void): () => void;
     onAiEnd(handler: (payload: AiStreamEnd) => void): () => void;
+    onMetricsSample(handler: (payload: MetricsEvent) => void): () => void;
   };
 }
 

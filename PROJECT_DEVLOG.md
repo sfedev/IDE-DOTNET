@@ -258,6 +258,34 @@ por tanto **compila** pero no **ejecuta** los proyectos generados. Se añade el 
 - [x] F14.16 El proceso depurado tiene canal, pastilla, puerto y parada propios (v1.8.1, ADR-034)
 - [x] F14.17 El indicador de una tarea de larga duración es un punto verde, no un spinner (v1.8.1)
 
+### Fase 15 — Explorador de pruebas, sintaxis semántica, túneles, métricas y auditoría
+- [x] F15.1 Capacidad `textDocument/semanticTokens/full` declarada de verdad (las listas iban vacías)
+- [x] F15.2 Modelo puro de tokens semánticos (`src/shared/semantic-tokens.ts`): descodificación relativa,
+      normalización de los nombres de Roslyn y reempaquetado para Monaco
+- [x] F15.3 Proveedor de tokens semánticos en el puente de Monaco, con repintado al llegar la leyenda
+- [x] F15.4 Paleta de sintaxis estilo Visual Studio 2026 en los dos temas, con contraste AA verificado
+- [x] F15.5 `solution/open`: Roslyn no carga nada hasta que se le abre la solución (ADR-039)
+- [x] F15.6 Modelo puro del explorador de pruebas (`src/shared/test-explorer.ts`): descubrimiento por
+      texto, árbol, filtros de VSTest y lectura de resultados
+- [x] F15.7 Servicio de pruebas: recorrido de los proyectos de pruebas y `dotnet test` con logger TRX
+- [x] F15.8 Resultados leídos del TRX, que es invariante; consola sólo como camino degradado (ADR-036)
+- [x] F15.9 Panel lateral "Pruebas": árbol proyecto → clase → prueba, estados, filtro y "Ejecutar todas"
+- [x] F15.10 Lentes de código "▶ Ejecutar prueba" y "Depurar" sobre cada `[Fact]` y `[Theory]`
+- [x] F15.11 Los fallos van al panel de problemas con archivo, línea, mensaje del assert y traza
+- [x] F15.12 Insignia de pruebas en rojo sobre el icono de la barra de actividad
+- [x] F15.13 Modelo puro de túneles (`src/shared/dev-tunnel.ts`) con escáner de salida por líneas
+- [x] F15.14 Botón "Crear túnel público" en la barra superior, con la URL clicable y el aviso
+- [x] F15.15 Modelo puro de contadores (`src/shared/perf-counters.ts`): dos generaciones de nombres
+- [x] F15.16 Pestaña "Métricas": CPU, montón, conjunto de trabajo, reserva, GC por generación y HTTP
+- [x] F15.17 Sesión de `dotnet-counters collect` leyendo el CSV de forma incremental (ADR-038)
+- [x] F15.18 Modelo puro de la auditoría de NuGet (`src/shared/nuget-audit.ts`): JSON y tabla degradada
+- [x] F15.19 Sección "Seguridad" en el panel de NuGet: gravedad, CVE/GHSA y transitivos
+- [x] F15.20 Insignia de paquetes con aviso sobre el icono de NuGet
+- [x] F15.21 Modos de diagnóstico `--ui=tests`, `--ui=tests-run`, `--ui=metrics`, `--ui=audit`
+- [x] F15.22 `--probe=` espera promesas: sirve para medir una llamada IPC, no sólo el DOM
+- [x] F15.23 La salida de error del servidor de lenguaje llega a la consola en vez de perderse
+- [x] F15.24 Pruebas: 165 nuevas (tokens semánticos, pruebas, túneles, contadores y auditoría)
+
 ---
 
 ## Decisiones técnicas (ADR corto)
@@ -1717,3 +1745,171 @@ está en marcha"— y el spinner se reserva para lo que sí acaba: compilar, res
 - `npm test` en verde: **893 pruebas**, seis de ellas nuevas para la regla del canal depurado.
 
 **Versión:** corrección de comportamiento visible, sin contratos nuevos: 1.8.0 → **1.8.1**.
+
+### ADR-035 — La sintaxis es un código de colores, no una armonía
+**Fecha:** 2026-08-24
+**Contexto:** Desde la Fase 7 los colores de código se elegían dentro de un rango de saturación
+estrecho, con el criterio de que ninguno "saltara" por encima del resto. El resultado era agradable
+y decía poco: un tipo, un método y una variable local se distinguían por matices de azul.
+**Opciones:**
+- (a) mantener la paleta armónica y confiar en la forma del código para orientarse;
+- (b) adoptar la jerarquía cromática de Visual Studio: verde azulado para los tipos, verde agua para
+  las interfaces, dorado para lo que se invoca, azul claro para los miembros de datos, gris claro
+  para lo local y púrpura para el flujo de control.
+**Decisión:** (b), en los dos temas.
+**Consecuencias:** el color deja de ser decoración y pasa a ser **información**: en veinte líneas de
+configuración de un `Program.cs`, `WebApplication` se lee como tipo y `CreateBuilder` como llamada
+sin tener que leerlas. A cambio la pantalla tiene más colores, y por eso cada uno se ha verificado
+contra el fondo: el peor sobre `#1b1d27` es el comentario, con 4,93:1, por encima del mínimo AA. El
+tema claro **no** usa los mismos hexadecimales: el azul de Visual Studio sobre blanco se queda en
+3:1, así que cada familia tiene ahí su versión oscurecida.
+
+### ADR-036 — Los resultados de las pruebas salen del TRX, no de la consola
+**Fecha:** 2026-08-24
+**Contexto:** `dotnet test` escribe por consola una línea por prueba con su estado, y es lo más fácil
+de parsear. En un Windows en español esa línea dice `Con error` donde la documentación dice `Failed`.
+**Decisión:** se ejecuta siempre con `--logger "trx;LogFileName=…"` y los resultados se leen del XML,
+donde el estado es el nombre de una enumeración (`Passed`, `Failed`, `NotExecuted`) y no cambia con el
+idioma del sistema. El parseo de la consola existe, se usa sólo si el TRX no está —el runner ha
+reventado antes de escribirlo— y el resumen sale marcado como `degraded` para que la interfaz lo diga.
+**Consecuencias:** es la misma decisión que con el bloque JSON de EF Core (ADR-025) y por el mismo
+motivo. Además el TRX trae lo que la consola no da estructurado: la duración por prueba, el mensaje
+del assert y la traza completa, que es lo que alimenta el panel de problemas. Dos detalles que
+costaron una vuelta cada uno: el nombre bueno está en `TestDefinitions` y no en `testName` —en una
+`[Theory]` ese campo trae los argumentos del caso—, y el TRX escribe los saltos de línea del mensaje
+como `&#xD;&#xA;`, que hay que descodificar o aparecen incrustados en cada línea de la traza.
+
+### ADR-037 — Las pruebas se descubren leyendo el código, no compilando
+**Fecha:** 2026-08-24
+**Contexto:** `dotnet test --list-tests` da la lista exacta, y para darla compila la solución entera.
+**Decisión:** el árbol y las lentes salen de un análisis de texto de los `.cs` de los proyectos de
+pruebas, igual que las lentes de endpoints (ADR-027).
+**Consecuencias:** el árbol está lleno al abrir la solución y la lente aparece sobre el `[Fact]` que
+se está escribiendo, en un archivo que todavía no compila. El precio es que una prueba generada por
+un `[TestCaseSource]` exótico puede no aparecer hasta que se ejecute, y que se puede ofrecer ejecutar
+algo que `dotnet test` dirá que no existe: el error barato. Se reconocen xUnit (`[Fact]`, `[Theory]`),
+NUnit (`[Test]`, `[TestCase]`) y MSTest (`[TestMethod]`).
+
+### ADR-038 — El monitor de contadores usa `collect`, no `monitor`
+**Fecha:** 2026-08-24
+**Contexto:** `dotnet-counters monitor` pinta una tabla en directo y parece la opción evidente para
+un panel de métricas. Con la salida redirigida —que es la única forma de leerla desde el IDE—
+revienta con una `NullReferenceException` antes de emitir un solo valor: necesita una consola de
+verdad para calcular el ancho y mover el cursor.
+**Decisión:** `dotnet-counters collect --format csv --output <archivo>`, y el servicio lee el archivo
+de forma incremental, guardando el desplazamiento y procesando sólo hasta el último salto de línea.
+**Consecuencias:** funciona sin terminal, sobrevive a que la herramienta esté escribiendo una fila
+justo cuando se lee, y el CSV es un formato estable que además sirve para pegar una captura en una
+prueba. El archivo vive en el directorio temporal y se borra al parar la sesión. De paso apareció lo
+que de verdad importaba: **desde .NET 9 los contadores tienen otros nombres**. Los EventCounters
+clásicos (`CPU Usage`, `GC Heap Size`) dan paso a las métricas del `Meter` de `System.Runtime`
+(`dotnet.process.cpu.time`, `dotnet.gc.collections[gc.heap.generation=gen0]`), con unidad declarada y
+etiquetas. Se soportan las dos familias: con sólo la primera el panel se quedaba vacío justo en el
+framework que este IDE targetea.
+
+### ADR-039 — A Roslyn hay que abrirle la solución
+**Fecha:** 2026-08-24
+**Contexto:** Al conectar el proveedor de tokens semánticos apareció que el servidor devolvía `null`.
+Al comprobarlo, devolvía `null` **a todo**: hover, completado, símbolos. Y sin embargo el handshake
+terminaba bien y la barra de estado decía "Roslyn LanguageServer listo".
+**Causa:** `initialize` le dice al servidor dónde está la carpeta, pero no qué proyectos cargar. Su
+espacio de trabajo se llena con dos notificaciones que **no son parte de LSP**: `solution/open` y
+`project/open`. Sin ellas el servidor arranca, contesta al handshake y no sabe nada de ningún archivo.
+**Decisión:** en cuanto termina el handshake se le abre la solución (o la lista de proyectos si no hay
+`.sln`), y su stderr deja de tragarse: va a la consola del proceso principal.
+**Consecuencias:** es el fallo más difícil de ver de este proyecto, porque por fuera parecía que
+funcionaba. La regla que queda escrita es más general que el arreglo: **un servidor que responde
+"listo" no está diciendo que sepa nada**, y un proveedor que devuelve siempre vacío es indistinguible
+de uno que funciona si nadie mira el error. Por eso ahora se registra.
+
+---
+
+### Iteración 19 — 2026-08-24 — Fase 15: pruebas, color, túneles, métricas y seguridad
+
+**Objetivo:** cerrar el hueco entre "el IDE compila y ejecuta" y "el IDE me dice cómo va": qué
+pruebas fallan, qué es cada símbolo del código, cuánto está gastando la aplicación, qué paquetes
+tienen avisos y cómo abrir el puerto local a un webhook.
+
+**Cinco módulos, todos con su modelo puro aparte:**
+
+- `src/shared/semantic-tokens.ts` — la codificación relativa de LSP y la normalización de los
+  nombres de clasificación de Roslyn (`class name`, `keyword - control`, `xml doc comment - text`)
+  a un conjunto pequeño de ámbitos con significado visual.
+- `src/shared/test-explorer.ts` — descubrimiento de pruebas por texto, árbol, filtros de VSTest y
+  lectura de resultados; `src/main/services/test-service.ts` recorre el disco y lanza `dotnet test`.
+- `src/shared/dev-tunnel.ts` — argumentos de `devtunnel` y `ngrok`, y el escáner que reconoce la URL
+  pública con búfer de líneas.
+- `src/shared/perf-counters.ts` — las dos generaciones de nombres de contador, las transformaciones
+  (bytes a MB, segundos de CPU a por ciento) y la geometría del gráfico.
+- `src/shared/nuget-audit.ts` — el JSON de `dotnet list package --vulnerable` y la tabla degradada.
+
+**Errores encontrados y solucionados:**
+
+1. *Síntoma:* el resaltado semántico no pintaba nada aunque el servidor dijera "listo".
+   *Causa raíz (1):* las listas `tokenTypes` y `tokenModifiers` de las capacidades del cliente iban
+   **vacías** desde la Fase 2. Para LSP eso significa "no entiendo ningún tipo de token", así que un
+   servidor correcto no manda ninguno.
+   *Causa raíz (2):* aun con las capacidades bien, Roslyn seguía devolviendo `null` — y no sólo a los
+   tokens: a hover, a completado y a símbolos. Le faltaba la notificación `solution/open` (ADR-039).
+   *Arreglo:* las dos cosas, más registrar el stderr del servidor para que un fallo así no vuelva a
+   ser invisible.
+2. *Síntoma:* con el proveedor registrado, un archivo abierto se quedaba con los colores de la
+   gramática aunque el servidor cargara después.
+   *Causa raíz:* Monaco pide los tokens **una vez** por versión del documento; si la respuesta llega
+   vacía no vuelve a preguntar hasta que se escriba en el archivo.
+   *Arreglo:* el proveedor expone `onDidChange` y se dispara al llegar la leyenda y al recibir
+   `workspace/projectInitializationComplete`.
+3. *Síntoma:* el panel de métricas no enseñaba nada con una sesión en marcha.
+   *Causa raíz:* `dotnet-counters monitor` revienta con la salida redirigida (ADR-038).
+   *Arreglo:* `collect --format csv` leyendo el archivo de forma incremental.
+4. *Síntoma:* con eso arreglado, el panel seguía vacío contra una Web API en net10.0.
+   *Causa raíz:* .NET 9 sustituyó los EventCounters por el `Meter` de `System.Runtime`, con nombres
+   nuevos, unidades declaradas y etiquetas.
+   *Arreglo:* la tabla de contadores reconoce las dos familias y declara qué transformación necesita
+   cada una. Las generaciones del GC se distinguen por su etiqueta, no por el nombre.
+5. *Síntoma:* la traza de una prueba fallida aparecía con `&#xD;` incrustado en cada línea.
+   *Causa raíz:* el parser de XML traduce las entidades con nombre, no las referencias numéricas, y
+   el TRX escribe los saltos de línea como `&#xD;&#xA;`.
+   *Arreglo:* descodificación explícita, con su prueba.
+6. *Síntoma:* la primera visita a la pestaña de métricas decía "sin procesos .NET" con tres
+   corriendo.
+   *Causa raíz:* el panel se pinta al pulsar su pestaña, y ahí todavía no se había preguntado nada.
+   *Arreglo:* la primera pintada dispara la consulta.
+7. *Decisión de herramienta:* `--probe=` envuelve ahora la expresión en `Promise.resolve`. Sin eso no
+   se puede medir nada asíncrono —una llamada IPC, una petición al servidor de lenguaje— porque
+   serializar una promesa imprime `{}`. Es lo que permitió diagnosticar el punto 1.
+
+**Verificado sobre la aplicación real** (solución `Acme.Lab` generada con el propio scaffolding,
+net10.0, con su Web API arrancada):
+
+- Explorador de pruebas: **13 pruebas descubiertas** en dos clases sin compilar nada; `Ejecutar
+  todas` deja `12 correctas · 1 con error · 0 omitidas`, la prueba rota en rojo con
+  `Assert.Equal() Failure: Strings differ / Expected: "Teclado roto" / Actual: "Teclado mecánico"`,
+  su traza con `ProductTests.cs:line 15`, insignia `1` sobre el icono de pruebas y `1` en la pestaña
+  de problemas.
+- Colores: con datos de clasificación, `WebApplication` se pinta `rgb(78, 201, 176)` (#4EC9B0) y
+  `CreateBuilder` `rgb(220, 220, 170)` (#DCDCAA), leídos del estilo calculado, no de una captura.
+- Métricas: `Monitorizando Acme.Lab.WebApi`, grupos Proceso / Memoria / Recolección de basura y —con
+  tráfico— HTTP; `Montón administrado 26 MB`, `Conjunto de trabajo 130 MB`, `Reserva 0,9 MB/s` y diez
+  gráficos de tendencia.
+- Auditoría: sobre la solución limpia, "Sin vulnerabilidades conocidas"; tras añadir
+  `Newtonsoft.Json 12.0.1`, cinco filas `Alta` con `GHSA-5CRP-9R3C-P9VR`, marcando cuál es directa y
+  cuáles transitivas, e insignia `5` sobre el icono de NuGet.
+- Túnel: sin herramienta instalada, `▲ No hay ninguna herramienta de túnel instalada. Instala una:
+  winget install Microsoft.devtunnel · winget install ngrok.ngrok`.
+- `npm test` en verde de punta a punta: **1058 pruebas** (904 unit, 41 security, 57 package, 56
+  scaffold), de las cuales 165 son nuevas de esta fase. `prune:dist` liberó los artefactos de la
+  1.8.0 y `verify:dist` confirma el instalador y el ZIP de la 1.9.0.
+
+**Limitación conocida, con diagnóstico.** En esta máquina el servidor de Roslyn arranca, contesta al
+handshake y muere al componer su gráfico MEF:
+`PartDiscoveryException: Could not find assembly Microsoft.CodeAnalysis.CSharp.Features, Version=5.4.0.0 … in any extension context`.
+Se reproduce lanzando el ejecutable a mano, fuera del IDE, y no depende de la ruta ni de la caché de
+composición. Es un fallo del paquete `microsoft.codeanalysis.languageserver.win-x64 5.4.0-2.26179.14`
+del feed `dotnet-tools`, anterior a esta fase, y por eso el IntelliSense de C# nunca ha devuelto
+datos en este equipo. Todo lo que depende del IDE está hecho y verificado —capacidades, leyenda,
+descodificación, proveedor y colores— y el resaltado semántico se enciende solo el día que el
+servidor conteste. Fijar una versión conocida buena del servidor queda anotado para la Fase 16.
+
+**Versión:** funcionalidad nueva con once canales IPC nuevos y una corrección de comportamiento
+visible en el resaltado: 1.8.1 → **1.9.0** (ADR-009).

@@ -177,3 +177,10 @@ export {
 export type { DotnetVerbosity, DotnetVerbosityPlan } from '../shared/dotnet-verbosity.js';
 
 export { DEFAULT_SETTINGS } from '../shared/contracts.js';
+
+/**
+ * Explorador de pruebas: el descubrimiento recorre el disco y la lectura de resultados parsea el
+ * TRX. Ninguno importa `electron`, así que las pruebas pueden ejercitarlos contra archivos de
+ * verdad en un directorio temporal.
+ */
+export { discoverProjectTests, discoverTests, parseTrx } from './services/test-service.js';

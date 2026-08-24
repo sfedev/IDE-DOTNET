@@ -21,6 +21,7 @@ import {
 import { lspClient } from './lsp/lsp-client.js';
 import * as aiService from './services/ai/ai-service.js';
 import * as aiSecrets from './services/ai/secret-store.js';
+import * as metricsService from './services/metrics-service.js';
 import * as processRegistry from './services/process-registry.js';
 import * as settingsService from './services/settings-service.js';
 import * as startupService from './services/startup-service.js';
@@ -382,30 +383,46 @@ const uiAction = (() => {
 
 const UI_ACTIONS: Record<string, string> = {
   // La barra de actividad, en orden: solución, control de código fuente, generador, NuGet,
-  // base de datos, contenedores, depuración, IA, [spacer], ajustes. Los índices son posicionales:
-  // si se añade una herramienta, hay que moverlos aquí, y por eso el orden está escrito arriba.
+  // base de datos, contenedores, pruebas, depuración, IA, [spacer], ajustes. Los índices son
+  // posicionales: si se añade una herramienta, hay que moverlos aquí, y por eso el orden está
+  // escrito arriba. La Fase 15 metió "pruebas" en el 6 y desplazó todo lo que venía detrás.
   git: "document.querySelectorAll('.activity-item')[1]?.click()",
   wizard: "document.querySelectorAll('.activity-item')[2]?.click()",
   nuget: "document.querySelectorAll('.activity-item')[3]?.click()",
   efcore: "document.querySelectorAll('.activity-item')[4]?.click()",
   containers: "document.querySelectorAll('.activity-item')[5]?.click()",
-  debug: "document.querySelectorAll('.activity-item')[6]?.click()",
-  ai: "document.querySelectorAll('.activity-item')[7]?.click()",
-  settings: "document.querySelectorAll('.activity-item')[8]?.click()",
+  tests: "document.querySelectorAll('.activity-item')[6]?.click()",
+  debug: "document.querySelectorAll('.activity-item')[7]?.click()",
+  ai: "document.querySelectorAll('.activity-item')[8]?.click()",
+  settings: "document.querySelectorAll('.activity-item')[9]?.click()",
   // Cliente HTTP y visor de registro: pestañas del panel inferior.
   http: "[...document.querySelectorAll('.panel-tab')].find((tab) => tab.textContent?.includes('HTTP'))?.click()",
   logs: "[...document.querySelectorAll('.panel-tab')].find((tab) => tab.textContent?.includes('Registro'))?.click()",
+  // Abre la pestaña y **arranca la sesión**: un panel de métricas parado no enseña nada que
+  // revisar, y esperar a que alguien pulse a mano no es una comprobación reproducible.
+  metrics:
+    "[...document.querySelectorAll('.panel-tab')].find((tab) => tab.textContent?.includes('Métricas'))?.click();" +
+    'setTimeout(() => [...document.querySelectorAll(".metrics-head .btn")]' +
+    ".find((button) => button.textContent?.includes('Monitorizar'))?.click(), 3000)",
+  // Fase 15: el explorador de pruebas con el árbol ya descubierto, y la auditoría de NuGet.
+  'tests-run':
+    "document.querySelectorAll('.activity-item')[6]?.click();" +
+    'setTimeout(() => document.querySelector(".tests-run-all")?.click(), 4000)',
+  audit:
+    "document.querySelectorAll('.activity-item')[3]?.click();" +
+    'setTimeout(() => [...document.querySelectorAll(".nuget-audit-head button")]' +
+    ".find((button) => button.textContent?.includes('Analizar'))?.click(), 900)",
   palette: "document.querySelector('#statusbar button:last-of-type')?.click()",
   terminal: "[...document.querySelectorAll('.panel-tab')].find((tab) => tab.textContent?.includes('Terminal'))?.click()",
   // Dos pasos: abrir ajustes y pulsar "Claro". Se encadenan con un retardo porque la vista se
   // repinta entre uno y otro.
   light:
-    "document.querySelectorAll('.activity-item')[8]?.click();" +
+    "document.querySelectorAll('.activity-item')[9]?.click();" +
     "setTimeout(() => [...document.querySelectorAll('.segmented button')]" +
     ".find((button) => button.textContent?.includes('Claro'))?.click(), 400)",
   // Despliega el grupo de archivos satélite de appsettings.json.
   'probe-theme':
-    "document.querySelectorAll('.activity-item')[8]?.click();" +
+    "document.querySelectorAll('.activity-item')[9]?.click();" +
     "setTimeout(() => {" +
     "  [...document.querySelectorAll('.segmented button')].find((b) => b.textContent?.includes('Claro'))?.click();" +
     "  setTimeout(() => {" +
@@ -447,7 +464,7 @@ const UI_ACTIONS: Record<string, string> = {
   // Fase 11: conmuta "Activar el asistente" en Ajustes. Sirve para revisar a ojo el icono
   // atenuado de la barra de actividad; ejecutarlo dos veces deja la preferencia como estaba.
   'ai-toggle':
-    "document.querySelectorAll('.activity-item')[8]?.click();" +
+    "document.querySelectorAll('.activity-item')[9]?.click();" +
     'setTimeout(() => {' +
     "  const row = [...document.querySelectorAll('.settings-toggle')]" +
     "    .find((label) => label.textContent?.includes('Activar el asistente'));" +
@@ -490,8 +507,11 @@ const probeExpression = (() => {
 function runProbe(window: BrowserWindow, expression: string): void {
   window.webContents.once('did-finish-load', () => {
     setTimeout(() => {
+      // La expresión se envuelve en `Promise.resolve`: así `--probe=` sirve también para medir
+      // algo asíncrono —una llamada al proceso principal, una petición al servidor de lenguaje—
+      // en vez de imprimir `{}`, que es lo que sale al serializar una promesa.
       void window.webContents
-        .executeJavaScript(`JSON.stringify(${expression})`, true)
+        .executeJavaScript(`Promise.resolve(${expression}).then((value) => JSON.stringify(value))`, true)
         .then((result: string) => {
           console.log(`PROBE ${result}`);
           app.exit(0);
@@ -640,6 +660,9 @@ app.on('before-quit', () => {
   void lspClient.stop();
   // Una petición en streaming sigue consumiendo tokens aunque nadie mire la respuesta.
   aiService.cancelAll();
+  // El monitor de rendimiento no pasa por el registro de tareas: tiene su propio proceso y su
+  // propia parada. Sin esto, `dotnet-counters` sobrevive al IDE enganchado a la aplicación.
+  metricsService.stop();
   processRegistry.killAll();
 });
 

@@ -211,3 +211,100 @@ export type {
   ContainerAction,
   ServiceStatus,
 } from '../shared/compose.js';
+
+/**
+ * Tokens semánticos: descodificación del formato relativo de LSP y traducción de la clasificación
+ * de Roslyn a los ámbitos del tema. Es aritmética con desplazamientos donde un error no falla,
+ * sólo tiñe mal: se prueba con datos.
+ */
+export {
+  CLIENT_TOKEN_MODIFIERS,
+  CLIENT_TOKEN_TYPES,
+  decodeTokens,
+  encodeTokens,
+  legendFromCapabilities,
+  normalizeTokenType,
+  remapTokens,
+  scopeForTokenType,
+  SEMANTIC_SCOPES,
+} from '../shared/semantic-tokens.js';
+export type { SemanticScope, SemanticToken, SemanticTokensLegend } from '../shared/semantic-tokens.js';
+
+/**
+ * Explorador de pruebas: descubrimiento por texto, árbol, filtros de VSTest y lectura de
+ * resultados. Todo son reglas sobre texto con casos borde reales.
+ */
+export {
+  aggregateStatus,
+  attributeNames,
+  baseTestId,
+  buildTestTree,
+  collapseResults,
+  describeSummary,
+  escapeFilterValue,
+  filterForClass,
+  filterForTests,
+  findTests,
+  looksLikeTestFile,
+  namedArgument,
+  outcomeToStatus,
+  parseConsoleResults,
+  parseDuration,
+  qualify,
+  summarize,
+  testRunArgs,
+} from '../shared/test-explorer.js';
+export type { TestCase, TestResult, TestRunSummary, TestStatus } from '../shared/test-explorer.js';
+
+/** Túneles públicos: argumentos, reconocimiento de la URL y el escáner con búfer de líneas. */
+export {
+  detectTunnelUrl,
+  isValidPort,
+  missingToolMessage,
+  TUNNEL_TOOLS,
+  TUNNEL_WARNING,
+  TunnelOutputScanner,
+  tunnelArgs,
+  tunnelInfo,
+} from '../shared/dev-tunnel.js';
+export type { TunnelState, TunnelTool } from '../shared/dev-tunnel.js';
+
+/** Monitor de rendimiento: parseo de `dotnet-counters` y geometría del gráfico. */
+export {
+  applySamples,
+  counterUnit,
+  countersCollectArgs,
+  COUNTERS_REFRESH_SECONDS,
+  COUNTER_PROVIDERS,
+  mappingForCounter,
+  parseCounterName,
+  fillRatio,
+  formatMetric,
+  METRICS,
+  metricForCounter,
+  metricInfo,
+  parseCounterSamples,
+  parseCounterValue,
+  parseDotnetProcesses,
+  pushPoint,
+  sparklinePath,
+  stripAnsi,
+} from '../shared/perf-counters.js';
+export type { CounterSample, MetricId, MetricsSnapshot, MetricsState } from '../shared/perf-counters.js';
+
+/** Auditoría de seguridad de NuGet: JSON del SDK, tabla degradada y orden por gravedad. */
+export {
+  advisoryIdentifier,
+  auditArgs,
+  AUDIT_RESTORE_HINT,
+  coerceSeverity,
+  countBySeverity,
+  describeAudit,
+  parseVulnerableJson,
+  parseVulnerableText,
+  severityRank,
+  SEVERITY_LABEL,
+  sortPackages,
+  worstSeverity,
+} from '../shared/nuget-audit.js';
+export type { AuditReport, VulnerablePackage, VulnerabilitySeverity } from '../shared/nuget-audit.js';

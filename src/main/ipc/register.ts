@@ -33,6 +33,11 @@ import type { EfOperation, EfOperationOptions } from '../../shared/efcore.js';
 import type { ComposeAction, ContainerAction } from '../../shared/compose.js';
 import { composeArgs, containerArgs, isComposeFile } from '../../shared/compose.js';
 import { EF_OPERATIONS } from '../../shared/efcore.js';
+import { TUNNEL_TOOLS, isValidPort, missingToolMessage } from '../../shared/dev-tunnel.js';
+import type { TunnelTool } from '../../shared/dev-tunnel.js';
+import type { MetricsState } from '../../shared/perf-counters.js';
+import { legendFromCapabilities } from '../../shared/semantic-tokens.js';
+import { filterForClass, filterForTests } from '../../shared/test-explorer.js';
 import { buildDiffRequest } from '../../shared/git.js';
 import { IPC, IPC_EVENTS } from '../../shared/contracts.js';
 import { AI_PROVIDER_IDS } from '../../shared/ai.js';
@@ -55,7 +60,10 @@ import * as fileService from '../services/file-service.js';
 import * as httpClient from '../services/http-client-service.js';
 import * as gitService from '../services/git-service.js';
 import { readNpmScripts } from '../services/node-scripts.js';
+import * as metricsService from '../services/metrics-service.js';
 import * as nugetService from '../services/nuget-service.js';
+import * as testService from '../services/test-service.js';
+import * as tunnelService from '../services/tunnel-service.js';
 import * as settingsService from '../services/settings-service.js';
 import * as startupService from '../services/startup-service.js';
 import { loadSolution } from '../services/solution-service.js';
@@ -90,6 +98,15 @@ function requireString(value: unknown, name: string): string {
 const TASK_KINDS: ReadonlySet<string> = new Set<DotnetTaskKind>([
   'build', 'rebuild', 'clean', 'restore', 'test', 'run', 'watch', 'format',
 ]);
+
+/**
+ * Forma de un nombre completamente cualificado de prueba.
+ *
+ * Se valida antes de construir el filtro porque acaba dentro de un `argv`: identificadores de C#
+ * separados por puntos y nada más. Un nombre que no encaje se descarta en vez de escaparse, que
+ * es la decisión conservadora — como mucho no se ejecuta una prueba.
+ */
+const TEST_ID = /^[A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)+$/;
 
 const taskCallbacks: dotnetService.DotnetTaskCallbacks = {
   onStarted: (payload) => broadcast(IPC_EVENTS.taskStarted, payload),
@@ -184,7 +201,16 @@ async function startLanguageServer(): Promise<LspState> {
       } satisfies LspState);
     });
 
-    return await lspClient.start(server, currentSolution.directory);
+    const state = await lspClient.start(server, currentSolution.directory);
+
+    // Roslyn no carga nada por su cuenta: hay que abrirle la solución explícitamente o devolverá
+    // `null` a todas las peticiones con el servidor en estado "listo".
+    lspClient.openWorkspace(
+      currentSolution.path,
+      currentSolution.projects.map((project) => project.path),
+    );
+
+    return state;
   } catch (error) {
     const state: LspState = {
       status: 'degraded',
@@ -211,6 +237,18 @@ export function registerIpcHandlers(): void {
 
   lspClient.on('state', (state: LspState) => broadcast(IPC_EVENTS.lspStateChanged, state));
   lspClient.on('notification', (payload) => broadcast(IPC_EVENTS.lspNotification, payload));
+
+  /**
+   * Lo que el servidor escriba por stderr va a la consola del proceso principal.
+   *
+   * Un servidor de lenguaje que arranca, contesta al handshake y luego devuelve `null` a todo es
+   * el fallo más difícil de ver de este proyecto: por fuera parece que funciona. Su stderr es la
+   * única pista, y tragárselo era garantizar no encontrarlo nunca.
+   */
+  lspClient.on('log', (text: string) => {
+    const trimmed = text.trim();
+    if (trimmed !== '') console.error(`[lsp] ${trimmed}`);
+  });
 
   // --- Aplicación ---------------------------------------------------------------------------
   ipcMain.handle(IPC.appInfo, async (): Promise<AppInfo> => {
@@ -696,6 +734,121 @@ export function registerIpcHandlers(): void {
     ),
   );
 
+  /**
+   * Auditoría de vulnerabilidades.
+   *
+   * Sin objetivo se audita la solución entera, que es lo que se quiere el 95% de las veces: la
+   * vulnerabilidad suele estar en un transitivo que arrastra un proyecto cualquiera.
+   */
+  ipcMain.handle(IPC.nugetAudit, (_event, target: unknown) => {
+    const path =
+      target === null || target === undefined || target === ''
+        ? currentSolution?.path ?? currentSolution?.directory ?? null
+        : assertInsideWorkspace(target);
+
+    if (path === null) throw new Error('no hay ninguna solución abierta que auditar');
+    return nugetService.audit(path);
+  });
+
+  // --- Explorador de pruebas ---------------------------------------------------------------------
+
+  /**
+   * Descubrimiento.
+   *
+   * Sólo se recorren los proyectos que la solución ya ha marcado como de pruebas: recorrer el
+   * workspace entero leyendo `.cs` sería lento y encontraría cosas que no son pruebas.
+   */
+  ipcMain.handle(IPC.testsDiscover, () => {
+    const projects = (currentSolution?.projects ?? [])
+      .filter((project) => project.isTestProject)
+      .map((project) => project.path);
+
+    return testService.discoverTests(projects);
+  });
+
+  ipcMain.handle(IPC.testsRun, async (_event, request: unknown) => {
+    if (typeof request !== 'object' || request === null) throw new Error('petición de pruebas inválida');
+
+    const payload = request as { target?: unknown; ids?: unknown; classId?: unknown; label?: unknown };
+    const target = assertInsideWorkspace(payload.target);
+
+    // El filtro se **construye aquí** a partir de identificadores validados, en vez de aceptar la
+    // cadena que mande el renderer: así no hay forma de colar opciones extra dentro del `--filter`.
+    const ids = Array.isArray(payload.ids)
+      ? payload.ids.filter((id): id is string => typeof id === 'string' && TEST_ID.test(id))
+      : [];
+
+    const classId = typeof payload.classId === 'string' && TEST_ID.test(payload.classId) ? payload.classId : null;
+
+    const filter = ids.length > 0 ? filterForTests(ids) : classId !== null ? filterForClass(classId) : null;
+
+    const resultsRoot = await testService.ensureResultsRoot(join(app.getPath('userData'), 'test-results'));
+
+    return testService.runTests(
+      {
+        target,
+        filter,
+        requested: ids,
+        verbosity: settingsService.current().dotnetVerbosity,
+        label: typeof payload.label === 'string' && payload.label !== '' ? payload.label : 'Pruebas',
+        resultsRoot,
+      },
+      taskCallbacks,
+    );
+  });
+
+  ipcMain.handle(IPC.testsResults, (_event, taskId: unknown) =>
+    testService.readResults(requireString(taskId, 'taskId')),
+  );
+
+  // --- Túnel público ------------------------------------------------------------------------------
+  ipcMain.handle(IPC.tunnelTools, () => tunnelService.detectTools());
+
+  ipcMain.handle(IPC.tunnelStart, async (_event, tool: unknown, port: unknown) => {
+    const id = TUNNEL_TOOLS.find((entry) => entry.id === tool)?.id;
+    if (id === undefined) throw new Error(`herramienta de túnel no reconocida: ${String(tool)}`);
+    if (!isValidPort(port)) throw new Error(`puerto no válido para el túnel: ${String(port)}`);
+
+    const available = await tunnelService.detectTools();
+    if (!available.includes(id)) throw new Error(missingToolMessage(id as TunnelTool));
+
+    const cwd = currentSolution?.directory ?? app.getPath('userData');
+    return tunnelService.startTunnel(id as TunnelTool, port, cwd, taskCallbacks);
+  });
+
+  // --- Monitor de rendimiento ----------------------------------------------------------------------
+  ipcMain.handle(IPC.metricsState, async (): Promise<MetricsState> => {
+    await metricsService.isAvailable();
+    return metricsService.getState();
+  });
+
+  ipcMain.handle(IPC.metricsProcesses, () => metricsService.listProcesses());
+
+  ipcMain.handle(IPC.metricsStart, (_event, pid: unknown, processName: unknown): MetricsState => {
+    if (typeof pid !== 'number' || !Number.isInteger(pid) || pid <= 0) {
+      throw new Error(`pid no válido: ${String(pid)}`);
+    }
+
+    return metricsService.start(pid, typeof processName === 'string' ? processName : null, {
+      onSamples: (samples) =>
+        broadcast(IPC_EVENTS.metricsSample, {
+          state: metricsService.getState(),
+          samples,
+          at: Date.now(),
+        }),
+      onStatus: () =>
+        broadcast(IPC_EVENTS.metricsSample, {
+          state: metricsService.getState(),
+          samples: [],
+          at: Date.now(),
+        }),
+    });
+  });
+
+  ipcMain.handle(IPC.metricsStop, () => {
+    metricsService.stop();
+  });
+
   // --- Depuración -------------------------------------------------------------------------------
   ipcMain.handle(IPC.debugState, (): DebugState => debugController.getState());
 
@@ -767,9 +920,11 @@ export function registerIpcHandlers(): void {
     if (!lspClient.isRunning()) return null;
     try {
       return await lspClient.request(requireString(method, 'method'), params);
-    } catch {
+    } catch (error) {
       // Una petición LSP fallida no debe propagarse como excepción a la UI: Monaco espera
-      // simplemente "sin resultados".
+      // simplemente "sin resultados". Pero sí se deja constancia en la consola: un proveedor que
+      // devuelve siempre vacío por un error del servidor es indistinguible de uno que funciona.
+      console.error(`[lsp] ${String(method)}: ${error instanceof Error ? error.message : String(error)}`);
       return null;
     }
   });
@@ -778,6 +933,8 @@ export function registerIpcHandlers(): void {
     if (!lspClient.isRunning()) return;
     lspClient.notify(requireString(method, 'method'), params);
   });
+
+  ipcMain.handle(IPC.lspLegend, () => legendFromCapabilities(lspClient.getServerCapabilities()));
 
   // --- Asistente de IA ---------------------------------------------------------------------------
   ipcMain.handle(IPC.aiStatus, (): AiStatus => aiService.status(settingsService.current().ai));

@@ -33,7 +33,7 @@ const MAX_OUTPUT_LINES = 5000;
 /** Cuántas sugerencias se listan en el menú. Más que esto ya no se lee: se ojea. */
 const MAX_SUGGESTIONS = 8;
 
-export type PanelTab = 'output' | 'terminal' | 'problems' | 'debug' | 'http' | 'logs';
+export type PanelTab = 'output' | 'terminal' | 'problems' | 'debug' | 'http' | 'logs' | 'metrics';
 
 export interface PanelHost {
   openDiagnostic(diagnostic: BuildDiagnostic): void;
@@ -42,6 +42,8 @@ export interface PanelHost {
   renderDebug(container: HTMLElement): void;
   /** Pinta el cliente HTTP dentro del panel. Misma idea que `renderDebug`. */
   renderHttp(container: HTMLElement): void;
+  /** Pinta el monitor de rendimiento. Misma idea que `renderDebug`. */
+  renderMetrics(container: HTMLElement): void;
   /** Abre un archivo por su ruta y línea: lo pide un marco de pila del visor de registro. */
   openLogLocation(file: string, line: number): void;
   /** Contexto para el autocompletado: ramas de git y proyectos de la solución. */
@@ -138,6 +140,15 @@ export class PanelView {
 
   /** Violaciones de las reglas de arquitectura. Sobreviven a una compilación correcta. */
   private architecture: BuildDiagnostic[] = [];
+
+  /**
+   * Pruebas en rojo de la última ejecución.
+   *
+   * Tienen su propia lista por el mismo motivo que las de arquitectura: una compilación correcta
+   * no arregla una prueba que falla, así que no puede borrar su problema. Se van cuando se vuelve
+   * a ejecutar la prueba, que es lo único que cambia el hecho.
+   */
+  private testFailures: BuildDiagnostic[] = [];
   private runningTasks = new Map<string, DotnetTaskStarted>();
   private collapsed = false;
 
@@ -518,9 +529,15 @@ export class PanelView {
     this.render();
   }
 
-  /** Problemas del compilador y de la arquitectura, en ese orden. */
+  /** Fallos de la última ejecución de pruebas, con su mensaje y su traza. */
+  setTestDiagnostics(diagnostics: BuildDiagnostic[]): void {
+    this.testFailures = diagnostics;
+    this.render();
+  }
+
+  /** Problemas del compilador, de la arquitectura y de las pruebas, en ese orden. */
   getDiagnostics(): BuildDiagnostic[] {
-    return [...this.diagnostics, ...this.architecture];
+    return [...this.diagnostics, ...this.architecture, ...this.testFailures];
   }
 
   hasRunningTasks(): boolean {
@@ -573,6 +590,13 @@ export class PanelView {
       case 'logs':
         content.appendChild(this.renderLogs());
         return;
+
+      case 'metrics': {
+        const host = el('div', { className: 'metrics-panel' });
+        this.host.renderMetrics(host);
+        content.appendChild(host);
+        return;
+      }
     }
   }
 
@@ -1312,6 +1336,7 @@ export class PanelView {
           : null,
       ),
       makeTab('http', 'send', 'HTTP'),
+      makeTab('metrics', 'gauge', 'Métricas'),
       el('span', { className: 'spacer', style: { flex: '1' } }),
     );
 

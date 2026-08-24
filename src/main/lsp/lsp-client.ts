@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import type { LspState } from '../../shared/contracts.js';
+import { CLIENT_TOKEN_MODIFIERS, CLIENT_TOKEN_TYPES } from '../../shared/semantic-tokens.js';
 import { APP_VERSION } from '../../shared/version.js';
 import type { AcquiredServer } from './acquire.js';
 
@@ -77,12 +78,25 @@ function clientCapabilities(): Record<string, unknown> {
       },
       publishDiagnostics: { relatedInformation: true, versionSupport: true },
       inlayHint: { dynamicRegistration: false },
+      /**
+       * Tokens semánticos.
+       *
+       * Las dos listas **no pueden ir vacías**: para LSP, "no declaro ningún tipo de token" es
+       * exactamente lo que parece, y un servidor que lo lea correctamente no manda nada. Estuvieron
+       * vacías desde la Fase 2, que es por lo que el resaltado de C# se quedaba en lo que sabía la
+       * gramática Monarch. Roslyn publica su propia leyenda al inicializarse y el renderer traduce
+       * de la suya a la nuestra (`src/shared/semantic-tokens.ts`).
+       */
       semanticTokens: {
         dynamicRegistration: false,
-        requests: { range: false, full: true },
-        tokenTypes: [],
-        tokenModifiers: [],
+        requests: { range: false, full: { delta: false } },
+        tokenTypes: [...CLIENT_TOKEN_TYPES],
+        tokenModifiers: [...CLIENT_TOKEN_MODIFIERS],
         formats: ['relative'],
+        overlappingTokenSupport: false,
+        multilineTokenSupport: false,
+        serverCancelSupport: true,
+        augmentsSyntaxTokens: true,
       },
     },
     general: { positionEncodings: ['utf-16'] },
@@ -96,6 +110,9 @@ export class LspClient extends EventEmitter {
   private readonly pending = new Map<number, PendingRequest>();
   private state: LspState = { status: 'idle', server: null, version: null, message: null, progress: null };
   private serverCapabilities: Record<string, unknown> | null = null;
+
+  /** Qué servidor está en marcha. Roslyn necesita que se le abra la solución; OmniSharp no. */
+  private serverKind: AcquiredServer['kind'] | null = null;
 
   getState(): LspState {
     return this.state;
@@ -131,6 +148,7 @@ export class LspClient extends EventEmitter {
     });
 
     this.child = child;
+    this.serverKind = server.kind;
 
     child.stdout?.on('data', (chunk: Buffer) => this.onData(chunk));
     child.stderr?.on('data', (chunk: Buffer) => this.emit('log', chunk.toString('utf8')));
@@ -197,11 +215,38 @@ export class LspClient extends EventEmitter {
 
     this.rejectAllPending(new Error('el servidor de lenguaje se ha detenido'));
     this.serverCapabilities = null;
+    this.serverKind = null;
     this.setState({ status: 'idle', server: null, version: null, message: null, progress: null });
   }
 
   isRunning(): boolean {
     return this.child !== null && this.state.status === 'ready';
+  }
+
+  /**
+   * Abre la solución en el servidor.
+   *
+   * **Sin esto, `Microsoft.CodeAnalysis.LanguageServer` no responde a nada.** El handshake termina
+   * bien, el servidor dice "listo" y luego devuelve `null` a cualquier `hover`, `completion` o
+   * `semanticTokens`, porque su espacio de trabajo está vacío: `initialize` le dice dónde está la
+   * carpeta, pero no qué proyectos cargar. Eso se pide con dos notificaciones propias suyas,
+   * `solution/open` y `project/open`, que no son parte de LSP y por eso es fácil no enterarse.
+   *
+   * Se prefiere la solución al listado de proyectos: con el `.sln` el servidor resuelve él mismo
+   * las referencias entre proyectos, y con la lista suelta puede acabar cargando cada uno aislado.
+   *
+   * OmniSharp descubre la solución solo a partir de la raíz, así que aquí no hace nada.
+   */
+  openWorkspace(solutionPath: string | null, projectPaths: readonly string[]): void {
+    if (this.serverKind !== 'roslyn' || this.child === null) return;
+
+    if (solutionPath !== null && solutionPath !== '') {
+      this.notify('solution/open', { solution: pathToFileURL(solutionPath).toString() });
+      return;
+    }
+
+    if (projectPaths.length === 0) return;
+    this.notify('project/open', { projects: projectPaths.map((path) => pathToFileURL(path).toString()) });
   }
 
   request(method: string, params: unknown): Promise<unknown> {

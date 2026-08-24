@@ -80,9 +80,13 @@ function buildTheme(base: 'vs' | 'vs-dark'): MonacoApi.editor.IStandaloneThemeDa
       { token: 'comment.cs', foreground: token('--syntax-comment'), fontStyle: 'italic' },
       { token: 'comment.razor', foreground: token('--syntax-comment'), fontStyle: 'italic' },
       { token: 'comment.html', foreground: token('--syntax-comment'), fontStyle: 'italic' },
+      { token: 'comment.doc', foreground: token('--syntax-doc'), fontStyle: 'italic' },
 
       { token: 'keyword', foreground: token('--syntax-keyword') },
       { token: 'keyword.cs', foreground: token('--syntax-keyword') },
+      // `if`, `return`, `await`, `foreach`: el flujo se distingue del resto de palabras clave,
+      // que es la diferencia que Visual Studio marca con el púrpura.
+      { token: 'keyword.control', foreground: token('--syntax-control') },
       { token: 'keyword.directive.razor', foreground: token('--syntax-razor'), fontStyle: 'bold' },
       { token: 'delimiter.razor', foreground: token('--syntax-razor') },
       { token: 'keyword.control.razor', foreground: token('--syntax-control'), fontStyle: 'bold' },
@@ -90,14 +94,31 @@ function buildTheme(base: 'vs' | 'vs-dark'): MonacoApi.editor.IStandaloneThemeDa
       { token: 'string', foreground: token('--syntax-string') },
       { token: 'string.cs', foreground: token('--syntax-string') },
       { token: 'string.razor', foreground: token('--syntax-string') },
-      { token: 'string.escape.cs', foreground: token('--syntax-number') },
+      { token: 'string.escape', foreground: token('--syntax-escape') },
+      { token: 'string.escape.cs', foreground: token('--syntax-escape') },
 
       { token: 'number', foreground: token('--syntax-number') },
       { token: 'number.cs', foreground: token('--syntax-number') },
+      { token: 'regexp', foreground: token('--syntax-regexp') },
 
       { token: 'type', foreground: token('--syntax-type') },
       { token: 'type.cs', foreground: token('--syntax-type') },
       { token: 'type.identifier', foreground: token('--syntax-type') },
+      // Los parámetros de tipo (`TEntity`) comparten color con las interfaces: los dos son
+      // "un contrato", no un tipo concreto.
+      { token: 'type.parameter', foreground: token('--syntax-interface') },
+      { token: 'interface', foreground: token('--syntax-interface') },
+      { token: 'method', foreground: token('--syntax-method') },
+      { token: 'property', foreground: token('--syntax-property') },
+      { token: 'field', foreground: token('--syntax-property') },
+      { token: 'constant', foreground: token('--syntax-property') },
+      { token: 'enum.member', foreground: token('--syntax-property') },
+      { token: 'event', foreground: token('--syntax-property') },
+      { token: 'variable', foreground: token('--syntax-variable') },
+      { token: 'parameter', foreground: token('--syntax-variable') },
+      { token: 'label', foreground: token('--syntax-variable') },
+      { token: 'namespace', foreground: token('--syntax-namespace') },
+      { token: 'operator', foreground: token('--syntax-operator') },
 
       { token: 'identifier.cs', foreground: token('--syntax-variable') },
       { token: 'identifier.razor', foreground: token('--syntax-variable') },
@@ -109,7 +130,7 @@ function buildTheme(base: 'vs' | 'vs-dark'): MonacoApi.editor.IStandaloneThemeDa
       { token: 'attribute.razor', foreground: token('--syntax-razor') },
       { token: 'metatag.html', foreground: token('--syntax-comment') },
 
-      { token: 'operator.cs', foreground: token('--syntax-control') },
+      { token: 'operator.cs', foreground: token('--syntax-operator') },
 
       // Archivos .http del cliente integrado: verbo, URL, cabecera, variable y separador.
       { token: 'keyword.http', foreground: token('--syntax-keyword'), fontStyle: 'bold' },

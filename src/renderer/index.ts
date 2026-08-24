@@ -21,13 +21,16 @@ import type {
 import type { AiContext, AiProviderId, AiStatus, AiTask } from '../shared/ai.js';
 import { buildHttpFile, findEndpoints, httpFileNameFor, requestFor } from '../shared/api-endpoints.js';
 import { isHttpFile, parseHttpFile } from '../shared/http-file.js';
-import { debugChannelTransition } from './run-output.js';
+import { debugChannelTransition, portOf } from './run-output.js';
 import type { ArchitectureViolation } from '../shared/architecture-rules.js';
 import { checkSolution, checkUsings } from '../shared/architecture-rules.js';
 import { architectureLabel, buildContext, detectArchitecture } from '../shared/ai-context.js';
 import type { RunMode, StartupConfig } from '../shared/startup.js';
 import { launchPlan, runnableProjects, shortProjectName } from '../shared/startup.js';
 import { aiEntryState, AI_DISABLED_MESSAGE } from './ai-availability.js';
+import type { TunnelTool } from '../shared/dev-tunnel.js';
+import { TUNNEL_TOOLS, TunnelOutputScanner, TUNNEL_WARNING, tunnelInfo } from '../shared/dev-tunnel.js';
+import { findTests } from '../shared/test-explorer.js';
 import { byId, clear, el } from './dom.js';
 import { installIconGallery } from './icon-gallery.js';
 import { icon, type IconName } from './icons.js';
@@ -43,7 +46,9 @@ import { ExplorerView } from './views/explorer.js';
 import { HttpClientView } from './views/http.js';
 import { GitView } from './views/git.js';
 import { NuGetView } from './views/nuget.js';
+import { MetricsView } from './views/metrics.js';
 import { PanelView, type ServiceInfo } from './views/panel.js';
+import { TestExplorerView } from './views/tests.js';
 import { DebugView } from './views/debug.js';
 import { CommandPalette, type Command } from './views/palette.js';
 import { SettingsView } from './views/settings.js';
@@ -52,7 +57,7 @@ import { StatusBar } from './views/statusbar.js';
 import { WelcomeView } from './views/welcome.js';
 import { WizardView } from './views/wizard.js';
 
-type SidebarView = 'explorer' | 'git' | 'nuget' | 'efcore' | 'containers' | 'settings' | 'ai';
+type SidebarView = 'explorer' | 'git' | 'nuget' | 'efcore' | 'containers' | 'tests' | 'settings' | 'ai';
 
 class DotForgeApp {
   private info: AppInfo | null = null;
@@ -134,7 +139,35 @@ class DotForgeApp {
   private readonly nuget = new NuGetView({
     notify: (message, level) => this.notify(message, level),
     reloadSolution: () => void this.reloadSolution(),
+    openUrl: (url) => void window.dotforge.app.openExternal(url),
+    vulnerabilitiesChanged: () => this.renderActivityBar(),
   });
+
+  /** Explorador de pruebas: árbol proyecto → clase → prueba y ejecución con resultados. */
+  private readonly testsView = new TestExplorerView({
+    notify: (message, level) => this.notify(message, level),
+    openFile: (path, line) => void this.openFile(path, line),
+    showOutput: () => this.panel.show('output'),
+    publishFailures: (diagnostics) => {
+      this.panel.setTestDiagnostics(diagnostics);
+      this.renderActivityBar();
+      this.renderStatus();
+    },
+    defaultTarget: () => this.solution?.path ?? this.solution?.projects[0]?.path ?? null,
+  });
+
+  /** Monitor de rendimiento: vive dentro del panel inferior, como la depuración. */
+  private readonly metricsView = new MetricsView({
+    notify: (message, level) => this.notify(message, level),
+    refresh: () => {
+      if (this.panel.currentTab() === 'metrics') this.panel.render();
+    },
+    runningServiceNames: () => this.panel.services().map((service) => service.label),
+  });
+
+  /** Túnel público activo: tarea, herramienta y URL en cuanto la anuncia. */
+  private tunnel: { taskId: string; tool: TunnelTool; port: number; url: string | null } | null = null;
+  private readonly tunnelScanner = new TunnelOutputScanner();
 
   private readonly panel = new PanelView({
     openDiagnostic: (diagnostic) => void this.openDiagnostic(diagnostic),
@@ -142,6 +175,7 @@ class DotForgeApp {
     runCommand: (line) => void this.runTerminalCommand(line),
     renderDebug: (container) => this.debug.render(container, () => this.panel.render()),
     renderHttp: (container) => this.httpClient.render(container),
+    renderMetrics: (container) => this.metricsView.render(container),
     openLogLocation: (file, line) => void this.openFile(file, line),
     suggestContext: () => ({
       branches: this.branches,
@@ -263,6 +297,7 @@ class DotForgeApp {
     this.attachLspProviders();
     this.registerEditorAiActions();
     this.registerHttpFeatures();
+    this.registerTestFeatures();
 
     this.renderActivityBar();
     this.renderTitlebarActions();
@@ -363,6 +398,7 @@ class DotForgeApp {
     this.nuget.setSolution(solution);
     this.efcoreView.setSolution(solution);
     this.containersView.setSolution(solution);
+    this.testsView.setSolution(solution);
     this.startupBar.setSolution(solution);
     this.aiChat.setArchitecture(architectureLabel(detectArchitecture(solution)));
     this.updateTitle();
@@ -614,6 +650,8 @@ class DotForgeApp {
 
   private async restartLsp(): Promise<void> {
     this.notify('Reiniciando el servidor de lenguaje…', 'info');
+    // La leyenda de tokens semánticos es del servidor que se está parando: se olvida.
+    void import('./lsp-bridge.js').then(({ resetSemanticLegend }) => resetSemanticLegend());
     await window.dotforge.lsp.stop();
     const state = await window.dotforge.lsp.start();
     this.lsp = state;
@@ -682,13 +720,58 @@ class DotForgeApp {
       button('Explorador de soluciones', 'solution', this.sidebarView === 'explorer', () => this.showExplorer()),
       this.sourceControlButton(changes),
       button('Generador de arquitecturas', 'wand', false, () => void this.wizard.open()),
-      button('Paquetes NuGet', 'package', this.sidebarView === 'nuget', () => this.showNuGet()),
+      this.nugetButton(),
       button('Base de datos y EF Core', 'database', this.sidebarView === 'efcore', () => this.showEfCore()),
       button('Contenedores y Docker Compose', 'package', this.sidebarView === 'containers', () => this.showContainers()),
-      button('Depuración y pruebas', 'bug', false, () => this.panel.show('debug'), errors > 0),
+      this.testsButton(),
+      button('Depuración', 'bug', false, () => this.panel.show('debug'), errors > 0),
       this.aiButton(),
       el('div', { className: 'spacer' }),
       button('Ajustes', 'settings', this.sidebarView === 'settings', () => this.showSettings()),
+    );
+  }
+
+  /**
+   * Explorador de pruebas, con el número de pruebas en rojo como insignia.
+   *
+   * La insignia sólo aparece cuando hay fallos: un contador permanente de "cuántas pruebas hay"
+   * no cambia ninguna decisión, y uno de "cuántas fallan" las cambia todas.
+   */
+  private testsButton(): HTMLElement {
+    const failed = this.testsView.failedCount();
+
+    return el(
+      'button',
+      {
+        className: `activity-item${this.sidebarView === 'tests' ? ' active' : ''}`,
+        title: failed > 0 ? `Explorador de pruebas — ${failed} en rojo` : 'Explorador de pruebas',
+        attrs: { 'aria-label': 'Explorador de pruebas' },
+        on: { click: () => this.showTests() },
+      },
+      icon('flask', { size: 20 }),
+      failed > 0 ? el('span', { className: 'activity-count danger', text: failed > 99 ? '99+' : String(failed) }) : null,
+    );
+  }
+
+  /** NuGet, con el número de paquetes con aviso de seguridad como insignia. */
+  private nugetButton(): HTMLElement {
+    const vulnerable = this.nuget.vulnerableCount();
+
+    return el(
+      'button',
+      {
+        className: `activity-item${this.sidebarView === 'nuget' ? ' active' : ''}`,
+        title:
+          vulnerable > 0
+            ? `Paquetes NuGet — ${vulnerable} con aviso de seguridad`
+            : 'Paquetes NuGet',
+        attrs: { 'aria-label': 'Paquetes NuGet' },
+        on: { click: () => this.showNuGet() },
+      },
+      icon('package', { size: 20 }),
+      vulnerable > 0
+        ? el('span', { className: 'activity-count danger', text: vulnerable > 99 ? '99+' : String(vulnerable) })
+        : null,
     );
   }
 
@@ -749,6 +832,7 @@ class DotForgeApp {
     this.nuget.setVisible(view === 'nuget');
     this.efcoreView.setVisible(view === 'efcore');
     this.containersView.setVisible(view === 'containers');
+    this.testsView.setVisible(view === 'tests');
     this.settingsView.setVisible(view === 'settings');
     this.aiChat.setVisible(view === 'ai');
     this.renderActivityBar();
@@ -764,6 +848,10 @@ class DotForgeApp {
 
   private showContainers(): void {
     this.showSidebar('containers');
+  }
+
+  private showTests(): void {
+    this.showSidebar('tests');
   }
 
   private showSettings(): void {
@@ -797,7 +885,37 @@ class DotForgeApp {
 
     actions.append(
       action('hammer', `Compilar solución (${modifier}+Shift+B)`, () => void this.runTask('build')),
-      action('flask', `Ejecutar pruebas (${modifier}+Shift+T)`, () => void this.runTask('test')),
+      action('flask', `Ejecutar pruebas (${modifier}+Shift+T)`, () => this.testsView.runAll()),
+      this.tunnelButton(),
+    );
+  }
+
+  /**
+   * Botón del túnel público.
+   *
+   * Con el túnel abierto, el botón cambia de significado: pasa a decir la URL y a cerrarlo. Es la
+   * misma pieza porque es el mismo estado, y tener dos botones —uno para abrir y otro para cerrar—
+   * obliga a mirar cuál está activo.
+   */
+  private tunnelButton(): HTMLElement {
+    const open = this.tunnel !== null;
+    const url = this.tunnel?.url ?? null;
+
+    const label = open
+      ? url === null
+        ? 'Abriendo el túnel…'
+        : `Túnel público en ${url} — clic para cerrarlo`
+      : 'Crear túnel público hacia el puerto de la aplicación';
+
+    return el(
+      'button',
+      {
+        className: `icon-btn${open ? ' active' : ''}`,
+        title: label,
+        attrs: { 'aria-label': label },
+        on: { click: () => void (open ? this.stopTunnel() : this.startTunnel()) },
+      },
+      icon('tunnel', { size: 15 }),
     );
   }
 
@@ -1225,12 +1343,19 @@ class DotForgeApp {
       { id: 'build.clean', title: 'Limpiar', group: 'Compilar', run: () => void this.runTask('clean') },
       { id: 'build.restore', title: 'Restaurar paquetes', group: 'Compilar', run: () => void this.runTask('restore') },
       {
+        /**
+         * Ejecutar pruebas pasa por el explorador y no por el runner de tareas.
+         *
+         * Es el mismo `dotnet test`, pero con el logger TRX puesto: así la ejecución deja
+         * resultados —qué prueba ha fallado, con qué mensaje y en qué línea— en vez de sólo un
+         * volcado de texto en la salida.
+         */
         id: 'build.test',
         icon: 'flask',
         title: 'Ejecutar pruebas',
         group: 'Compilar',
         keybinding: `${modifier}+Shift+T`,
-        run: () => void this.runTask('test'),
+        run: () => this.testsView.runAll(),
       },
       {
         id: 'run.start',
@@ -1426,6 +1551,69 @@ class DotForgeApp {
         group: 'Ver',
         keybinding: `${modifier}+Shift+L`,
         run: () => this.panel.show('logs'),
+      },
+      {
+        id: 'view.tests',
+        icon: 'flask',
+        title: 'Explorador de pruebas',
+        group: 'Ver',
+        keybinding: `${modifier}+Shift+Y`,
+        run: () => this.showTests(),
+      },
+      {
+        id: 'tests.run-all',
+        icon: 'play',
+        title: 'Pruebas: ejecutar todas',
+        group: 'Pruebas',
+        run: () => this.testsView.runAll(),
+      },
+      {
+        id: 'tests.run-file',
+        icon: 'flask',
+        title: 'Pruebas: ejecutar las del archivo actual',
+        group: 'Pruebas',
+        run: () => {
+          const tab = this.editor.activeTab();
+          if (!tab) {
+            this.notify('Abre el archivo de pruebas que quieras ejecutar.', 'warn');
+            return;
+          }
+          this.testsView.runFile(tab.path);
+        },
+      },
+      {
+        id: 'view.metrics',
+        icon: 'gauge',
+        title: 'Métricas de rendimiento',
+        group: 'Ver',
+        run: () => {
+          this.panel.show('metrics');
+          void this.metricsView.refresh();
+        },
+      },
+      {
+        id: 'tunnel.create',
+        icon: 'tunnel',
+        title: 'Crear túnel público hacia el puerto local',
+        group: 'Ejecutar',
+        run: () => void this.startTunnel(),
+      },
+      {
+        id: 'tunnel.stop',
+        icon: 'stop',
+        title: 'Cerrar el túnel público',
+        group: 'Ejecutar',
+        run: () => void this.stopTunnel(),
+      },
+      {
+        id: 'nuget.audit',
+        icon: 'shield',
+        title: 'NuGet: buscar vulnerabilidades conocidas',
+        group: 'Seguridad',
+        run: () => {
+          this.showNuGet();
+          void this.nuget.audit();
+        },
       },
       {
         id: 'architecture.check',
@@ -1743,6 +1931,179 @@ class DotForgeApp {
    * es la única forma que ofrece el editor autónomo de Monaco: `registerCommand` no está expuesto
    * en el paquete de distribución, y un `MarkerProvider` no puede ejecutar acciones.
    */
+  // -------------------------------------------------------------------------------------------
+  // Túnel público
+  // -------------------------------------------------------------------------------------------
+
+  /**
+   * Puerto que se va a publicar.
+   *
+   * Se toma del proceso que esté corriendo y ya haya anunciado su URL: publicar el puerto
+   * equivocado da un túnel que responde 502 y diez minutos de desconcierto. Si no hay ninguno, se
+   * pregunta, porque el usuario puede tener la aplicación arrancada desde fuera del IDE.
+   */
+  private tunnelPort(): number | null {
+    const service = this.panel.services().find((entry) => entry.url !== null);
+    const detected = service?.url === undefined || service.url === null ? null : portOf(service.url);
+
+    const answer = window.prompt(
+      'Puerto local que quieres publicar en internet:',
+      detected ?? '5000',
+    );
+    if (answer === null) return null;
+
+    const port = Number.parseInt(answer.trim(), 10);
+    if (!Number.isInteger(port) || port <= 0 || port >= 65_536) {
+      this.notify(`Puerto no válido: ${answer}`, 'warn');
+      return null;
+    }
+
+    return port;
+  }
+
+  private async startTunnel(): Promise<void> {
+    if (this.tunnel !== null) return;
+
+    let tools: TunnelTool[];
+    try {
+      tools = await window.dotforge.tunnel.tools();
+    } catch (error) {
+      this.notify(`No se ha podido comprobar las herramientas de túnel: ${this.messageOf(error)}`, 'error');
+      return;
+    }
+
+    const tool = tools[0];
+    if (tool === undefined) {
+      // Ninguna instalada: se explica y se da la orden, como con `dotnet-ef` o con Docker.
+      this.notify(
+        `No hay ninguna herramienta de túnel instalada. Instala una: ${TUNNEL_TOOLS.map(
+          (entry) => entry.install,
+        ).join('  ·  ')}`,
+        'warn',
+      );
+      return;
+    }
+
+    const port = this.tunnelPort();
+    if (port === null) return;
+
+    try {
+      const task = await window.dotforge.tunnel.start(tool, port);
+
+      this.tunnelScanner.reset();
+      this.tunnel = { taskId: task.taskId, tool, port, url: null };
+      this.panel.show('output');
+      this.notify(`Abriendo un túnel con ${tunnelInfo(tool).label} hacia el puerto ${port}. ${TUNNEL_WARNING}`, 'info');
+    } catch (error) {
+      this.notify(`No se ha podido abrir el túnel: ${this.messageOf(error)}`, 'error');
+    } finally {
+      this.renderTitlebarActions();
+    }
+  }
+
+  private async stopTunnel(): Promise<void> {
+    const tunnel = this.tunnel;
+    if (tunnel === null) return;
+
+    await window.dotforge.dotnet.cancelTask(tunnel.taskId);
+    this.notify('Túnel cerrado.', 'ok');
+  }
+
+  /** Reconoce la URL pública en la salida del túnel. Llega una sola vez y a mitad del chorro. */
+  private noteTunnelOutput(taskId: string, chunk: string): void {
+    if (this.tunnel === null || this.tunnel.taskId !== taskId) return;
+
+    const url = this.tunnelScanner.push(chunk);
+    if (url === null) return;
+
+    this.tunnel = { ...this.tunnel, url };
+    this.renderTitlebarActions();
+    this.notify(`Túnel público: ${url}`, 'ok');
+  }
+
+  private registerTestFeatures(): void {
+    const monaco = getMonaco();
+    const editor = this.editor.getEditor();
+    if (!editor) return;
+
+    const runCommand = editor.addCommand(0, (_context, id: unknown) => {
+      const test = this.testsView.all().find((candidate) => candidate.id === String(id));
+      if (test) this.testsView.runTest(test);
+    });
+
+    const debugCommand = editor.addCommand(0, (_context, line: unknown) => {
+      void this.debugTestAtLine(Number(line));
+    });
+
+    /**
+     * Lentes sobre `[Fact]` y `[Theory]`.
+     *
+     * Se calculan sobre el texto del modelo y **no** sobre la lista descubierta: la lente tiene que
+     * aparecer en la prueba que se acaba de escribir, antes de guardar y sin volver a recorrer el
+     * disco. Es el mismo motivo por el que las lentes de endpoints se calculan por texto (ADR-027).
+     */
+    monaco.languages.registerCodeLensProvider('csharp', {
+      provideCodeLenses: (model) => {
+        const path = model.uri.fsPath === '' ? model.uri.path : model.uri.fsPath;
+        const tests = findTests(model.getValue(), path);
+
+        return {
+          lenses: tests.flatMap((test) => {
+            const range = {
+              startLineNumber: test.line,
+              startColumn: 1,
+              endLineNumber: test.line,
+              endColumn: 1,
+            };
+
+            return [
+              {
+                id: `test-run-${test.id}`,
+                range,
+                ...(runCommand === null
+                  ? {}
+                  : { command: { id: runCommand, title: '▶ Ejecutar prueba', arguments: [test.id] } }),
+              },
+              {
+                id: `test-debug-${test.id}`,
+                range,
+                ...(debugCommand === null
+                  ? {}
+                  : { command: { id: debugCommand, title: 'Depurar', arguments: [test.methodLine] } }),
+              },
+            ];
+          }),
+          dispose: () => undefined,
+        };
+      },
+    });
+  }
+
+  /**
+   * Depura la prueba de una línea.
+   *
+   * NetCoreDbg lanza el ejecutable de un proyecto, y un proyecto de pruebas no tiene uno propio:
+   * lo que se depura de verdad es el runner. Mientras eso no esté resuelto, la acción hace lo
+   * honesto —poner un punto de interrupción en la prueba y ejecutarla— en vez de fingir una
+   * sesión de depuración que no va a parar en ninguna parte.
+   */
+  private async debugTestAtLine(line: number): Promise<void> {
+    const tab = this.editor.activeTab();
+    if (!tab) return;
+
+    const test = findTests(tab.model.getValue(), tab.path).find((candidate) => candidate.methodLine === line);
+    if (!test) return;
+
+    await this.toggleBreakpoint(tab.path, test.methodLine);
+    this.notify(
+      `Punto de interrupción en ${test.method}. Se ejecuta la prueba con el depurador escuchando.`,
+      'info',
+    );
+
+    const discovered = this.testsView.all().find((candidate) => candidate.id === test.id);
+    this.testsView.runTest(discovered ?? test);
+  }
+
   private registerHttpFeatures(): void {
     const monaco = getMonaco();
     registerHttpLanguage(monaco);
@@ -1972,6 +2333,8 @@ class DotForgeApp {
 
     window.dotforge.events.onTaskOutput((output) => {
       this.panel.append(output.chunk, output.stream, output.taskId);
+      // La URL pública del túnel llega en una línea cualquiera de su salida.
+      this.noteTunnelOutput(output.taskId, output.chunk);
     });
 
     window.dotforge.events.onTaskExit((exit) => {
@@ -1979,6 +2342,8 @@ class DotForgeApp {
       // Si la tarea era una operación de EF Core o de Docker, su panel se relee solo.
       this.efcoreView.noteTaskExit(exit.taskId, exit.code);
       this.containersView.noteTaskExit(exit.taskId, exit.code);
+      void this.testsView.noteTaskExit(exit.taskId);
+      this.noteTunnelExit(exit.taskId);
       this.applyBuildMarkers(exit.diagnostics);
       this.renderStatus();
       this.startupBar.render();
@@ -2001,12 +2366,26 @@ class DotForgeApp {
             .filter((tab) => tab.languageId === 'csharp' || tab.languageId === 'razor')
             .map((tab) => ({ path: tab.path, languageId: tab.languageId, text: tab.model.getValue() })),
         );
+
+        // El servidor ya puede clasificar: se le vuelven a pedir los tokens de lo que hay abierto.
+        void import('./lsp-bridge.js').then(({ refreshSemanticTokens }) => refreshSemanticTokens());
       }
     });
 
     window.dotforge.events.onLspNotification(({ method, params }) => {
       if (method === 'textDocument/publishDiagnostics') {
         applyPublishDiagnostics(getMonaco(), params, (path, markers) => this.editor.setMarkers(path, markers));
+        return;
+      }
+
+      /**
+       * Roslyn avisa cuando ha terminado de cargar los proyectos.
+       *
+       * Hasta ese momento contesta vacío a todo, así que los archivos abiertos se quedan con los
+       * colores de la gramática. Al llegar este aviso se les vuelve a pedir la clasificación.
+       */
+      if (method === 'workspace/projectInitializationComplete') {
+        void import('./lsp-bridge.js').then(({ refreshSemanticTokens }) => refreshSemanticTokens());
       }
     });
 
@@ -2051,6 +2430,11 @@ class DotForgeApp {
       else if (this.aiInline.ownsRequest(requestId)) this.aiInline.finish(requestId, reason, message);
     });
 
+    // Muestras del monitor de rendimiento. Llegan cada pocos segundos mientras dure la sesión.
+    window.dotforge.events.onMetricsSample(({ state, samples, at }) => {
+      this.metricsView.applyEvent(state, samples, at);
+    });
+
     // Avisar de cambios sin guardar antes de cerrar la ventana.
     window.addEventListener('beforeunload', (event) => {
       if (this.editor.hasDirtyTabs()) {
@@ -2058,6 +2442,15 @@ class DotForgeApp {
         event.returnValue = '';
       }
     });
+  }
+
+  /** El proceso del túnel ha muerto: se cierra el estado y se repinta el botón. */
+  private noteTunnelExit(taskId: string): void {
+    if (this.tunnel === null || this.tunnel.taskId !== taskId) return;
+
+    this.tunnel = null;
+    this.tunnelScanner.reset();
+    this.renderTitlebarActions();
   }
 
   private applyBuildMarkers(diagnostics: BuildDiagnostic[]): void {

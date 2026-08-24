@@ -27,8 +27,11 @@ desde el primer minuto, con un CRUD funcional de ejemplo. Desde la v1.4.0 lleva 
 control del nivel de detalle de la salida de la CLI de .NET. La v1.6.0 añade el **gestor visual de
 Entity Framework Core** y un **cliente HTTP integrado** para probar la API que estás escribiendo, y
 la v1.7.0 un **visor de registro estructurado**, un **linter de reglas de arquitectura** y
-autocompletado de Docker, Azure y npm en la terminal. La v1.8.0 cierra el círculo con un **panel de
-contenedores y Docker Compose** para levantar los servicios de apoyo sin salir del IDE.
+autocompletado de Docker, Azure y npm en la terminal. La v1.8.0 añade un **panel de contenedores y
+Docker Compose** para levantar los servicios de apoyo sin salir del IDE, y la v1.9.0 cierra el
+círculo del día a día: **explorador de pruebas** con lentes de código sobre cada `[Fact]`,
+**resaltado de C# estilo Visual Studio** alimentado por el compilador, **monitor de rendimiento**,
+**túneles públicos** para probar webhooks y **auditoría de vulnerabilidades** de los paquetes.
 
 ![DotForge IDE con una solución DDD abierta](docs/screenshot-workspace.png)
 
@@ -44,6 +47,10 @@ contenedores y Docker Compose** para levantar los servicios de apoyo sin salir d
 - [Registro estructurado](#registro-estructurado)
 - [Linter de reglas de arquitectura](#linter-de-reglas-de-arquitectura)
 - [Contenedores y Docker Compose](#contenedores-y-docker-compose)
+- [Explorador de pruebas](#explorador-de-pruebas)
+- [Monitor de rendimiento](#monitor-de-rendimiento)
+- [Túnel público para webhooks](#túnel-público-para-webhooks)
+- [Auditoría de seguridad de NuGet](#auditoría-de-seguridad-de-nuget)
 - [Instalación](#instalación)
 - [El generador de arquitecturas](#el-generador-de-arquitecturas)
   - [Clean Architecture](#clean-architecture)
@@ -77,6 +84,11 @@ contenedores y Docker Compose** para levantar los servicios de apoyo sin salir d
 - **Monaco Editor** con IntelliSense de C# vía **Roslyn LanguageServer** (con OmniSharp de respaldo):
   completado, hover, ayuda de firma, ir a la definición, buscar referencias, renombrar, formatear
   y diagnósticos en vivo.
+- **Resaltado semántico estilo Visual Studio**: el color no lo decide la gramática, lo decide el
+  compilador. Los tipos se leen en verde azulado, las interfaces en verde agua, lo que se invoca en
+  dorado, los miembros de datos en azul claro, las locales y los parámetros en gris claro y el flujo
+  de control en púrpura. En un `Program.cs` de veinte líneas, `WebApplication` se distingue de
+  `CreateBuilder` sin tener que leerlos.
 - Gramática **Razor/Blazor** propia: distingue directivas (`@page`, `@code`), bloques de control
   (`@foreach`, `@if`), C# incrustado, componentes Blazor y etiquetas HTML.
 - Auto-cierre de etiquetas que respeta las void (`<br>`) y las autocerradas (`<Foo />`).
@@ -340,6 +352,60 @@ proyecto y el botón para levantarlos.
 > Sin Docker instalado o con el motor parado, el panel no se queda en blanco: sigue enseñando los
 > servicios declarados, con las acciones deshabilitadas y un aviso que dice qué pasa.
 
+### Explorador de pruebas
+
+Un panel en la barra de actividad (`Ctrl+Shift+Y`) con el árbol **proyecto → clase → prueba**, y una
+lente de código sobre cada `[Fact]` y cada `[Theory]` del editor.
+
+- **El árbol está lleno al abrir la solución**, sin compilar nada: las pruebas se descubren leyendo
+  el código. Eso significa que la lente aparece también sobre la prueba que acabas de escribir y que
+  todavía no compila. Se reconocen xUnit (`[Fact]`, `[Theory]`), NUnit (`[Test]`) y MSTest
+  (`[TestMethod]`).
+- **Ejecuta lo que quieras**: todas, las de un proyecto, las de una clase, las de un archivo o una
+  sola desde su lente. La salida va al panel inferior como cualquier compilación, con su cancelar.
+- **Estado por prueba** — 🟢 correcta, 🔴 con error, 🟡 omitida — y agregado por clase y por
+  proyecto. Ejecutar una prueba suelta no borra el resultado de las demás.
+- **El fallo se lee donde está**: mensaje del assert y traza completa bajo la prueba, y además en el
+  panel de problemas con su archivo y su línea, para saltar al código de un clic.
+- Los resultados salen del **TRX** que genera `dotnet test`, no de la consola: así el estado de una
+  prueba no depende del idioma de tu Windows.
+
+### Monitor de rendimiento
+
+Una pestaña "Métricas" en el panel inferior que lee los contadores que el propio runtime publica.
+No hay que instrumentar la aplicación ni añadirle ningún paquete.
+
+- **CPU**, **montón administrado**, **conjunto de trabajo**, **tasa de reserva**, **colecciones de
+  GC por generación**, **tiempo en GC**, **hilos del pool** y, si es una web, **peticiones en
+  curso**.
+- Valor, barra y una línea de tendencia del último minuto por métrica.
+- Elige a qué proceso .NET engancharse: normalmente el que acabas de arrancar con F5.
+
+> Necesita `dotnet-counters`. Si no está, el panel lo dice y te da la orden para instalarlo:
+> `dotnet tool install --global dotnet-counters`.
+
+### Túnel público para webhooks
+
+Un botón en la barra superior que publica el puerto local en una URL HTTPS accesible desde internet,
+para que Stripe, GitHub o un bot puedan llamar a la API que tienes corriendo.
+
+- Usa `devtunnel` (Microsoft) o `ngrok`, lo que tengas instalado.
+- El puerto se propone a partir del proceso que ya está en marcha, para no publicar el equivocado.
+- La URL aparece en el panel de salida en cuanto la herramienta la anuncia, y el botón pasa a
+  cerrarlo.
+
+> El túnel expone ese puerto en internet mientras esté abierto. El IDE lo dice al abrirlo.
+
+### Auditoría de seguridad de NuGet
+
+Dentro del panel de NuGet, una sección **Seguridad** que cruza los paquetes restaurados con los
+avisos de GitHub Security Advisories (`dotnet list package --vulnerable`).
+
+- Gravedad, versión afectada y el identificador del aviso (**GHSA** o **CVE**) como enlace.
+- **Incluye los transitivos**, marcados como tales y diciendo en qué proyecto entran: la
+  vulnerabilidad casi nunca está en el paquete que instalaste.
+- El número de paquetes con aviso aparece como insignia sobre el icono de NuGet.
+
 ### Paquetes NuGet
 
 - Panel visual: buscar en nuget.org, ver lo instalado, elegir versión, instalar y desinstalar.
@@ -548,6 +614,7 @@ En macOS, `Ctrl` es `Cmd`.
 | **Enviar la petición HTTP del cursor** | `Alt+Enter` |
 | **Registro de la aplicación** | `Ctrl+Shift+L` |
 | **Contenedores y Docker Compose** | `Ctrl+Shift+K` |
+| **Explorador de pruebas** | `Ctrl+Shift+Y` |
 | **Asistente de IA** | `Ctrl+Shift+A` |
 | **Editar con IA la selección** | `Ctrl+I` |
 | Problemas | `Ctrl+Shift+M` |
@@ -719,6 +786,16 @@ Se listan explícitamente porque un README que sólo cuenta lo que funciona no s
   el orquestador MTP todavía no encajan bien (ver ADR-003 en `PROJECT_DEVLOG.md`).
 - **`net9.0` compila pero necesita el runtime 9 para ejecutarse.** Si sólo tienes el runtime 10,
   genera con `--framework net10.0`.
+- **El resaltado semántico depende de que Roslyn conteste.** El IDE declara las capacidades, le abre
+  la solución, descodifica su clasificación y colorea; pero algunas versiones preliminares del
+  paquete `microsoft.codeanalysis.languageserver` del feed `dotnet-tools` fallan al componer su
+  gráfico MEF y mueren justo después del handshake. Cuando pasa, el editor se queda con el resaltado
+  de la gramática —sigue siendo perfectamente utilizable— y el motivo aparece en la consola en vez de
+  perderse. Fijar una versión conocida buena está anotado para la próxima fase.
+- **Los túneles usan una herramienta externa.** `devtunnel` y `ngrok` no se incluyen ni se descargan:
+  si no hay ninguna instalada, el botón lo dice y da la orden de instalación.
+- **El monitor de rendimiento necesita `dotnet-counters`**, que tampoco se incluye. Misma regla: se
+  explica y se da el comando.
 
 ---
 

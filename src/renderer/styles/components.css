@@ -3969,3 +3969,485 @@ select.input {
   letter-spacing: var(--tracking-wide);
   text-transform: uppercase;
 }
+
+/* ==============================================================================================
+   Fase 15 — Explorador de pruebas, métricas de rendimiento y auditoría de NuGet
+   ============================================================================================== */
+
+/* --- Explorador de pruebas ------------------------------------------------------------------ */
+
+.tests-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+}
+
+.tests-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+}
+
+.tests-run-all {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.tests-counts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-xs);
+}
+
+.tests-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.tests-pill.passed { background: var(--success-soft); color: var(--success); }
+.tests-pill.failed { background: var(--danger-soft); color: var(--danger); }
+.tests-pill.skipped { background: var(--warning-soft); color: var(--warning); }
+
+.tests-total {
+  margin-left: auto;
+  color: var(--text-faint);
+}
+
+.tests-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tests-filter .input {
+  flex: 1;
+  min-width: 0;
+}
+
+.tests-filter .icon-btn.active {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.tests-project,
+.tests-class {
+  display: flex;
+  flex-direction: column;
+}
+
+.tests-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  height: var(--tree-row-height);
+  padding: 0 4px;
+  background: none;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  text-align: left;
+}
+
+.tests-group.nested {
+  padding-left: var(--tree-indent);
+}
+
+.tests-group:hover {
+  color: var(--text-strong);
+}
+
+.tests-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tests-count {
+  flex: none;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.tests-kind {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--accent-softer);
+  color: var(--accent);
+  font-size: 9.5px;
+  line-height: 15px;
+}
+
+/* Punto de estado agregado del grupo: dice de un vistazo si dentro hay algo en rojo. */
+.tests-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+
+.tests-dot.passed { background: var(--success); }
+.tests-dot.failed { background: var(--danger); }
+.tests-dot.skipped { background: var(--warning); }
+.tests-dot.running { background: var(--info); }
+
+.tests-class-row,
+.tests-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.tests-class-row:hover,
+.tests-row:hover {
+  background: var(--surface-hover);
+  border-radius: var(--radius-sm);
+}
+
+.tests-case {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  height: var(--tree-row-height);
+  padding: 0 4px 0 calc(var(--tree-indent) * 2);
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  text-align: left;
+}
+
+.tests-row.passed .tests-case { color: var(--text); }
+.tests-row.passed .tests-case svg { color: var(--success); }
+.tests-row.failed .tests-case { color: var(--danger); }
+.tests-row.skipped .tests-case svg { color: var(--warning); }
+.tests-row.running .tests-case svg { color: var(--info); }
+
+.tests-run {
+  flex: none;
+  opacity: 0;
+}
+
+.tests-class-row:hover .tests-run,
+.tests-row:hover .tests-run {
+  opacity: 1;
+}
+
+.tests-error {
+  margin: 2px 0 8px calc(var(--tree-indent) * 2 + 4px);
+  padding: 8px;
+  border-left: 2px solid var(--danger);
+  background: var(--danger-soft);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.tests-message,
+.tests-stack {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tests-message { color: var(--danger); }
+
+.tests-stack {
+  margin-top: 6px;
+  max-height: 140px;
+  overflow: auto;
+  color: var(--text-faint);
+}
+
+.empty-hint {
+  padding: 12px;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+}
+
+.empty-hint p { margin: 0 0 6px; }
+.empty-hint .muted { color: var(--text-faint); font-size: var(--text-xs); }
+
+/* La insignia de la barra de actividad en rojo: pruebas en rojo, paquetes con aviso. */
+.activity-count.danger {
+  background: var(--danger);
+  color: var(--text-inverse);
+}
+
+/* --- Monitor de rendimiento ------------------------------------------------------------------ */
+
+.metrics-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  padding: 10px;
+  overflow: auto;
+}
+
+.metrics-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.metrics-head .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.metrics-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+
+.metrics-dot.running { background: var(--success); }
+.metrics-dot.starting { background: var(--warning); }
+.metrics-dot.error { background: var(--danger); }
+
+.metrics-status {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.metrics-select {
+  margin-left: auto;
+  max-width: 260px;
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.metrics-group {
+  padding: 10px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+}
+
+.metrics-group-title {
+  margin: 0 0 8px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+
+.metric-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  font-size: var(--text-sm);
+}
+
+.metric-label {
+  flex: none;
+  width: 116px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metric-value {
+  flex: none;
+  width: 72px;
+  color: var(--text-strong);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.metric-bar {
+  flex: 1;
+  min-width: 24px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.metric-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 220ms ease;
+}
+
+/* La memoria es violeta, la CPU azul y el GC ámbar: el color agrupa sin necesidad de leer. */
+.metric-fill.cpu { background: var(--info); }
+.metric-fill.heapMb,
+.metric-fill.workingSetMb,
+.metric-fill.allocRate { background: var(--accent); }
+.metric-fill.timeInGc { background: var(--warning); }
+.metric-fill.requestsPerSecond,
+.metric-fill.currentRequests { background: var(--success); }
+
+.metric-spark {
+  flex: none;
+  color: var(--accent);
+  opacity: 0.75;
+}
+
+/* --- Auditoría de seguridad de NuGet ---------------------------------------------------------- */
+
+.nuget-audit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 10px;
+  padding: 8px;
+  background: var(--surface-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+}
+
+.nuget-audit-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nuget-audit-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--text);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  text-align: left;
+}
+
+.nuget-audit-head .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.nuget-audit-count {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.nuget-audit-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.severity-pill {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.severity-pill.critical { background: var(--danger-soft); color: var(--danger); font-weight: 600; }
+.severity-pill.high { background: var(--danger-soft); color: var(--danger); }
+.severity-pill.moderate { background: var(--warning-soft); color: var(--warning); }
+.severity-pill.low { background: var(--info-soft); color: var(--info); }
+
+.vuln-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 8px;
+  border-left: 2px solid var(--border-strong);
+  background: var(--surface-2);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.vuln-row.critical,
+.vuln-row.high { border-left-color: var(--danger); }
+.vuln-row.moderate { border-left-color: var(--warning); }
+.vuln-row.low { border-left-color: var(--info); }
+
+.vuln-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: var(--text-sm);
+}
+
+.vuln-transitive {
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-faint);
+  font-size: 9.5px;
+  line-height: 15px;
+}
+
+.vuln-advisories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.vuln-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.vuln-link:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}

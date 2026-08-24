@@ -51,6 +51,15 @@ import type {
   RecentWorkspace,
   SolutionInfo,
   TerminalContext,
+  AuditReport,
+  TestCase,
+  TestRunRequest,
+  TestRunSummary,
+  TunnelTool,
+  DotnetProcess,
+  MetricsEvent,
+  MetricsState,
+  SemanticTokensLegend,
 } from '../shared/contracts.js';
 import { IPC, IPC_EVENTS } from '../shared/contracts.js';
 import type { GitDiffRequest, GitRepositoryStatus } from '../shared/git.js';
@@ -172,6 +181,26 @@ const api: DotForgeApi = {
       ipcRenderer.invoke(IPC.nugetInstall, projectPath, packageId, version) as Promise<DotnetTaskStarted>,
     uninstall: (projectPath, packageId) =>
       ipcRenderer.invoke(IPC.nugetUninstall, projectPath, packageId) as Promise<DotnetTaskStarted>,
+    audit: (target) => ipcRenderer.invoke(IPC.nugetAudit, target ?? null) as Promise<AuditReport>,
+  },
+
+  tests: {
+    discover: () => ipcRenderer.invoke(IPC.testsDiscover) as Promise<TestCase[]>,
+    run: (request: TestRunRequest) => ipcRenderer.invoke(IPC.testsRun, request) as Promise<DotnetTaskStarted>,
+    results: (taskId) => ipcRenderer.invoke(IPC.testsResults, taskId) as Promise<TestRunSummary>,
+  },
+
+  tunnel: {
+    tools: () => ipcRenderer.invoke(IPC.tunnelTools) as Promise<TunnelTool[]>,
+    start: (tool: TunnelTool, port: number) => ipcRenderer.invoke(IPC.tunnelStart, tool, port) as Promise<DotnetTaskStarted>,
+  },
+
+  metrics: {
+    state: () => ipcRenderer.invoke(IPC.metricsState) as Promise<MetricsState>,
+    processes: () => ipcRenderer.invoke(IPC.metricsProcesses) as Promise<DotnetProcess[]>,
+    start: (pid: number, processName) =>
+      ipcRenderer.invoke(IPC.metricsStart, pid, processName ?? null) as Promise<MetricsState>,
+    stop: () => ipcRenderer.invoke(IPC.metricsStop) as Promise<void>,
   },
 
   lsp: {
@@ -180,6 +209,7 @@ const api: DotForgeApi = {
     stop: () => ipcRenderer.invoke(IPC.lspStop) as Promise<void>,
     request: (method, params) => ipcRenderer.invoke(IPC.lspRequest, method, params),
     notify: (method, params) => ipcRenderer.invoke(IPC.lspNotify, method, params) as Promise<void>,
+    legend: () => ipcRenderer.invoke(IPC.lspLegend) as Promise<SemanticTokensLegend | null>,
   },
 
   debug: {
@@ -220,6 +250,7 @@ const api: DotForgeApi = {
     onDebugOutput: (handler) => subscribe<{ category: string; text: string }>(IPC_EVENTS.debugOutput, handler),
     onAiDelta: (handler) => subscribe<AiStreamDelta>(IPC_EVENTS.aiDelta, handler),
     onAiEnd: (handler) => subscribe<AiStreamEnd>(IPC_EVENTS.aiEnd, handler),
+    onMetricsSample: (handler) => subscribe<MetricsEvent>(IPC_EVENTS.metricsSample, handler),
   },
 };
 

@@ -106,6 +106,17 @@ export class EditorView {
       inlayHints: { enabled: 'on' },
       occurrencesHighlight: 'singleFile',
       renderLineHighlight: 'all',
+      /**
+       * Resaltado semántico encendido explícitamente.
+       *
+       * El valor por defecto es `configuredByTheme`, y un tema definido con `defineTheme` no lo
+       * activa: el proveedor de tokens se registra, el servidor responde y no se ve absolutamente
+       * nada. Es el tipo de ajuste que parece redundante hasta que se pasa media tarde buscando
+       * por qué Roslyn "no manda colores".
+       */
+      'semanticHighlighting.enabled': true,
+      // La lente de código la usan las pruebas ([Fact]/[Theory]), los endpoints y los `.http`.
+      codeLens: true,
     });
 
     this.disposables.push(installTagAutoClose(monaco, this.editor));

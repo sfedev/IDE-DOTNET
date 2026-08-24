@@ -9,6 +9,9 @@
  */
 import type * as MonacoApi from 'monaco-editor';
 
+import type { SemanticTokensLegend } from '../shared/semantic-tokens.js';
+import { remapTokens, SEMANTIC_SCOPES } from '../shared/semantic-tokens.js';
+
 // ---------------------------------------------------------------------------------------------
 // Conversión de rutas <-> URIs
 // ---------------------------------------------------------------------------------------------
@@ -213,6 +216,110 @@ export function applyPublishDiagnostics(
 }
 
 // ---------------------------------------------------------------------------------------------
+// Tokens semánticos
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Leyenda que publicó el servidor. Se pide una vez y se guarda.
+ *
+ * No se puede cablear: Roslyn y OmniSharp mandan leyendas distintas, y los datos son índices
+ * dentro de la suya. Descodificar con la leyenda equivocada no falla — pinta los colores
+ * cambiados, que es mucho peor que no pintar nada.
+ */
+let serverLegend: SemanticTokensLegend | null = null;
+let legendRequest: Promise<SemanticTokensLegend | null> | null = null;
+
+/**
+ * Aviso a Monaco de que vuelva a pedir los tokens.
+ *
+ * Monaco pide los tokens semánticos **una vez** por versión del documento. Cuando el archivo se
+ * abre, el servidor todavía está cargando la solución y responde vacío; sin este aviso, el archivo
+ * se queda con los colores de la gramática hasta que se escriba en él. Se dispara cuando llega la
+ * leyenda y cuando el servidor anuncia que ha terminado de cargar los proyectos.
+ */
+let refresh: (() => void) | null = null;
+
+/** Se llama al parar o reiniciar el servidor: la próxima leyenda puede ser de otro servidor. */
+export function resetSemanticLegend(): void {
+  serverLegend = null;
+  legendRequest = null;
+}
+
+/** Pide a Monaco que vuelva a tokenizar los documentos abiertos. */
+export function refreshSemanticTokens(): void {
+  refresh?.();
+}
+
+async function ensureLegend(): Promise<SemanticTokensLegend | null> {
+  if (serverLegend !== null) return serverLegend;
+
+  legendRequest ??= window.dotforge.lsp
+    .legend()
+    .then((legend) => {
+      serverLegend = legend;
+      // Si el servidor todavía no ha terminado el handshake, se vuelve a preguntar la próxima vez.
+      if (legend === null) legendRequest = null;
+      else refresh?.();
+      return legend;
+    })
+    .catch(() => {
+      legendRequest = null;
+      return null;
+    });
+
+  return legendRequest;
+}
+
+/**
+ * Registra el proveedor de tokens semánticos para un lenguaje.
+ *
+ * Monaco resuelve el color uniendo el tipo del token y sus modificadores con puntos y buscando la
+ * regla más específica del tema; por eso la leyenda que se le da **son los nombres de las reglas**
+ * (`type`, `method`, `property`…) y no los de LSP. La traducción entre las dos vive en el modelo
+ * puro, donde se puede probar con datos reales.
+ */
+function registerSemanticTokens(monaco: typeof MonacoApi, language: string): MonacoApi.IDisposable {
+  const emitter = new monaco.Emitter<void>();
+
+  // Un único disparador para todos los lenguajes registrados: los dos quieren repintarse a la vez.
+  const previous = refresh;
+  refresh = () => {
+    previous?.();
+    emitter.fire();
+  };
+
+  const provider = monaco.languages.registerDocumentSemanticTokensProvider(language, {
+    onDidChange: emitter.event,
+    getLegend: () => ({ tokenTypes: [...SEMANTIC_SCOPES], tokenModifiers: [] }),
+
+    async provideDocumentSemanticTokens(model) {
+      const legend = await ensureLegend();
+      if (legend === null) return null;
+
+      const result = await ask<{ data?: number[]; resultId?: string }>(
+        'textDocument/semanticTokens/full',
+        documentParams(model),
+      );
+
+      if (!result || !Array.isArray(result.data)) return null;
+
+      return { data: new Uint32Array(remapTokens(result.data, legend)) };
+    },
+
+    // Sin deltas no hay nada que liberar: cada respuesta es completa.
+    releaseDocumentSemanticTokens: () => undefined,
+  });
+
+  return {
+    dispose(): void {
+      provider.dispose();
+      emitter.dispose();
+      refresh = null;
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
 // Proveedores de Monaco
 // ---------------------------------------------------------------------------------------------
 
@@ -240,6 +347,11 @@ export function registerCSharpProviders(monaco: typeof MonacoApi): MonacoApi.IDi
   const languages = ['csharp', 'razor'];
 
   for (const language of languages) {
+    // --- Tokens semánticos ---------------------------------------------------------------------
+    // Va el primero a propósito: es lo que convierte el resaltado "de gramática" en resaltado
+    // "de compilador", y lo que hace que `IProductRepository` se vea como una interfaz.
+    disposables.push(registerSemanticTokens(monaco, language));
+
     // --- Completado ------------------------------------------------------------------------
     disposables.push(
       monaco.languages.registerCompletionItemProvider(language, {

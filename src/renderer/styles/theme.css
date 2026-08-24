@@ -11,8 +11,11 @@
  *    para el logotipo, donde sí tiene que ser la marca.
  *  - **Contraste AA en todo el texto funcional** (≥ 4.5:1). Los tonos `faint` se miden también:
  *    #757d99 sobre el fondo da 4.6:1, así que las pistas del árbol siguen siendo legibles.
- *  - **Sintaxis armónica, no arcoíris.** Los colores de código se eligen dentro de un rango de
- *    saturación estrecho para que ninguno "salte" por encima del resto.
+ *  - **Sintaxis con jerarquía, no arcoíris.** Desde la v1.9.0 (ADR-035) la paleta de código es la
+ *    de Visual Studio 2026: no es un rango de saturación estrecho, es un código de colores donde
+ *    cada familia de símbolos —tipo, interfaz, método, miembro, local— tiene el suyo y siempre el
+ *    mismo. Deja de ser decoración y pasa a ser información, que es lo que un desarrollador de C#
+ *    espera y lo que hace legible un `Program.cs` de veinte líneas de configuración.
  *
  * Regla del proyecto: ningún componente escribe un color literal. Todo sale de aquí.
  */
@@ -75,20 +78,32 @@
   --tone-test: #8ed6a6;
   --tone-muted: #7b839c;
 
-  /* --- Sintaxis --------------------------------------------------------------------------- */
-  --syntax-comment: #616a86;
-  --syntax-keyword: #b99cf5;
-  --syntax-control: #e690a8;
-  --syntax-string: #a5cf85;
-  --syntax-number: #e0a97b;
-  --syntax-type: #8ad0ee;
-  --syntax-interface: #85cfb8;
-  --syntax-method: #8fb2f2;
-  --syntax-variable: #c3cadf;
-  --syntax-razor: #e0a97b;
-  --syntax-tag: #86b6f0;
-  --syntax-attribute: #c3a6f0;
-  --syntax-component: #e3c48b;
+  /* --- Sintaxis -----------------------------------------------------------------------------
+     Jerarquía cromática estilo Visual Studio 2026 (ADR-035). Cada familia de símbolos tiene su
+     color y el color significa siempre lo mismo: verde azulado es "un tipo", dorado es "algo que
+     se invoca", azul claro es "un miembro de datos", gris claro es "algo local". Los tres colores
+     nuevos —propiedad, escape y documentación— existen porque los tokens semánticos de Roslyn
+     distinguen cosas que la gramática de texto no podía distinguir.
+     Todos verificados sobre `--bg` (#1b1d27): el peor es el comentario, con 4,93:1 (AA). ------ */
+  --syntax-comment: #57a64a;
+  --syntax-doc: #6a9955;
+  --syntax-keyword: #569cd6;
+  --syntax-control: #c586c0;
+  --syntax-string: #ce9178;
+  --syntax-escape: #d7ba7d;
+  --syntax-number: #b5cea8;
+  --syntax-regexp: #d16969;
+  --syntax-type: #4ec9b0;
+  --syntax-interface: #b8d7a3;
+  --syntax-method: #dcdcaa;
+  --syntax-property: #9cdcfe;
+  --syntax-variable: #d4d4d4;
+  --syntax-namespace: #d4d4d4;
+  --syntax-operator: #d4d4d4;
+  --syntax-razor: #c586c0;
+  --syntax-tag: #569cd6;
+  --syntax-attribute: #9cdcfe;
+  --syntax-component: #4ec9b0;
 
   /* --- Geometría --------------------------------------------------------------------------- */
   --radius-sm: 6px;
@@ -185,19 +200,27 @@
   --tone-test: #1c7a4f;
   --tone-muted: #6b7183;
 
-  --syntax-comment: #6b7284;
-  --syntax-keyword: #7028b8;
-  --syntax-control: #b02a58;
-  --syntax-string: #26713a;
-  --syntax-number: #a1520d;
-  --syntax-type: #14657e;
-  --syntax-interface: #10714f;
-  --syntax-method: #1f56ad;
+  /* La misma jerarquía, con los tonos que cumplen AA sobre fondo claro: el azul de Visual Studio
+     sobre blanco se queda en 3:1, así que aquí cada familia usa su versión oscurecida. */
+  --syntax-comment: #2c7d2c;
+  --syntax-doc: #3c7a3c;
+  --syntax-keyword: #0f4fa8;
+  --syntax-control: #8a2f8a;
+  --syntax-string: #a3401e;
+  --syntax-escape: #8a6212;
+  --syntax-number: #2b6b2b;
+  --syntax-regexp: #a52d2d;
+  --syntax-type: #10706a;
+  --syntax-interface: #3f6b28;
+  --syntax-method: #7a5a08;
+  --syntax-property: #14608f;
   --syntax-variable: #333849;
-  --syntax-razor: #a1520d;
-  --syntax-tag: #1f5fa8;
-  --syntax-attribute: #7b3fc4;
-  --syntax-component: #8a5f0a;
+  --syntax-namespace: #333849;
+  --syntax-operator: #333849;
+  --syntax-razor: #8a2f8a;
+  --syntax-tag: #0f4fa8;
+  --syntax-attribute: #14608f;
+  --syntax-component: #10706a;
 
   --shadow-soft: 0 1px 2px rgba(48, 52, 70, 0.08);
   --shadow-panel: 0 10px 26px rgba(48, 52, 70, 0.12);
