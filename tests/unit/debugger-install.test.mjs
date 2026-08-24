@@ -19,7 +19,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, truncate, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -40,6 +40,27 @@ const RELEASE_ZIP = makeZip([
   ['netcoredbg/netcoredbg.exe', Buffer.alloc(2_100_000, 3)],
   ['netcoredbg/ManagedPart.dll', Buffer.alloc(120_000, 9)],
   ['netcoredbg/dbgshim.dll', Buffer.from('dbgshim')],
+]);
+
+/**
+ * La forma real del ZIP de macOS, que **no** es la de Windows.
+ *
+ * El paquete se comprime en un Mac, así que llega con el árbol `__MACOSX/` de bifurcaciones de
+ * recurso: un `._nombre` por cada archivo. Con `strip: 1`, `__MACOSX/netcoredbg/._netcoredbg` se
+ * queda en `netcoredbg/._netcoredbg` y crea una **carpeta** que se llama igual que el ejecutable.
+ * Como esas entradas van antes en el directorio central, cuando toca escribir el binario el nombre
+ * ya está ocupado y la instalación muere con `EISDIR`.
+ *
+ * El fixture de arriba sólo copiaba la forma de Windows, y por eso esto no lo cazó nadie: el
+ * depurador no se ha podido instalar en macOS en ninguna versión publicada.
+ */
+const RELEASE_ZIP_OSX = makeZip([
+  ['__MACOSX/netcoredbg/._Microsoft.CodeAnalysis.dll', Buffer.from('bifurcación de recurso')],
+  ['netcoredbg/Microsoft.CodeAnalysis.dll', Buffer.alloc(4_096, 7)],
+  ['__MACOSX/netcoredbg/._netcoredbg', Buffer.from('bifurcación de recurso')],
+  ['netcoredbg/netcoredbg', Buffer.alloc(2_625_896, 5)],
+  ['netcoredbg/libdbgshim.dylib', Buffer.from('dbgshim')],
+  ['netcoredbg/.DS_Store', Buffer.from('basura del Finder')],
 ]);
 
 async function install() {
@@ -133,5 +154,56 @@ describe('instalación de NetCoreDbg', () => {
     if (process.platform === 'win32') assert.equal(name, 'netcoredbg-win64.zip');
     else if (process.platform === 'darwin') assert.match(name, /^netcoredbg-osx-(arm64|amd64)\.zip$/);
     else assert.equal(name, null, 'Linux se publica como .tar.gz y queda fuera');
+  });
+
+  it('el paquete de macOS deja el ejecutable como archivo, no como carpeta', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dotforge-dbg-osx-'));
+    const directory = join(root, 'netcoredbg', '3.2.0-1092');
+
+    await installArchive(RELEASE_ZIP_OSX, directory, {
+      kind: 'netcoredbg',
+      packageVersion: '3.2.0-1092',
+      rid: 'darwin-arm64',
+      strip: 1,
+    });
+
+    const executable = join(directory, 'netcoredbg');
+    assert.ok(existsSync(executable), 'no se ha escrito el ejecutable');
+    assert.ok(
+      statSync(executable).isFile(),
+      'netcoredbg ha quedado como carpeta: las bifurcaciones de recurso se han colado',
+    );
+    assert.equal(statSync(executable).size, 2_625_896);
+
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('no escribe nada del arbol __MACOSX ni los ._ del Finder', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dotforge-dbg-osx-'));
+    const directory = join(root, 'netcoredbg', '3.2.0-1092');
+
+    await installArchive(RELEASE_ZIP_OSX, directory, {
+      kind: 'netcoredbg',
+      packageVersion: '3.2.0-1092',
+      rid: 'darwin-arm64',
+      strip: 1,
+    });
+
+    const manifest = await readInstallManifest(directory);
+    const paths = manifest.files.map((file) => file.path);
+
+    assert.deepEqual(
+      paths.filter((path) => path.includes('__MACOSX') || path.includes('._') || path.includes('.DS_Store')),
+      [],
+      `el manifiesto anota basura del empaquetado: ${paths.join(', ')}`,
+    );
+    assert.deepEqual(paths.sort(), ['Microsoft.CodeAnalysis.dll', 'libdbgshim.dylib', 'netcoredbg'].sort());
+
+    // Y lo que se anota tiene que estar de verdad: un manifiesto que promete de más no verifica.
+    const check = await verifyInstall(directory);
+    assert.equal(check.verified, true);
+    assert.deepEqual(check.problems, []);
+
+    await rm(root, { recursive: true, force: true });
   });
 });

@@ -2472,3 +2472,77 @@ iteración atacan una cada uno, y ninguno toca código de producción.
   dentro: `la sesión terminó antes de llegar al breakpoint (estado "idle")` seguido de los tres
   eventos de stdout del programa (`1`, `3`, `6`, `total=6`). Es exactamente la traza que faltaba en
   el fallo de Windows Server 2025.
+
+---
+
+### Iteración 24 — 2026-08-24 — No era el timeout: dos bugs reales del depurador
+
+**Objetivo:** arreglar el fallo del depurador en CI. La iteración 23 lo trató como lentitud del
+runner y amplió los márgenes de espera. **Era un diagnóstico equivocado**, y lo demostró el volcado
+de diagnóstico que se añadió en esa misma iteración: en cuanto el fallo trajo la salida del proceso,
+se vio que el programa se ejecutaba **entero** —`1`, `3`, `6`, `total=6`— y terminaba en 1,5 s. No se
+estaba agotando ningún plazo: el breakpoint no se ligaba nunca. Ampliar el timeout sólo habría hecho
+que el mismo fallo tardara más en aparecer.
+
+Detrás había dos averías distintas, una por plataforma, y las dos son de **código de producción**, no
+de la prueba. La prueba era lo único que las estaba destapando.
+
+**Hecho:**
+
+1. **Windows — el alias 8.3 dejaba el breakpoint sin ligar.** NetCoreDbg resuelve un breakpoint
+   comparando **como texto** la ruta pedida con la que guarda el PDB. En los runners de Windows el
+   usuario es `runneradmin`, que no cabe en 8.3, así que `%TEMP%` llega como
+   `C:\Users\RUNNER~1\AppData\Local\Temp` y `os.tmpdir()` lo devuelve tal cual. El compilador guarda
+   siempre la forma larga ⇒ las dos cadenas no casan, el breakpoint se queda pendiente para siempre
+   y **no hay ningún error**. Ahora `DebugSession.setBreakpoints` canonicaliza la ruta con
+   `debuggerSourcePath()` justo en la frontera con el adaptador, para que ningún camino nuevo se
+   olvide. Le pasaba igual a cualquier usuario con el proyecto bajo una ruta con `~1`
+   (`C:\PROGRA~1\…`, `%TEMP%`, un acceso directo antiguo).
+2. **macOS — el depurador no se ha podido instalar en ninguna versión publicada.** El ZIP de
+   NetCoreDbg para macOS se comprime en un Mac y trae el árbol `__MACOSX/` de bifurcaciones de
+   recurso. Con `strip: 1`, `__MACOSX/netcoredbg/._Microsoft.CodeAnalysis.dll` se queda en
+   `netcoredbg/._…` y **crea una carpeta llamada igual que el ejecutable**; como esa entrada va antes
+   en el directorio central, al escribir el binario el nombre ya está ocupado y muere con `EISDIR`.
+   `extractTo` descarta ahora `__MACOSX/`, los `._*` y `.DS_Store`, antes que el filtro de quien
+   llama: no es una preferencia del paquete, es basura del empaquetado. Vale para todo lo que se
+   extrae, incluidos los `.vsix` de Open VSX, que también se publican comprimidos desde un Mac.
+
+**Errores encontrados y solucionados:**
+
+1. *Síntoma:* el fallo de `windows-latest` parecía un timeout, y se arregló como un timeout.
+   *Causa raíz:* el mensaje no distinguía "no ha dado tiempo" de "no va a parar nunca". Sin la
+   salida del proceso, las dos averías se ven igual.
+   *Arreglo:* el de esta iteración. La lección se queda: **el primer arreglo de la 23 sobraba y el
+   segundo era el que valía.** Los márgenes anchos en CI se conservan porque no estorban, pero no
+   son los que ponen esto en verde.
+2. *Síntoma:* `realpath` no expandía el alias 8.3 y la primera versión del arreglo no cambiaba nada.
+   *Causa raíz:* el `realpath` de JavaScript resuelve enlaces simbólicos pero devuelve `DOTFOR~1`
+   tal cual; sólo el **nativo** llama al sistema y da el nombre largo. Además `fs/promises` no
+   expone `realpath.native`: hay que promisificar el de `node:fs`.
+   *Arreglo:* medido antes de escribir el arreglo, no supuesto, y anotado en el propio código.
+
+**Verificado con comandos reales:**
+
+- **El caso de Windows, reproducido y luego arreglado**, con A/B en la misma máquina y el mismo
+  NetCoreDbg: compilando y depurando bajo un alias 8.3 el programa corría entero y escribía
+  `1 3 6 total=6` —los mismos bytes que el log de CI—; en forma larga paraba. Tras el arreglo, la
+  misma reproducción responde `verified: true` y para en la línea 5.
+- **Un tercer experimento decidió hacia dónde normalizar:** compilando bajo la ruta corta y pidiendo
+  el breakpoint con la larga, liga. O sea, el PDB guarda la larga y hay que expandir, no acortar.
+- **El caso de macOS, con el paquete de verdad**, no con una maqueta: descargado
+  `netcoredbg-osx-arm64.zip` de la release 3.2.0-1092 e instalado con `installArchive`. Sin el
+  arreglo, `EISDIR ... open .../netcoredbg`, idéntico al de CI; con él, `netcoredbg` queda como
+  archivo de 2.625.896 bytes y `verifyInstall` da verde sin problemas.
+- **Las pruebas nuevas se comprobaron en rojo antes que en verde:** con el arreglo de `zip.ts`
+  apartado, las dos de macOS fallan; con él, pasan. Una prueba que no puede fallar no prueba nada.
+- `npm run build`, `npx tsc --noEmit` y `npm test` en verde: **1226 pruebas** (1058 unit, 55
+  security, 57 package, 56 scaffold), 5 nuevas.
+
+**Lo que esta iteración NO arregla:** el fallo de `runtime-smoke` en macOS
+(`Could not load file or assembly 'Microsoft.EntityFrameworkCore, Version=10.0.11.0'`). Sigue
+abierto y **no** es lo que se creyó en la iteración 22: esta vez la caché de NuGet ni siquiera se
+restauró (`Cache not found`) y volvió a fallar, así que la explicación de "caché a medias" no se
+sostiene. La pista que queda es que `node --test` ejecuta los archivos en paralelo y varios
+`dotnet build` restauran a la vez sobre un `~/.nuget/packages` frío. No se ha tocado porque no se
+puede reproducir ni verificar desde Windows, y un arreglo a ciegas en el pipeline es justo lo que ha
+costado esta iteración.

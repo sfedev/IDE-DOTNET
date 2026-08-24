@@ -83,7 +83,7 @@ export type { InstallManifest, InstallProblem, ManifestFile } from '../shared/to
 
 /** Instalación verificable: se ejercita contra un ZIP de mentira en un directorio temporal. */
 export { installArchive, readInstallManifest, removeInstall, verifyInstall } from './services/toolchain-install.js';
-export { acquireDebugger, assetNameForPlatform } from './debug/netcoredbg.js';
+export { acquireDebugger, assetNameForPlatform, debuggerSourcePath } from './debug/netcoredbg.js';
 export type { DebuggerBinary } from './debug/netcoredbg.js';
 export { extractTo, listEntries, readEntry, sha256, ZipError } from './services/zip.js';
 export { DebugController, resolveDebugTarget } from './debug/debug-controller.js';

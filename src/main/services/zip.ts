@@ -152,6 +152,25 @@ export function readEntry(buffer: Buffer, entry: ZipEntry): Buffer {
 }
 
 /**
+ * Restos del empaquetado en macOS, que no son contenido del paquete.
+ *
+ * El Finder guarda las bifurcaciones de recurso en un árbol `__MACOSX/` paralelo, con un `._nombre`
+ * por cada archivo real. Nunca aportan nada, y combinados con `strip` hacen daño de verdad: en el
+ * ZIP de NetCoreDbg para macOS, `__MACOSX/netcoredbg/._netcoredbg` se queda en
+ * `netcoredbg/._netcoredbg`, es decir, **crea una carpeta que se llama igual que el ejecutable**.
+ * Esa entrada va antes en el directorio central, así que cuando toca escribir el binario el nombre
+ * ya lo ocupa un directorio y `writeFile` muere con `EISDIR`. Por eso el depurador no se ha podido
+ * instalar nunca en macOS, con un mensaje que no menciona ni a macOS ni al ZIP.
+ */
+function isMacPackagingArtifact(name: string): boolean {
+  const segments = name.split('/');
+  if (segments.includes('__MACOSX')) return true;
+
+  const base = segments[segments.length - 1] ?? '';
+  return base.startsWith('._') || base === '.DS_Store';
+}
+
+/**
  * Extrae el ZIP a un directorio.
  *
  * Protege contra zip-slip: una entrada llamada `../../evil.exe` escribiría fuera del destino.
@@ -177,6 +196,9 @@ export async function extractTo(
 
   for (const entry of entries) {
     if (entry.isDirectory) continue;
+    // Antes que el filtro de quien llama: esto no es una preferencia del paquete, es basura del
+    // empaquetado, y nadie debería tener que acordarse de descartarla.
+    if (isMacPackagingArtifact(entry.name)) continue;
     if (filter && !filter(entry)) continue;
 
     const segments = entry.name.split('/').slice(strip);

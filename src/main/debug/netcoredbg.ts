@@ -7,8 +7,9 @@
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { existsSync } from 'node:fs';
+import { existsSync, realpath as realpathCallback } from 'node:fs';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 
 import { githubToken, rateLimitHint, requestHeaders } from '../../shared/github-api.js';
 import { describeProblems } from '../../shared/toolchain-manifest.js';
@@ -16,6 +17,40 @@ import { installArchive, verifyInstall } from '../services/toolchain-install.js'
 
 const RELEASES = 'https://api.github.com/repos/Samsung/netcoredbg/releases/latest';
 const HEADER_SEPARATOR = '\r\n\r\n';
+
+/**
+ * `realpath` **nativo**: es el único que expande los alias 8.3 de Windows.
+ *
+ * El de JavaScript resuelve enlaces simbólicos y devuelve `C:\...\DOTFOR~1` tal cual; el nativo
+ * llama al sistema y devuelve el nombre largo. Medido, no supuesto.
+ */
+const realpathNative = promisify(realpathCallback.native);
+
+/**
+ * Ruta del archivo en la misma forma en la que la guarda el PDB.
+ *
+ * NetCoreDbg liga un breakpoint comparando la ruta que se le pide con la que trae el PDB, **como
+ * texto**. El compilador guarda siempre la forma canónica, así que basta con que la ruta llegue con
+ * otro nombre equivalente para que el breakpoint se quede "pendiente" para siempre: el programa
+ * corre entero, nadie para en ningún sitio y no hay ningún error por ninguna parte.
+ *
+ * Pasa con más facilidad de la que parece:
+ *   - Windows entrega alias 8.3 en cuanto un componente no cabe en ese formato. En los runners de
+ *     GitHub, `%TEMP%` es `C:\Users\RUNNER~1\AppData\Local\Temp`, y de ahí salió el fallo que se
+ *     tomó por lentitud de CI. Le pasa igual a cualquiera que abra el proyecto desde una ruta con
+ *     `~1` (`C:\PROGRA~1\…`, un acceso directo antiguo, `%TEMP%`).
+ *   - macOS resuelve `/var` a `/private/var`, y el PDB guarda la segunda.
+ *
+ * Si la ruta no se puede resolver —el archivo se acaba de borrar, o es un búfer sin guardar— se
+ * manda tal cual: un breakpoint imposible no debe tumbar la sesión de depuración.
+ */
+export async function debuggerSourcePath(file: string): Promise<string> {
+  try {
+    return await realpathNative(file);
+  } catch {
+    return file;
+  }
+}
 
 export interface DebuggerBinary {
   version: string;
@@ -238,8 +273,12 @@ export class DebugSession extends EventEmitter {
 
   /** Reemplaza el conjunto de breakpoints de un archivo (semántica de DAP). */
   async setBreakpoints(file: string, lines: number[]): Promise<unknown> {
+    // La ruta se canonicaliza aquí, en la frontera con el adaptador, y no en quien llama: el
+    // renderer sigue nombrando sus archivos como los abrió, y ningún camino nuevo puede olvidarse.
+    const path = await debuggerSourcePath(file);
+
     return this.request('setBreakpoints', {
-      source: { path: file },
+      source: { path },
       breakpoints: lines.map((line) => ({ line })),
       lines,
     });
