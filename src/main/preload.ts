@@ -66,6 +66,9 @@ import type {
   MarketplaceExtension,
   SearchQuery,
   SearchResult,
+  SearchOptions,
+  SearchProgress,
+  SearchSummary,
   InstalledExtension,
 } from '../shared/contracts.js';
 import { IPC, IPC_EVENTS } from '../shared/contracts.js';
@@ -241,6 +244,11 @@ const api: DotForgeApi = {
     applyOnQuit: (now) => ipcRenderer.invoke(IPC.updateApplyOnQuit, now ?? false) as Promise<UpdateState>,
   },
 
+  search: {
+    inFiles: (options: SearchOptions) => ipcRenderer.invoke(IPC.searchInFiles, options) as Promise<SearchSummary>,
+    cancel: () => ipcRenderer.invoke(IPC.searchCancel) as Promise<void>,
+  },
+
   extensions: {
     search: (request: SearchQuery) => ipcRenderer.invoke(IPC.extensionsSearch, request) as Promise<SearchResult>,
     installed: () => ipcRenderer.invoke(IPC.extensionsInstalled) as Promise<InstalledExtension[]>,
@@ -278,6 +286,7 @@ const api: DotForgeApi = {
     onAiEnd: (handler) => subscribe<AiStreamEnd>(IPC_EVENTS.aiEnd, handler),
     onMetricsSample: (handler) => subscribe<MetricsEvent>(IPC_EVENTS.metricsSample, handler),
     onUpdateState: (handler) => subscribe<UpdateState>(IPC_EVENTS.updateState, handler),
+    onSearchProgress: (handler) => subscribe<SearchProgress>(IPC_EVENTS.searchProgress, handler),
   },
 };
 

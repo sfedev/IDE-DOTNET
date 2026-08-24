@@ -138,6 +138,18 @@ export type {
 } from './updates.js';
 export type { MarketplaceExtension, SearchQuery, SearchResult } from './open-vsx.js';
 export type { ContributionSummary, InstalledExtension, VsixManifest } from './vsix.js';
+
+// Fase 20: búsqueda de texto en el contenido de los archivos. El modelo es puro; su superficie
+// IPC es parte del contrato. Los nombres llevan `Search…` de prefijo y no chocan con los de Open
+// VSX (`SearchQuery`, `SearchResult`), que son de otra búsqueda: la del registro de extensiones.
+export type {
+  SearchFileResult,
+  SearchMatch,
+  SearchOptions,
+  SearchProgress,
+  SearchSummary,
+} from './file-search.js';
+import type { SearchOptions, SearchProgress, SearchSummary } from './file-search.js';
 import type { EfMigrationList, EfDbContext, EfOperation, EfOperationOptions } from './efcore.js';
 import type { DatabaseSchema } from './efcore-schema.js';
 import type { HttpResponseResult, ResolvedHttpRequest } from './http-file.js';
@@ -692,6 +704,9 @@ export const IPC = {
   updateDismiss: 'update:dismiss',
   updateApplyOnQuit: 'update:apply-on-quit',
 
+  searchInFiles: 'search:in-files',
+  searchCancel: 'search:cancel',
+
   extensionsSearch: 'extensions:search',
   extensionsInstalled: 'extensions:installed',
   extensionsInstall: 'extensions:install',
@@ -722,6 +737,7 @@ export const IPC_EVENTS = {
   aiEnd: 'event:ai-end',
   metricsSample: 'event:metrics-sample',
   updateState: 'event:update-state',
+  searchProgress: 'event:search-progress',
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];
@@ -1041,6 +1057,20 @@ export interface DotForgeApi {
   };
 
   /**
+   * Búsqueda de texto en los archivos del workspace.
+   *
+   * `inFiles` devuelve el resumen completo, y por el camino va emitiendo lotes por
+   * `onSearchProgress`: una solución mediana tarda un segundo largo y un panel que no enseña nada
+   * hasta el final se percibe como roto aunque tarde lo mismo. Los dos llevan el mismo `searchId`,
+   * que es lo que permite descartar los avances de una búsqueda ya abandonada.
+   */
+  search: {
+    inFiles(options: SearchOptions): Promise<SearchSummary>;
+    /** Abandona la búsqueda en marcha. La emite el panel al cerrarse o al vaciarse la caja. */
+    cancel(): Promise<void>;
+  };
+
+  /**
    * Extensiones de Open VSX.
    *
    * La búsqueda y la descarga las hace el proceso principal: la CSP del renderer no admite
@@ -1090,6 +1120,7 @@ export interface DotForgeApi {
     onAiEnd(handler: (payload: AiStreamEnd) => void): () => void;
     onMetricsSample(handler: (payload: MetricsEvent) => void): () => void;
     onUpdateState(handler: (state: UpdateState) => void): () => void;
+    onSearchProgress(handler: (progress: SearchProgress) => void): () => void;
   };
 }
 

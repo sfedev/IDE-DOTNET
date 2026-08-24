@@ -42,6 +42,8 @@ import type { UpdateState } from '../../shared/updates.js';
 import type { MarketplaceExtension, SearchQuery, SearchResult } from '../../shared/open-vsx.js';
 import { isTrustedDownload, isValidSegment, SEARCH_PAGE_SIZE } from '../../shared/open-vsx.js';
 import type { InstalledExtension } from '../../shared/vsix.js';
+import type { SearchSummary } from '../../shared/file-search.js';
+import { coerceSearchOptions } from '../../shared/file-search.js';
 import { describeFault, type ServerFault } from '../../shared/lsp-health.js';
 import { legendFromCapabilities } from '../../shared/semantic-tokens.js';
 import { filterForClass, filterForTests } from '../../shared/test-explorer.js';
@@ -83,11 +85,18 @@ import * as testService from '../services/test-service.js';
 import * as tunnelService from '../services/tunnel-service.js';
 import * as updaterService from '../services/updater-service.js';
 import * as openVsxService from '../services/open-vsx-service.js';
+import * as searchService from '../services/search-service.js';
 import * as extensionInstaller from '../services/extension-installer.js';
 import * as settingsService from '../services/settings-service.js';
 import * as startupService from '../services/startup-service.js';
 import { loadSolution } from '../services/solution-service.js';
-import { allowRoot, assertInsideWorkspace, isInside, setWorkspaceRoot } from '../services/workspace-guard.js';
+import {
+  allowRoot,
+  assertInsideWorkspace,
+  getWorkspaceRoot,
+  isInside,
+  setWorkspaceRoot,
+} from '../services/workspace-guard.js';
 import { describeRecents, firstAvailable, isOpenableWorkspace } from '../services/workspace-recents.js';
 
 const execFileAsync = promisify(execFile);
@@ -520,6 +529,9 @@ export function registerIpcHandlers(): void {
     await lspClient.stop();
     currentSolution = null;
     setWorkspaceRoot(null);
+    // Una búsqueda en marcha sobre la solución que se acaba de cerrar seguiría leyendo archivos y
+    // emitiendo resultados de un workspace que ya no está abierto.
+    searchService.cancel();
     syncTerminalContext();
     broadcast(IPC_EVENTS.workspaceChanged, null);
   });
@@ -1165,6 +1177,42 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.updateApplyOnQuit, (_event, now: unknown): Promise<UpdateState> =>
     updaterService.applyOnQuit(now === true),
   );
+
+  // --- Búsqueda de texto en los archivos ----------------------------------------------------------
+
+  /**
+   * Busca en el contenido de los archivos del workspace.
+   *
+   * La raíz **no** llega del renderer: se toma del guardián de rutas, que es quien sabe qué hay
+   * abierto de verdad. Así este canal no tiene ninguna ruta que validar — no hay forma de pedirle
+   * que busque en `C:\Windows` — y sin workspace abierto contesta un resumen vacío en vez de un
+   * error, porque no tener solución abierta es un estado normal, no un fallo.
+   */
+  ipcMain.handle(IPC.searchInFiles, (_event, raw: unknown): Promise<SearchSummary> => {
+    const options = coerceSearchOptions(raw);
+    const root = getWorkspaceRoot();
+
+    if (root === null) {
+      searchService.cancel();
+      return Promise.resolve({
+        searchId: 0,
+        files: [],
+        totalMatches: 0,
+        filesScanned: 0,
+        filesMatched: 0,
+        truncated: false,
+        cancelled: false,
+        elapsedMs: 0,
+        error: 'no hay ninguna solución abierta',
+      });
+    }
+
+    return searchService.searchWorkspace(root, options, {
+      onProgress: (progress) => broadcast(IPC_EVENTS.searchProgress, progress),
+    });
+  });
+
+  ipcMain.handle(IPC.searchCancel, (): void => searchService.cancel());
 
   // --- Extensiones (Open VSX) ---------------------------------------------------------------------
 

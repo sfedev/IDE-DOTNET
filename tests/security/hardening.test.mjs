@@ -633,3 +633,51 @@ describe('terminal integrada', () => {
     }
   });
 });
+
+/**
+ * Búsqueda de texto en los archivos.
+ *
+ * Es una superficie nueva que lee el disco a petición del renderer, así que hay una pregunta
+ * evidente que hacerle: ¿puede alguien pedirle que lea fuera del workspace? La respuesta tiene que
+ * ser estructural y no "es que el panel no lo hace": la raíz no llega por el canal, se toma del
+ * guardián de rutas, que es el único que sabe qué hay abierto de verdad.
+ */
+describe('búsqueda en los archivos', () => {
+  const register = readSource('src/main/ipc/register.ts');
+  const service = readSource('src/main/services/search-service.ts');
+
+  /** El cuerpo del handler, para no dar por buena una coincidencia de otro sitio del archivo. */
+  const handler = register.slice(
+    register.indexOf('ipcMain.handle(IPC.searchInFiles'),
+    register.indexOf('ipcMain.handle(IPC.searchCancel'),
+  );
+
+  it('la raíz sale del guardián de rutas, no del renderer', () => {
+    assert.match(handler, /getWorkspaceRoot\(\)/);
+    assert.ok(handler.length > 0, 'no se ha encontrado el handler de búsqueda');
+  });
+
+  it('sin solución abierta no se busca en ninguna parte', () => {
+    assert.match(handler, /root === null/);
+  });
+
+  it('todo lo que llega del renderer pasa por el saneado', () => {
+    assert.match(handler, /coerceSearchOptions\(raw\)/);
+  });
+
+  /**
+   * Misma regla que el ADR-051: en Electron, el hilo que lee el disco es el que repinta la ventana
+   * y atiende el IPC del renderer. Un `readFileSync` dentro del recorrido convierte una búsqueda en
+   * una aplicación colgada, y es de las cosas más fáciles de colar en una revisión porque compila y
+   * funciona.
+   */
+  it('el recorrido no bloquea el hilo principal', () => {
+    // Con paréntesis: el propio archivo los nombra en un comentario para explicar por qué no están.
+    assert.doesNotMatch(service, /readFileSync\(|readdirSync\(|statSync\(|existsSync\(/);
+    assert.match(service, /from 'node:fs\/promises'/);
+  });
+
+  it('no se baja a los directorios de construcción ni de dependencias', () => {
+    assert.match(service, /shouldSkipDirectory\(entry\.name\)/);
+  });
+});
