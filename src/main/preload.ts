@@ -91,6 +91,7 @@ const api: DotForgeApi = {
 
   workspace: {
     openDialog: () => ipcRenderer.invoke(IPC.workspaceOpenDialog) as Promise<string | null>,
+    openSolutionDialog: () => ipcRenderer.invoke(IPC.workspaceOpenSolutionDialog) as Promise<string | null>,
     open: (path) => ipcRenderer.invoke(IPC.workspaceOpen, path) as Promise<SolutionInfo>,
     current: () => ipcRenderer.invoke(IPC.workspaceCurrent) as Promise<SolutionInfo | null>,
     close: () => ipcRenderer.invoke(IPC.workspaceClose) as Promise<void>,

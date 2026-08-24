@@ -75,6 +75,22 @@ export {
 export type { DirectoryTarget, ResolveContext, ShortenOptions, TerminalIntent } from '../shared/terminal-cwd.js';
 
 export * as terminalSession from './services/terminal-session.js';
+
+/**
+ * Contenido de la barra de menú.
+ *
+ * Vive como dato puro para poder comprobar lo que se rompe en silencio: un menú que manda un
+ * comando que el renderer no conoce, o dos entradas peleándose por el mismo acelerador.
+ */
+export {
+  acceleratorClashes,
+  acceleratorOf,
+  buildMenuTemplate,
+  commandsOf,
+  normalizeAccelerator,
+  ROLE_ACCELERATORS,
+} from '../shared/menu-template.js';
+export type { MenuEntry, MenuSection, MenuTemplateOptions } from '../shared/menu-template.js';
 export type { SessionContext, TerminalLineOutcome } from './services/terminal-session.js';
 export {
   environmentFromProfile,

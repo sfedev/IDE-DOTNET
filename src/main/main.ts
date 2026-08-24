@@ -6,13 +6,15 @@
  */
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { app, BrowserWindow, shell, type BrowserWindowConstructorOptions } from 'electron';
+import { app, BrowserWindow, Menu, shell, type BrowserWindowConstructorOptions } from 'electron';
 
 import { readdirSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 import { installApplicationMenu } from './menu.js';
 import {
+  listRecentWorkspaces,
+  openRecentFromMenu,
   openWorkspaceFromCli,
   registerIpcHandlers,
   setPendingFile,
@@ -533,6 +535,37 @@ function runProbe(window: BrowserWindow, expression: string): void {
   });
 }
 
+/** `--menu-dump`: vuelca la barra de menú ya construida por Electron y sale. */
+const menuDump = process.argv.includes('--menu-dump');
+
+/**
+ * Imprime el menú que ha construido Electron, sección a sección.
+ *
+ * Se lee del `Menu` real —no de la plantilla— justamente para que lo que se enseñe sea lo que
+ * Electron ha aceptado: un `role` inválido o un acelerador que no sabe parsear no llegan aquí.
+ */
+function printMenuTree(): void {
+  const menu = Menu.getApplicationMenu();
+  if (!menu) {
+    console.error('MENU_FAIL no hay barra de menú instalada');
+    return;
+  }
+
+  for (const section of menu.items) {
+    const entries = (section.submenu?.items ?? []).map((item) => {
+      if (item.type === 'separator') return '---';
+      const accelerator = item.accelerator ? ` [${item.accelerator}]` : '';
+      const submenu = item.submenu ? ` (${item.submenu.items.length})` : '';
+      const disabled = item.enabled ? '' : ' (deshabilitado)';
+      return `${item.label}${accelerator}${submenu}${disabled}`;
+    });
+
+    console.error(`MENU ${section.label}: ${entries.join(' | ')}`);
+  }
+
+  console.error(`MENU_OK ${menu.items.length} secciones`);
+}
+
 function createWindow(): BrowserWindow {
   const icon = iconPath();
 
@@ -639,7 +672,23 @@ app.whenReady().then(async () => {
   });
 
   registerIpcHandlers();
-  installApplicationMenu();
+
+  // El menú necesita dos cosas del proceso principal: la lista de recientes al construirse y una
+  // forma de abrir una. Se le inyectan en vez de que las importe, para que `menu.ts` siga sin saber
+  // nada del estado del IDE.
+  installApplicationMenu({ recents: listRecentWorkspaces, openRecent: openRecentFromMenu });
+
+  // Modo de diagnóstico: imprime la barra de menú tal y como la ha construido Electron y sale.
+  //
+  // Existe porque la prueba de `menu-template.test.mjs` comprueba el **dato** y no puede comprobar
+  // lo que sólo sabe Electron: que un `role` sea de los que conoce y que sepa parsear cada
+  // acelerador. Las dos cosas fallan en ejecución y sin traza útil. Con esto, "el menú se
+  // construye" es una aserción y no una suposición.
+  if (menuDump) {
+    printMenuTree();
+    app.exit(0);
+    return;
+  }
 
   // El workspace se abre ANTES de crear la ventana: así el renderer ya lo encuentra al pedir
   // `workspace:current` y no hay un parpadeo de pantalla de bienvenida.

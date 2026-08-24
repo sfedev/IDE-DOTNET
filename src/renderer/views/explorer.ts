@@ -109,6 +109,19 @@ export class ExplorerView {
     this.render();
   }
 
+  /**
+   * Abre el filtro del árbol y le da el foco.
+   *
+   * Lo llaman el botón de la vista y el menú Editar. Es un filtro **por nombre de archivo**, no una
+   * búsqueda dentro del contenido, y el menú lo dice con esas palabras: prometer "buscar en los
+   * archivos" y filtrar por nombre es peor que no ofrecerlo.
+   */
+  focusFilter(): void {
+    this.filter = this.filter === '' ? ' ' : '';
+    this.render();
+    byId('sidebar-content').querySelector<HTMLInputElement>('.tree-filter input')?.focus();
+  }
+
   getMode(): ExplorerMode {
     return this.mode;
   }
@@ -171,7 +184,17 @@ export class ExplorerView {
       return;
     }
 
-    if (this.filter.trim() !== '') {
+    /**
+     * Sin `trim()` a propósito, y aquí está la diferencia entre "el filtro está abierto" y "el
+     * filtro filtra algo".
+     *
+     * `focusFilter()` abre la caja poniendo un espacio, que es el centinela de "abierta y vacía".
+     * Con `trim()` ese espacio contaba como vacío y la barra no se pintaba nunca: el botón
+     * "Filtrar por nombre" de la barra de la vista llevaba desde la Fase 7 sin hacer nada visible.
+     * Filtrar de verdad sí mira el texto recortado (más abajo): un espacio no puede descartar
+     * archivos.
+     */
+    if (this.filter !== '') {
       container.appendChild(this.renderFilterBar());
     }
 
@@ -217,11 +240,7 @@ export class ExplorerView {
     if (!this.solution) return;
 
     actions.append(
-      action('search', 'Filtrar por nombre', () => {
-        this.filter = this.filter === '' ? ' ' : '';
-        this.render();
-        byId('sidebar-content').querySelector<HTMLInputElement>('.tree-filter input')?.focus();
-      }, this.filter !== ''),
+      action('search', 'Filtrar por nombre', () => this.focusFilter(), this.filter !== ''),
       action(
         this.mode === 'solution' ? 'folder' : 'solution',
         this.mode === 'solution' ? 'Ver archivos de la carpeta' : 'Ver la solución',

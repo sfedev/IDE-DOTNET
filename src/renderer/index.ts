@@ -391,6 +391,58 @@ class DotForgeApp {
     if (path) await this.openWorkspace(path);
   }
 
+  /**
+   * "Abrir solución…": diálogo filtrado a `.sln` / `.slnx`.
+   *
+   * El proceso principal devuelve la **carpeta** del archivo elegido, que es lo que el IDE abre.
+   * Elegir el archivo es lo natural para quien viene de Visual Studio; quedarse con su carpeta es
+   * lo que necesitan el explorador, git, la terminal y el servidor de lenguaje.
+   */
+  private async openSolutionDialog(): Promise<void> {
+    const path = await window.dotforge.workspace.openSolutionDialog();
+    if (path) await this.openWorkspace(path);
+  }
+
+  /**
+   * Cierra la solución y deja el IDE como recién arrancado.
+   *
+   * Se cierran también las pestañas: dejarlas abiertas señalando archivos de una solución que ya no
+   * está deja el editor lleno de rutas que el explorador ya no reconoce.
+   */
+  private async closeWorkspace(): Promise<void> {
+    await this.editor.closeAll();
+    await window.dotforge.workspace.close();
+    this.applySolution(null);
+    await this.refreshRecents();
+  }
+
+  /**
+   * Abre la documentación didáctica de la solución.
+   *
+   * Las soluciones que genera el asistente salen con un `README.md` que explica sus capas y por qué
+   * (ADR-010): es lo que convierte el generador en algo que se puede aprender y no sólo ejecutar.
+   * Si la solución no lo trae —porque no la generó DotForge— se dice, en vez de abrir una pestaña
+   * vacía.
+   */
+  private async openSolutionDocs(): Promise<void> {
+    if (!this.solution) {
+      this.notify('Abre una solución para ver su documentación.', 'warn');
+      return;
+    }
+
+    const separator = this.info?.platform === 'win32' ? '\\' : '/';
+    const readme = `${this.solution.directory}${separator}README.md`;
+
+    try {
+      await this.openFile(readme);
+    } catch {
+      this.notify(
+        `Esta solución no trae README.md. Las que genera el asistente de arquitecturas sí lo incluyen.`,
+        'warn',
+      );
+    }
+  }
+
   private async openWorkspace(path: string): Promise<void> {
     try {
       const solution = await window.dotforge.workspace.open(path);
@@ -1473,6 +1525,21 @@ class DotForgeApp {
         run: () => void this.openFolderDialog(),
       },
       {
+        id: 'file.open-solution',
+        icon: 'solution',
+        title: 'Abrir solución…',
+        group: 'Archivo',
+        keybinding: `${modifier}+Shift+O`,
+        run: () => void this.openSolutionDialog(),
+      },
+      {
+        id: 'file.close-workspace',
+        icon: 'x',
+        title: 'Cerrar la solución',
+        group: 'Archivo',
+        run: () => void this.closeWorkspace(),
+      },
+      {
         id: 'file.save',
         title: 'Guardar',
         group: 'Archivo',
@@ -1837,6 +1904,29 @@ class DotForgeApp {
         icon: 'moon',
         run: () => void this.toggleTheme(),
       },
+      // Los dos temas por separado, además del conmutador: en un menú desplegable "cambiar tema" no
+      // dice a cuál se va, y hay que abrirlo dos veces para averiguarlo.
+      {
+        id: 'view.theme-dark',
+        title: 'Tema oscuro',
+        group: 'Ver',
+        icon: 'moon',
+        run: () => void this.applySettings({ theme: 'dotforge-dark' }),
+      },
+      {
+        id: 'view.theme-light',
+        title: 'Tema claro',
+        group: 'Ver',
+        icon: 'sun',
+        run: () => void this.applySettings({ theme: 'dotforge-light' }),
+      },
+      {
+        id: 'view.http',
+        icon: 'exchange',
+        title: 'Cliente HTTP (.http / .rest)',
+        group: 'Ver',
+        run: () => this.panel.show('http'),
+      },
       {
         id: 'view.command-palette',
         icon: 'command',
@@ -1846,6 +1936,20 @@ class DotForgeApp {
         run: () => this.palette.show(),
       },
       { id: 'edit.find', title: 'Buscar en el archivo', group: 'Editar', keybinding: `${modifier}+F`, run: () => this.editor.runAction('actions.find') },
+      {
+        id: 'edit.find-in-files',
+        icon: 'search',
+        // El nombre dice lo que hace: filtra el árbol por nombre de archivo. DotForge todavía no
+        // busca dentro del contenido de los archivos, y llamarlo "buscar en los archivos" sería
+        // prometer una cosa y hacer otra.
+        title: 'Buscar archivos por nombre en el explorador',
+        group: 'Editar',
+        keybinding: `${modifier}+Shift+F`,
+        run: () => {
+          this.showExplorer();
+          this.explorer.focusFilter();
+        },
+      },
       {
         id: 'edit.format',
         title: 'Formatear documento',
@@ -1950,6 +2054,13 @@ class DotForgeApp {
           this.showGit();
           this.gitView.sync();
         },
+      },
+      {
+        id: 'help.docs',
+        icon: 'info',
+        title: 'Documentación de la solución abierta',
+        group: 'Ayuda',
+        run: () => void this.openSolutionDocs(),
       },
       {
         id: 'help.about',

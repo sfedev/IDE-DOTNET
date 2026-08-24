@@ -1,5 +1,14 @@
 /**
- * Menú nativo y atajos de teclado.
+ * Barra de menú nativa y atajos de teclado.
+ *
+ * El **contenido** del menú no está aquí: está en `src/shared/menu-template.ts`, como dato puro y
+ * con sus pruebas. Este archivo hace sólo la traducción a lo que espera Electron, más las dos cosas
+ * que sí necesitan al proceso principal: abrir una solución reciente y abrir un enlace externo.
+ *
+ * Ese reparto tiene un motivo concreto: `electron` no se puede importar en una prueba, así que
+ * mientras la plantilla viviera aquí no había forma de comprobar lo que se rompe en silencio —un
+ * comando que el renderer no conoce, dos entradas peleándose por el mismo acelerador— salvo
+ * abriendo los menús a mano uno por uno.
  *
  * Los aceleradores usan `CmdOrCtrl`, que Electron resuelve a Cmd en macOS y a Ctrl en el resto:
  * `Ctrl+Shift+B` en Windows y `Cmd+Shift+B` en macOS salen del mismo literal. `F5` es igual en
@@ -7,7 +16,20 @@
  */
 import { app, BrowserWindow, Menu, shell, type MenuItemConstructorOptions } from 'electron';
 
-import { IPC_EVENTS, type MenuCommand } from '../shared/contracts.js';
+import { IPC_EVENTS, type MenuCommand, type RecentWorkspace } from '../shared/contracts.js';
+import { buildMenuTemplate, type MenuEntry, type MenuSection } from '../shared/menu-template.js';
+
+/** Máximo de recientes en el menú. Más de ocho deja de ser un atajo y pasa a ser una lista. */
+const MAX_RECENT_ITEMS = 8;
+
+export interface MenuDependencies {
+  /** Soluciones recientes, ya con su disponibilidad resuelta. */
+  recents(): RecentWorkspace[];
+  /** Abre una carpeta reciente. Lo resuelve el proceso principal: ya sabe hacerlo. */
+  openRecent(path: string): void;
+}
+
+let dependencies: MenuDependencies = { recents: () => [], openRecent: () => {} };
 
 function send(command: MenuCommand): void {
   const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
@@ -16,200 +38,82 @@ function send(command: MenuCommand): void {
   }
 }
 
-function item(label: string, command: MenuCommand, accelerator?: string): MenuItemConstructorOptions {
-  return { label, ...(accelerator ? { accelerator } : {}), click: () => send(command) };
+/** Último segmento de una ruta, con cualquiera de los dos separadores. */
+function folderName(path: string): string {
+  const parts = path.split(/[\\/]+/).filter((part) => part !== '');
+  return parts.at(-1) ?? path;
+}
+
+/**
+ * Submenú de soluciones recientes.
+ *
+ * Las que ya no están **se enseñan deshabilitadas**, no se esconden: quien busca un proyecto que
+ * movió ayer necesita ver que el IDE lo recuerda y que la carpeta ya no está ahí. Esconderlas
+ * dejaría un menú que cambia de contenido sin explicación (misma regla que ADR-023).
+ */
+function recentsSubmenu(label: string): MenuItemConstructorOptions {
+  const recents = dependencies.recents().slice(0, MAX_RECENT_ITEMS);
+
+  if (recents.length === 0) {
+    return { label, submenu: [{ label: 'No hay ninguna todavía', enabled: false }] };
+  }
+
+  return {
+    label,
+    submenu: recents.map((entry) => ({
+      label: entry.available ? folderName(entry.path) : `${folderName(entry.path)} (no disponible)`,
+      // La ruta entera en el tooltip: dos soluciones pueden llamarse igual en carpetas distintas.
+      toolTip: entry.path,
+      enabled: entry.available,
+      click: () => dependencies.openRecent(entry.path),
+    })),
+  };
+}
+
+function toElectronItem(entry: MenuEntry): MenuItemConstructorOptions {
+  switch (entry.kind) {
+    case 'separator':
+      return { type: 'separator' };
+    case 'role':
+      return {
+        role: entry.role as MenuItemConstructorOptions['role'],
+        label: entry.label,
+        // Un `role` trae su propio acelerador si no se le dice otra cosa, y ahí es donde se colaban
+        // los choques: `togglefullscreen` se quedaba `F11` —que en un IDE es "paso a paso por
+        // instrucciones"— y `close` se quedaba `Ctrl+W`, que es cerrar pestaña.
+        ...(entry.accelerator ? { accelerator: entry.accelerator } : {}),
+      };
+    case 'link':
+      return { label: entry.label, click: () => void shell.openExternal(entry.url) };
+    case 'recents':
+      return recentsSubmenu(entry.label);
+    case 'command':
+      return {
+        label: entry.label,
+        ...(entry.accelerator ? { accelerator: entry.accelerator } : {}),
+        click: () => send(entry.command),
+      };
+  }
+}
+
+function toElectronSection(section: MenuSection): MenuItemConstructorOptions {
+  return { label: section.label, submenu: section.items.map(toElectronItem) };
 }
 
 export function buildApplicationMenu(): Menu {
-  const isMac = process.platform === 'darwin';
-
-  const macAppMenu: MenuItemConstructorOptions[] = isMac
-    ? [
-        {
-          label: app.getName(),
-          submenu: [
-            { role: 'about', label: 'Acerca de DotForge IDE' },
-            { type: 'separator' },
-            { role: 'services' },
-            { type: 'separator' },
-            { role: 'hide', label: 'Ocultar DotForge IDE' },
-            { role: 'hideOthers', label: 'Ocultar otros' },
-            { role: 'unhide', label: 'Mostrar todo' },
-            { type: 'separator' },
-            { role: 'quit', label: 'Salir de DotForge IDE' },
-          ],
-        },
-      ]
-    : [];
-
-  const template: MenuItemConstructorOptions[] = [
-    ...macAppMenu,
-    {
-      label: 'Archivo',
-      submenu: [
-        item('Nueva solución con el asistente…', 'scaffold.wizard', 'CmdOrCtrl+Shift+N'),
-        item('Nuevo archivo', 'file.new', 'CmdOrCtrl+N'),
-        { type: 'separator' },
-        item('Abrir carpeta…', 'file.open-folder', 'CmdOrCtrl+O'),
-        { type: 'separator' },
-        item('Guardar', 'file.save', 'CmdOrCtrl+S'),
-        item('Guardar todo', 'file.save-all', 'CmdOrCtrl+Alt+S'),
-        item('Cerrar pestaña', 'file.close-tab', 'CmdOrCtrl+W'),
-        { type: 'separator' },
-        isMac ? { role: 'close', label: 'Cerrar ventana' } : { role: 'quit', label: 'Salir' },
-      ],
-    },
-    {
-      label: 'Editar',
-      submenu: [
-        { role: 'undo', label: 'Deshacer' },
-        { role: 'redo', label: 'Rehacer' },
-        { type: 'separator' },
-        { role: 'cut', label: 'Cortar' },
-        { role: 'copy', label: 'Copiar' },
-        { role: 'paste', label: 'Pegar' },
-        { role: 'selectAll', label: 'Seleccionar todo' },
-        { type: 'separator' },
-        item('Buscar', 'edit.find', 'CmdOrCtrl+F'),
-        item('Formatear documento', 'edit.format', 'Alt+Shift+F'),
-      ],
-    },
-    {
-      label: 'Ver',
-      submenu: [
-        item('Paleta de comandos', 'view.command-palette', 'CmdOrCtrl+Shift+P'),
-        { type: 'separator' },
-        item('Explorador de soluciones', 'view.explorer', 'CmdOrCtrl+Shift+E'),
-        item('Control de código fuente', 'view.source-control', 'CmdOrCtrl+Shift+G'),
-        item('Paquetes NuGet', 'view.nuget', 'CmdOrCtrl+Shift+U'),
-        item('Base de datos y EF Core', 'view.efcore', 'CmdOrCtrl+Shift+D'),
-        item('Contenedores y Docker Compose', 'view.containers', 'CmdOrCtrl+Shift+K'),
-        item('Explorador de pruebas', 'view.tests', 'CmdOrCtrl+Shift+Y'),
-        item('Métricas de rendimiento', 'view.metrics'),
-        item('Extensiones', 'view.extensions'),
-        item('Problemas', 'view.problems', 'CmdOrCtrl+Shift+M'),
-        item('Registro de la aplicación', 'view.logs', 'CmdOrCtrl+Shift+L'),
-        item('Salida y terminal', 'view.terminal', 'CmdOrCtrl+J'),
-        { type: 'separator' },
-        item('Cambiar tema', 'view.toggle-theme'),
-        { type: 'separator' },
-        { role: 'resetZoom', label: 'Zoom normal' },
-        { role: 'zoomIn', label: 'Acercar' },
-        { role: 'zoomOut', label: 'Alejar' },
-        { type: 'separator' },
-        { role: 'togglefullscreen', label: 'Pantalla completa' },
-        { role: 'toggleDevTools', label: 'Herramientas de desarrollo' },
-      ],
-    },
-    {
-      label: 'IA',
-      submenu: [
-        item('Abrir DotForge AI Assistant', 'ai.chat', 'CmdOrCtrl+Shift+A'),
-        item('Editar el código seleccionado…', 'ai.inline', 'CmdOrCtrl+I'),
-        { type: 'separator' },
-        item('Explicar el código', 'ai.explain'),
-        item('Generar pruebas xUnit', 'ai.tests'),
-      ],
-    },
-    {
-      label: 'Datos',
-      submenu: [
-        item('Migraciones y esquema de EF Core', 'view.efcore', 'CmdOrCtrl+Shift+D'),
-        item('Añadir migración…', 'efcore.add-migration'),
-        item('Actualizar la base de datos', 'efcore.update-database'),
-        { type: 'separator' },
-        item('Enviar la petición HTTP del cursor', 'http.send-request', 'Alt+Enter'),
-        item('Generar pruebas HTTP del archivo', 'http.generate-file'),
-        { type: 'separator' },
-        item('Contenedores y Docker Compose', 'view.containers', 'CmdOrCtrl+Shift+K'),
-        item('Levantar los servicios del compose', 'docker.compose-up'),
-        item('Bajar los servicios del compose', 'docker.compose-down'),
-      ],
-    },
-    {
-      label: 'Git',
-      submenu: [
-        item('Abrir el control de código fuente', 'view.source-control', 'CmdOrCtrl+Shift+G'),
-        { type: 'separator' },
-        item('Confirmar los cambios preparados', 'git.commit'),
-        item('Publicar (push)', 'git.push'),
-        item('Traer del remoto (pull)', 'git.pull'),
-        item('Sincronizar', 'git.sync'),
-      ],
-    },
-    {
-      label: 'Compilar',
-      submenu: [
-        item('Compilar solución', 'build.build', 'CmdOrCtrl+Shift+B'),
-        item('Recompilar todo', 'build.rebuild', 'CmdOrCtrl+Alt+B'),
-        item('Limpiar', 'build.clean'),
-        item('Restaurar paquetes', 'build.restore'),
-        { type: 'separator' },
-        item('Ejecutar pruebas', 'build.test', 'CmdOrCtrl+Shift+T'),
-        item('Ejecutar las pruebas del archivo actual', 'tests.run-file'),
-        item('Explorador de pruebas', 'view.tests', 'CmdOrCtrl+Shift+Y'),
-        { type: 'separator' },
-        item('Revisar las reglas de arquitectura', 'architecture.check'),
-        item('Buscar vulnerabilidades en los paquetes', 'nuget.audit'),
-      ],
-    },
-    {
-      label: 'Depurar',
-      submenu: [
-        item('Iniciar depuración', 'run.start', 'F5'),
-        item('Ejecutar sin depurar', 'run.without-debug'),
-        item('Iniciar con Hot Reload (dotnet watch)', 'run.watch', 'CmdOrCtrl+F5'),
-        item('Detener', 'run.stop', 'Shift+F5'),
-        { type: 'separator' },
-        item('Crear túnel público…', 'tunnel.create'),
-        item('Cerrar el túnel público', 'tunnel.stop'),
-        item('Métricas de rendimiento', 'view.metrics'),
-        { type: 'separator' },
-        item('Alternar breakpoint', 'debug.toggle-breakpoint', 'F9'),
-        item('Continuar', 'debug.continue'),
-        item('Paso a paso por procedimientos', 'debug.step-over', 'F10'),
-        item('Paso a paso por instrucciones', 'debug.step-in', 'F11'),
-        item('Salir del método', 'debug.step-out', 'Shift+F11'),
-      ],
-    },
-    {
-      label: 'Ventana',
-      submenu: isMac
-        ? [
-            { role: 'minimize', label: 'Minimizar' },
-            { role: 'zoom', label: 'Zoom' },
-            { type: 'separator' },
-            { role: 'front', label: 'Traer todo al frente' },
-          ]
-        : [
-            { role: 'minimize', label: 'Minimizar' },
-            { role: 'close', label: 'Cerrar' },
-          ],
-    },
-    {
-      label: 'Ayuda',
-      submenu: [
-        item('Acerca de DotForge IDE', 'help.about'),
-        item('Buscar actualizaciones…', 'update.check'),
-        {
-          label: 'Documentación de .NET',
-          click: () => void shell.openExternal('https://learn.microsoft.com/dotnet/'),
-        },
-        {
-          label: 'Documentación de Blazor',
-          click: () => void shell.openExternal('https://learn.microsoft.com/aspnet/core/blazor/'),
-        },
-        {
-          label: 'Open VSX Registry',
-          click: () => void shell.openExternal('https://open-vsx.org/'),
-        },
-      ],
-    },
-  ];
-
-  return Menu.buildFromTemplate(template);
+  const template = buildMenuTemplate({ platform: process.platform, appName: app.getName() });
+  return Menu.buildFromTemplate(template.map(toElectronSection));
 }
 
-export function installApplicationMenu(): void {
+/**
+ * Instala (o reinstala) la barra de menú.
+ *
+ * Se reinstala al abrir o cerrar una solución, y no sólo al arrancar: un menú de Electron es
+ * estático una vez puesto, así que la lista de recientes sólo se pone al día volviendo a
+ * construirlo. Es barato —son unas decenas de entradas— y es la única forma de que "Soluciones
+ * recientes" no mienta.
+ */
+export function installApplicationMenu(deps?: MenuDependencies): void {
+  if (deps) dependencies = deps;
   Menu.setApplicationMenu(buildApplicationMenu());
 }

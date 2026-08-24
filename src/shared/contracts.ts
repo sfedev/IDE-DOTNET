@@ -590,6 +590,7 @@ export const IPC = {
   appShowItemInFolder: 'app:show-item-in-folder',
 
   workspaceOpenDialog: 'workspace:open-dialog',
+  workspaceOpenSolutionDialog: 'workspace:open-solution-dialog',
   workspaceOpen: 'workspace:open',
   workspaceCurrent: 'workspace:current',
   workspaceClose: 'workspace:close',
@@ -730,11 +731,16 @@ export type IpcEventChannel = (typeof IPC_EVENTS)[keyof typeof IPC_EVENTS];
 export type MenuCommand =
   | 'file.new'
   | 'file.open-folder'
+  | 'file.open-solution'
+  | 'file.close-workspace'
   | 'file.save'
   | 'file.save-all'
   | 'file.close-tab'
   | 'edit.find'
+  | 'edit.find-in-files'
   | 'edit.format'
+  | 'edit.go-to-definition'
+  | 'edit.rename'
   | 'view.command-palette'
   | 'view.explorer'
   | 'view.source-control'
@@ -756,7 +762,12 @@ export type MenuCommand =
   | 'view.logs'
   | 'architecture.check'
   | 'view.terminal'
+  | 'view.http'
+  | 'view.settings'
   | 'view.toggle-theme'
+  | 'view.theme-dark'
+  | 'view.theme-light'
+  | 'lsp.restart'
   | 'build.build'
   | 'build.rebuild'
   | 'build.clean'
@@ -785,7 +796,10 @@ export type MenuCommand =
   | 'ai.inline'
   | 'ai.explain'
   | 'ai.tests'
-  | 'help.about';
+  | 'ai.fix'
+  | 'ai.reset'
+  | 'help.about'
+  | 'help.docs';
 
 /**
  * API expuesta al renderer por el preload. Es intencionadamente pequeña: cada método es una
@@ -801,6 +815,11 @@ export interface DotForgeApi {
   };
   workspace: {
     openDialog(): Promise<string | null>;
+    /**
+     * Diálogo filtrado a `.sln` / `.slnx`. Devuelve la **carpeta** del archivo elegido, que es lo
+     * que el IDE abre: una solución sin su carpeta alrededor no sirve de nada.
+     */
+    openSolutionDialog(): Promise<string | null>;
     open(path: string): Promise<SolutionInfo>;
     current(): Promise<SolutionInfo | null>;
     close(): Promise<void>;

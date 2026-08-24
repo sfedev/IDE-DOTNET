@@ -69,6 +69,7 @@ import * as aiSecrets from '../services/ai/secret-store.js';
 import { AiRequestError, coerceChatRequest } from '../services/ai/validate.js';
 import * as commandRunner from '../services/command-runner.js';
 import * as terminalSession from '../services/terminal-session.js';
+import { installApplicationMenu } from '../menu.js';
 import * as dockerService from '../services/docker-service.js';
 import * as dotnetService from '../services/dotnet-service.js';
 import * as efcoreService from '../services/efcore-service.js';
@@ -179,6 +180,9 @@ async function openWorkspaceDirectory(directory: string): Promise<SolutionInfo> 
   // La terminal se muda con la solución: seguir en la carpeta de la anterior es defendible en la
   // teoría y desconcertante en la práctica.
   syncTerminalContext();
+  // Un menú de Electron es estático una vez puesto: la lista de recientes sólo se pone al día
+  // volviendo a construirlo.
+  installApplicationMenu();
   broadcast(IPC_EVENTS.workspaceChanged, currentSolution);
 
   // El LSP se arranca en segundo plano: abrir una carpeta no debe bloquearse por una descarga.
@@ -465,6 +469,29 @@ export function registerIpcHandlers(): void {
       buttonLabel: 'Abrir',
     });
     return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+
+  /**
+   * Diálogo de "Abrir solución…".
+   *
+   * Se elige el `.sln` y se abre **su carpeta**: el IDE trabaja sobre un directorio (explorador,
+   * git, terminal, servidor de lenguaje) y una solución suelta no le sirve a ninguno de los cinco.
+   * Elegir el archivo es lo natural para quien viene de Visual Studio; quedarse con su carpeta es
+   * lo correcto por dentro.
+   */
+  ipcMain.handle(IPC.workspaceOpenSolutionDialog, async (): Promise<string | null> => {
+    const result = await dialog.showOpenDialog({
+      title: 'Abrir solución',
+      properties: ['openFile'],
+      buttonLabel: 'Abrir',
+      filters: [
+        { name: 'Soluciones de .NET', extensions: ['sln', 'slnx'] },
+        { name: 'Proyectos de C#', extensions: ['csproj'] },
+      ],
+    });
+
+    const file = result.canceled ? null : (result.filePaths[0] ?? null);
+    return file === null ? null : dirname(file);
   });
 
   ipcMain.handle(IPC.workspaceOpen, async (_event, path: unknown): Promise<SolutionInfo> => {
@@ -1298,6 +1325,28 @@ export async function openWorkspaceFromCli(path: string): Promise<SolutionInfo |
     currentSolution = null;
     return null;
   }
+}
+
+/**
+ * Soluciones recientes para el submenú de "Archivo".
+ *
+ * Es la misma lista que ve la pantalla de bienvenida y con la misma resolución de disponibilidad:
+ * dos sitios enseñando recientes distintos serían dos verdades.
+ */
+export function listRecentWorkspaces(): RecentWorkspace[] {
+  return describeRecents(settingsService.current().recentWorkspaces);
+}
+
+/**
+ * Abre una reciente desde el menú nativo.
+ *
+ * Va por `openWorkspaceDirectory`, que es el mismo camino que el canal IPC: avisa al renderer,
+ * muda la terminal y arranca el servidor de lenguaje. El menú no reimplementa nada.
+ */
+export function openRecentFromMenu(path: string): void {
+  void openWorkspaceDirectory(path).catch((error: unknown) => {
+    console.error(`no se ha podido abrir "${path}": ${error instanceof Error ? error.message : String(error)}`);
+  });
 }
 
 /** Arranca el servidor de lenguaje para el workspace ya abierto. */
