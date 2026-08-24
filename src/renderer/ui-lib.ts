@@ -58,6 +58,15 @@ export { aiEntryState, aiActionBlockedReason, AI_DISABLED_MESSAGE } from './ai-a
 export type { AiEntryState } from './ai-availability.js';
 
 /**
+ * Conservación del foco al repintar una vista entera.
+ *
+ * Las reglas viven aparte del DOM justamente para poder probarlas aquí: qué se anota, cuándo se
+ * restaura y qué pasa cuando el texto ha cambiado entre la foto y la restauración.
+ */
+export { captureFocus, clampPosition, focusKeyOf, FOCUS_KEY_ATTRIBUTE, FOCUS_KEY_DATASET, restoreFocus } from './focus-guard.js';
+export type { FocusableField, FocusSnapshot } from './focus-guard.js';
+
+/**
  * Cuándo se puede escribir en el editor.
  *
  * Es una regla con consecuencias muy visibles —un `readOnly` colado deja el editor mudo hasta

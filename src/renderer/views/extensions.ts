@@ -25,7 +25,8 @@ import {
   formatRating,
 } from '../../shared/open-vsx.js';
 import { hasNewerVersion } from '../../shared/vsix.js';
-import { byId, clear, debounce, el } from '../dom.js';
+import { byId, clear, debounce, el, repaintPreservingFocus } from '../dom.js';
+import { FOCUS_KEY_ATTRIBUTE } from '../focus-guard.js';
 import { icon } from '../icons.js';
 
 export interface ExtensionsHost {
@@ -47,6 +48,8 @@ export class ExtensionsView {
   private error: string | null = null;
   /** Identificador de la extensión con una instalación o desinstalación en marcha. */
   private working: string | null = null;
+  /** Número de orden de la búsqueda en vuelo: descarta las respuestas que llegan tarde. */
+  private searchToken = 0;
 
   private readonly runSearch = debounce(() => void this.search(), 320);
 
@@ -84,24 +87,34 @@ export class ExtensionsView {
     this.render();
   }
 
+  /**
+   * Consulta Open VSX. Como en NuGet, sólo manda la última: dos consultas en vuelo pueden volver
+   * al revés y dejar el panel enseñando una búsqueda que el usuario ya había abandonado.
+   */
   private async search(): Promise<void> {
+    const request = ++this.searchToken;
+
     this.searching = true;
     this.error = null;
     this.render();
 
     try {
       const result = await window.dotforge.extensions.search({ query: this.query, category: this.category });
+      if (request !== this.searchToken) return;
       this.results = result.extensions;
       this.total = result.total;
     } catch (error) {
+      if (request !== this.searchToken) return;
       // Que Open VSX no conteste no vacía el panel: lo instalado sigue estando y sigue siendo
       // gestionable sin red, que es justo cuando más molesta un panel en blanco.
       this.results = [];
       this.total = 0;
       this.error = this.messageOf(error);
     } finally {
-      this.searching = false;
-      this.render();
+      if (request === this.searchToken) {
+        this.searching = false;
+        this.render();
+      }
     }
   }
 
@@ -151,9 +164,17 @@ export class ExtensionsView {
 
   // --- Pintado ----------------------------------------------------------------------------------
 
+  /**
+   * Repinta el panel conservando el foco: mismo motivo que en NuGet. Aquí es peor todavía, porque
+   * cada búsqueda pinta dos veces (el estado "Consultando…" y el resultado) y además se relee lo
+   * instalado, que pinta una tercera.
+   */
   render(): void {
     if (!this.visible) return;
+    repaintPreservingFocus(byId('sidebar-content'), () => this.paint());
+  }
 
+  private paint(): void {
     const container = byId('sidebar-content');
     clear(container);
     byId('sidebar-title').textContent = 'Extensiones';
@@ -207,6 +228,7 @@ export class ExtensionsView {
       className: 'input',
       placeholder: 'Buscar en open-vsx.org…',
       value: this.query,
+      attrs: { [FOCUS_KEY_ATTRIBUTE]: 'extensions-search' },
       on: {
         input: (event) => {
           this.query = (event.target as HTMLInputElement).value;

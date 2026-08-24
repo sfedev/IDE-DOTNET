@@ -5,6 +5,7 @@
  * viene de rutas de archivo, mensajes del compilador y descripciones de paquetes NuGet, es decir,
  * texto que no controlamos. Con `textContent` no hay forma de inyectar marcado.
  */
+import { captureFocus, FOCUS_KEY_ATTRIBUTE, restoreFocus, type FocusableField } from './focus-guard.js';
 
 type Child = Node | string | number | null | undefined | false;
 
@@ -84,6 +85,30 @@ export function byId<T extends HTMLElement = HTMLElement>(id: string): T {
   const node = document.getElementById(id);
   if (!node) throw new Error(`falta el elemento #${id} en index.html`);
   return node as T;
+}
+
+/**
+ * Repinta un contenedor sin perder el foco ni el cursor del campo que se estuviera usando.
+ *
+ * Es la contrapartida DOM de `focus-guard.ts`, que es donde están las reglas y las pruebas. El
+ * reparto es deliberado: aquí sólo se busca el nodo enfocado y el que ocupa su lugar después; qué
+ * se anota y qué se restaura se decide en funciones puras.
+ *
+ * Sólo entran en el trato los campos marcados con `data-focus-key`, y sólo si el foco estaba
+ * **dentro** de este contenedor: un repintado del panel de NuGet no puede robarle el cursor a la
+ * terminal.
+ */
+export function repaintPreservingFocus(container: Element, paint: () => void): void {
+  const active = document.activeElement;
+  const inside = active instanceof HTMLElement && container.contains(active);
+  const snapshot = inside ? captureFocus(active as unknown as FocusableField) : null;
+
+  paint();
+
+  if (snapshot === null) return;
+
+  const restored = container.querySelector(`[${FOCUS_KEY_ATTRIBUTE}="${CSS.escape(snapshot.key)}"]`);
+  restoreFocus(snapshot, (restored as unknown as FocusableField | null) ?? null);
 }
 
 /** Formatea un número grande de forma compacta: 12345678 -> "12,3 M". */
