@@ -10,7 +10,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -46,8 +46,31 @@ function runElectron(args, timeoutMs) {
       stderr += chunk.toString();
     });
 
+    /**
+     * Matar Electron es matar un árbol de procesos, no uno.
+     *
+     * Electron arranca sus procesos de GPU, renderer y utilidades como hijos, y todos heredan la
+     * tubería de salida. `child.kill()` en Windows termina sólo al padre: los nietos siguen vivos
+     * con el extremo de escritura abierto, la tubería no se cierra nunca y `node --test` se queda
+     * sin poder salir. La suite se colgaba ahí indefinidamente después de un timeout, que es justo
+     * cuando más falta hace ver el resultado.
+     */
+    const killTree = () => {
+      if (process.platform === 'win32' && child.pid !== undefined) {
+        // `/T` baja el árbol entero. Si el proceso ya no está, `taskkill` devuelve error y da igual.
+        spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+      } else {
+        child.kill('SIGKILL');
+      }
+
+      // Y se sueltan las tuberías: aunque quedara algún nieto escribiendo, este proceso ya no lo
+      // está esperando.
+      child.stdout.destroy();
+      child.stderr.destroy();
+    };
+
     const timer = setTimeout(() => {
-      child.kill('SIGKILL');
+      killTree();
       resolve({ code: -1, stdout, stderr: `${stderr}\n[timeout tras ${timeoutMs} ms]` });
     }, timeoutMs);
 
