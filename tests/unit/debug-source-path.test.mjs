@@ -18,9 +18,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import { debuggerSourcePath } from '../../build/toolchain.mjs';
 
@@ -67,13 +67,33 @@ describe('ruta de origen para el depurador', () => {
 
     assert.match(short, /~\d/, `se esperaba un alias 8.3 y ha salido ${short}`);
 
+    const marca = 'var x = 1; // marca de esta prueba\n';
     const file = join(root, 'Program.cs');
-    await writeFile(file, 'var x = 1;\n', 'utf8');
+    await writeFile(file, marca, 'utf8');
 
-    const resolved = await debuggerSourcePath(join(short, 'Program.cs'));
+    const desdeCorta = await debuggerSourcePath(join(short, 'Program.cs'));
+    const desdeLarga = await debuggerSourcePath(file);
 
-    assert.equal(resolved, file, 'la ruta no se ha llevado a su forma larga');
-    assert.ok(!/~\d/.test(resolved), `sigue habiendo un alias 8.3 en ${resolved}`);
+    /**
+     * Aquí había un error propio, y del mismo tipo que el que arregla el código bajo prueba.
+     *
+     * La aserción comparaba contra `file`, o sea contra `tmpdir()` + nombre. En esta máquina
+     * `%TEMP%` no tiene ningún componente 8.3 y pasaba; en un runner de Windows **sí lo tiene**
+     * (`C:\\Users\\RUNNER~1\\AppData\\Local\\Temp`), así que la referencia que hacía de "forma
+     * larga" tampoco lo era, y la prueba se caía enseñando la expansión correcta en `actual` y el
+     * alias en `expected`. Dar por canónica una ruta sin canonicalizarla es justo el fallo que
+     * dejaba los breakpoints sin ligar.
+     *
+     * Lo que de verdad necesita NetCoreDbg no es una cadena concreta —el nombre del usuario cambia
+     * en cada máquina— sino que **cualquier forma de escribir la ruta acabe en la misma**, y que
+     * esa sea la larga.
+     */
+    assert.equal(desdeCorta, desdeLarga, 'las dos formas de la ruta no convergen');
+    assert.ok(!/~\d/.test(desdeCorta), `sigue habiendo un alias 8.3 en ${desdeCorta}`);
+    assert.equal(basename(desdeCorta), 'Program.cs');
+
+    // Y apunta al archivo de verdad, no a otro que se llame igual.
+    assert.equal(await readFile(desdeCorta, 'utf8'), marca);
 
     await rm(root, { recursive: true, force: true });
   });

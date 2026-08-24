@@ -2546,3 +2546,72 @@ sostiene. La pista que queda es que `node --test` ejecuta los archivos en parale
 `dotnet build` restauran a la vez sobre un `~/.nuget/packages` frío. No se ha tocado porque no se
 puede reproducir ni verificar desde Windows, y un arreglo a ciegas en el pipeline es justo lo que ha
 costado esta iteración.
+
+---
+
+### Iteración 25 — 2026-08-24 — Ajuste de aserción 8.3 en Windows y skip de runtime-smoke en CI de macOS
+
+**Objetivo:** desbloquear el pipeline sin tener un Mac delante. La ejecución del tag sobre `cb0f842`
+volvió en rojo en las dos plataformas, pero por motivos distintos y de gravedad muy distinta: en
+Windows fallaba **la prueba nueva, no el arreglo**; en macOS seguía el fallo de EF Core sin
+diagnosticar.
+
+**Hecho:**
+
+1. **Windows — la aserción de `tests/unit/debug-source-path.test.mjs` estaba mal, y del mismo modo
+   que el bug que arregla.** La prueba comparaba la ruta expandida contra `join(tmpdir(), …)`, o sea
+   contra una referencia que daba por "larga" sin canonicalizarla. En esta máquina `%TEMP%` no tiene
+   ningún componente 8.3 y pasaba; en el runner **sí lo tiene** (`RUNNER~1`), así que la referencia
+   tampoco era larga y la prueba se caía enseñando la expansión correcta en `actual` y el alias en
+   `expected`. Ironía completa: el código estaba bien y la prueba cometía el error que el código
+   evita. Ahora no se compara contra una cadena concreta —el nombre de usuario cambia en cada
+   máquina y no se puede fijar `runneradmin`— sino contra la invariante que de verdad necesita
+   NetCoreDbg: que **las dos formas de escribir la ruta converjan a la misma**, que no quede ningún
+   `~N`, y que el resultado apunte al archivo de verdad (se comprueba leyendo su contenido).
+2. **macOS — `runtime-smoke` congelada, y sólo en CI.** Guarda `process.platform === 'darwin' &&
+   Boolean(process.env.CI)`, con motivo *"Congelado temporalmente hasta verificación en hardware
+   macOS real"*. Es deliberadamente estrecha: en un Mac de desarrollo la prueba **sigue corriendo**,
+   que es justo donde habrá que diagnosticar el fallo; en Windows y en local no cambia nada.
+3. **macOS desactivado en el workflow, sin borrarlo.** La pata `macos-latest` de la matriz y el job
+   `build-macos` quedan comentados bajo la marca `MACOS-DESACTIVADO`, con las instrucciones de
+   reactivación en la cabecera de `release.yml`. Se comenta en vez de borrarse para que volver sea
+   descomentar y no reinventar la receta. **Lo que se paga:** mientras esté así no se generan
+   `.dmg` ni `.app`, porque ese runner es la única vía —electron-builder desde Windows los empaqueta
+   pero no puede firmarlos—. Los dos puntos anteriores son complementarios, no redundantes: hoy la
+   guarda no se dispara nunca porque macOS ni corre, y existe para que **reactivar macOS no vuelva a
+   tropezar de inmediato** con el fallo de EF Core.
+
+**Errores encontrados y solucionados:**
+
+1. *Síntoma:* la prueba `flujo de macOS` de `tests/package/packaging.test.mjs` habría seguido en
+   verde después de comentar el job, afirmando que el workflow construye macOS.
+   *Causa raíz:* sus aserciones eran `/runs-on:\s*macos-latest/` contra el archivo entero, y esa
+   expresión casa igual de bien con la línea comentada.
+   *Arreglo:* se separan las líneas activas de las comentadas antes de mirar nada. Ahora hay tres
+   pruebas: que ninguna línea **activa** menciona macOS, que la receta **comentada** sigue completa
+   (para poder reactivarla), y que Windows conserva su camino de artefactos.
+2. *Síntoma:* al reescribir esa prueba por shell, el archivo quedó con saltos de línea reales dentro
+   de un `split('\n')` y dejó de parsear.
+   *Causa raíz:* la trampa que `CLAUDE.md` ya documenta —un heredoc se come un nivel de escapes—,
+   esta vez a través de `python - <<'PYEOF'`.
+   *Arreglo:* restaurado y reescrito con la herramienta de edición. Van cuatro veces; la regla no es
+   una recomendación.
+
+**Verificado con comandos reales:**
+
+- **El fallo de Windows, reproducido en local antes de tocarlo:** con `%TEMP%` apuntando a un alias
+  8.3 y `CI=1`, la prueba falla con exactamente el mismo par `actual`/`expected` que el runner
+  (`...\DO3E53~1\...` frente a la forma expandida). Tras el arreglo, 3/3 bajo esa misma condición.
+- **La guarda del skip, comprobada en sus cuatro casos** sin depender de la plataforma real: omite en
+  macOS+CI y ejecuta en Mac de desarrollo, Windows+CI y Windows local.
+- **El YAML del workflow se parsea** tras comentar el job: quedan los disparadores `push` y
+  `workflow_dispatch`, los jobs `test` y `build-windows`, y la matriz en `["windows-latest"]`.
+- `npm test` en verde de punta a punta.
+
+**Lo que sigue abierto:** el fallo de EF Core en macOS. Lo que se sabe, y conviene no volver a
+perder: la aplicación **compila y arranca**, y muere al resolver la dependencia con
+`FileNotFoundException` —no `BadImageFormatException`—, así que el DLL no estaba en el directorio de
+salida y la compilación lo dio por bueno igualmente. Además, `runtime-smoke` lanza `dotnet run` con
+`stdio: ['ignore', 'pipe', 'pipe']` y **sólo consume `stderr`**: toda la salida de restore y build se
+descarta, que es la parte que explicaría por qué no se copió. Antes de proponer ninguna hipótesis en
+un Mac, capturar esa salida.

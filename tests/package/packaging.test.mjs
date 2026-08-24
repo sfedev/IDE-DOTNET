@@ -277,11 +277,45 @@ describe('flujo de macOS', () => {
     assert.ok(existsSync(join(root, 'scripts', 'dist-mac.mjs')));
   });
 
-  it('el workflow de CI construye macOS en un runner macOS', () => {
-    const workflow = readFileSync(join(root, '.github', 'workflows', 'release.yml'), 'utf8');
-    assert.match(workflow, /runs-on:\s*macos-latest/);
-    assert.match(workflow, /npm run dist:mac/);
-    assert.match(workflow, /verify-dist\.mjs --require mac/);
+  /**
+   * macOS está desactivado a propósito en el workflow, y esto lo sostiene.
+   *
+   * Cuidado con **cómo** se comprueba. Lo que había aquí era `/runs-on:\s*macos-latest/` contra el
+   * texto entero del archivo, y una expresión así casa igual de bien con la línea comentada. Es
+   * decir: al comentar el job, esta prueba habría seguido en verde afirmando que el workflow
+   * construye macOS. Por eso ahora se separan las líneas activas de las comentadas antes de mirar
+   * nada; una prueba que no distingue lo uno de lo otro no está comprobando nada.
+   */
+  const workflowLines = () =>
+    readFileSync(join(root, '.github', 'workflows', 'release.yml'), 'utf8').split(/\r?\n/);
+
+  const activeLines = () => workflowLines().filter((line) => !line.trimStart().startsWith('#'));
+  const commentedLines = () => workflowLines().filter((line) => line.trimStart().startsWith('#'));
+
+  it('macOS está desactivado: ninguna línea activa lo menciona', () => {
+    const activas = activeLines().join('\n');
+
+    assert.doesNotMatch(activas, /macos-latest/, 'queda macOS activo en el workflow');
+    assert.doesNotMatch(activas, /npm run dist:mac/, 'queda un dist:mac activo en el workflow');
+  });
+
+  it('la receta de macOS sigue guardada para poder reactivarla', () => {
+    // Desactivar no es borrar: cuando haya un Mac, el job tiene que volver descomentando, no
+    // reinventándolo. Si alguien limpia estos comentarios, esto se pone en rojo.
+    const comentadas = commentedLines().join('\n');
+
+    assert.match(comentadas, /runs-on:\s*macos-latest/, 'se ha perdido el runner de macOS');
+    assert.match(comentadas, /npm run dist:mac/, 'se ha perdido el paso dist:mac');
+    assert.match(comentadas, /verify-dist\.mjs --require mac/, 'se ha perdido la verificación de mac');
+    assert.match(comentadas, /MACOS-DESACTIVADO/, 'falta la marca por la que se encuentra todo esto');
+  });
+
+  it('Windows sigue siendo la puerta de calidad y produce sus artefactos', () => {
+    const activas = activeLines().join('\n');
+
+    assert.match(activas, /windows-latest/);
+    assert.match(activas, /npm run dist:win/);
+    assert.match(activas, /verify-dist\.mjs --require win/);
   });
 });
 

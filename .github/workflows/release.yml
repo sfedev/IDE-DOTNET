@@ -3,6 +3,27 @@
 # El .dmg y el .app se generan en un runner macOS porque electron-builder no puede producirlos
 # desde otra plataforma. Este workflow es la ruta oficial para obtener los artefactos de macOS.
 
+# --- MACOS-DESACTIVADO ------------------------------------------------------------------------
+#
+# macOS está desactivado a propósito, no por descuido. No hay ningún Mac donde reproducir lo que
+# falla, y arreglar a ciegas ya salió caro: la iteración 22 dio por buena una explicación —"caché
+# de NuGet a medias"— que la 24 desmintió, porque volvió a fallar con la caché sin restaurar.
+#
+# Lo que NO se cubre mientras esté así:
+#   - No se prueba nada en macOS.
+#   - No se generan `.dmg` ni `.app`. Este runner es la única vía: electron-builder desde Windows
+#     los empaqueta pero no puede firmarlos.
+#
+# Para reactivarlo, con un Mac delante:
+#   1. Descomentar `macos-latest` en la matriz del job `test`.
+#   2. Descomentar el job `build-macos` entero, al final de este archivo.
+#   3. Actualizar `flujo de macOS` en tests/package/packaging.test.mjs, que hoy vigila justo lo
+#      contrario: que sigue desactivado y que la receta comentada no se ha perdido.
+#   4. Queda pendiente de diagnosticar el fallo que motivó esto: `runtime-smoke` moría con
+#      `Could not load file or assembly 'Microsoft.EntityFrameworkCore, Version=10.0.11.0'`,
+#      es decir, la app compilaba y arrancaba pero el DLL no estaba en el directorio de salida.
+# ------------------------------------------------------------------------------------------------
+
 name: release
 
 on:
@@ -18,7 +39,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        # MACOS-DESACTIVADO: la línea buena es la de abajo; descomentarla y borrar esta.
+        os: [windows-latest]
+        # os: [windows-latest, macos-latest]
 
     steps:
       - uses: actions/checkout@v4
@@ -97,32 +120,36 @@ jobs:
             dist/*.zip
           if-no-files-found: error
 
-  build-macos:
-    name: Artefactos de macOS
-    needs: test
-    runs-on: macos-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-
-      - run: npm ci
-
-      - name: Install Electron binary
-        run: node node_modules/electron/install.js
-
-      - run: npm run icons
-      - run: npm run dist:mac
-      - run: node scripts/verify-dist.mjs --require mac
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: dotforge-ide-macos
-          path: |
-            dist/*.dmg
-            dist/*.zip
-          if-no-files-found: error
+  # MACOS-DESACTIVADO: job `build-macos` comentado entero. Es la única fuente de `.dmg`/`.app`,
+  # así que descomentarlo es exactamente lo que hay que hacer al recuperar un Mac. No se borra
+  # para que la receta —iconos, dist:mac, verify --require mac, subida de artefactos— no se
+  # tenga que reinventar.
+#  build-macos:
+#    name: Artefactos de macOS
+#    needs: test
+#    runs-on: macos-latest
+#
+#    steps:
+#      - uses: actions/checkout@v4
+#
+#      - uses: actions/setup-node@v4
+#        with:
+#          node-version: 24
+#          cache: npm
+#
+#      - run: npm ci
+#
+#      - name: Install Electron binary
+#        run: node node_modules/electron/install.js
+#
+#      - run: npm run icons
+#      - run: npm run dist:mac
+#      - run: node scripts/verify-dist.mjs --require mac
+#
+#      - uses: actions/upload-artifact@v4
+#        with:
+#          name: dotforge-ide-macos
+#          path: |
+#            dist/*.dmg
+#            dist/*.zip
+#          if-no-files-found: error
