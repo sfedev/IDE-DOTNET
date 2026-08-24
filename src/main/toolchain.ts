@@ -85,6 +85,6 @@ export type { InstallManifest, InstallProblem, ManifestFile } from '../shared/to
 export { installArchive, readInstallManifest, removeInstall, verifyInstall } from './services/toolchain-install.js';
 export { acquireDebugger, assetNameForPlatform, debuggerSourcePath } from './debug/netcoredbg.js';
 export type { DebuggerBinary } from './debug/netcoredbg.js';
-export { extractTo, listEntries, readEntry, sha256, ZipError } from './services/zip.js';
+export { extractTo, listEntries, readEntry, readEntryAsync, sha256, sha256Async, ZipError } from './services/zip.js';
 export { DebugController, resolveDebugTarget } from './debug/debug-controller.js';
 export { DebugSession } from './debug/netcoredbg.js';

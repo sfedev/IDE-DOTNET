@@ -13,7 +13,6 @@
  *
  * Como el resto de servicios probables, no importa `electron`: la ruta de `userData` se inyecta.
  */
-import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { basename, join, resolve, sep } from 'node:path';
 
@@ -73,11 +72,11 @@ function insideExtensions(folder: string): string {
 // ---------------------------------------------------------------------------------------------
 
 async function readInstalled(directory: string): Promise<InstalledExtension | null> {
-  const manifestPath = join(directory, EXTENSION_MANIFEST);
-  if (!existsSync(manifestPath)) return null;
-
   try {
-    const manifest = parseVsixManifest(await readFile(manifestPath, 'utf8'));
+    // Sin `existsSync`: la ausencia del archivo la resuelve el propio `readFile`, por el mismo
+    // camino que un `package.json` ilegible, y sin una llamada síncrona de disco en el hilo
+    // principal por cada carpeta de extensión.
+    const manifest = parseVsixManifest(await readFile(join(directory, EXTENSION_MANIFEST), 'utf8'));
     const install = await readInstallManifest(directory);
     return installedFrom(manifest, directory, install?.installedAtUtc ?? null);
   } catch {
@@ -90,11 +89,18 @@ async function readInstalled(directory: string): Promise<InstalledExtension | nu
 /** Extensiones instaladas, ordenadas por nombre visible. */
 export async function listInstalled(): Promise<InstalledExtension[]> {
   const root = extensionsDirectory();
-  if (!existsSync(root)) return [];
+
+  let entries: string[];
+  try {
+    entries = await readdir(root);
+  } catch {
+    // Todavía no se ha instalado ninguna: la carpeta no existe y eso no es un error.
+    return [];
+  }
 
   const found: InstalledExtension[] = [];
 
-  for (const entry of await readdir(root)) {
+  for (const entry of entries) {
     const directory = join(root, entry);
     try {
       if (!(await stat(directory)).isDirectory()) continue;

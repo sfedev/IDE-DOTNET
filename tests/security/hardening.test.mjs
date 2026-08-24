@@ -371,9 +371,11 @@ describe('descargas del toolchain', () => {
       assert.match(source, /installArchive\(/);
     }
 
+    // El hash se calcula en la variante que trocea y cede el bucle de eventos (ADR-051), pero lo
+    // que se anota es exactamente lo mismo: el del artefacto y el de cada archivo escrito.
     const install = readSource('src/main/services/toolchain-install.ts');
-    assert.match(install, /sourceSha256: sha256\(archive\)/, 'el hash del artefacto descargado');
-    assert.match(install, /sha256: sha256\(contents\)/, 'y uno por archivo extraído');
+    assert.match(install, /sourceSha256: await sha256Async\(archive\)/, 'el hash del artefacto descargado');
+    assert.match(install, /sha256: await sha256Async\(contents\)/, 'y uno por archivo extraído');
   });
 
   /**
@@ -481,6 +483,37 @@ describe('extracción de archivos comprimidos', () => {
   it('protege contra zip-slip', () => {
     assert.match(zip, /zip-slip/);
     assert.match(zip, /relativePath\.startsWith\('\.\.'\)/);
+  });
+
+  /**
+   * Bloquear el hilo principal de Electron es un fallo de robustez, no sólo de comodidad: mientras
+   * dura, la ventana no repinta y el renderer no recibe IPC. Es estructural porque volver a
+   * escribir `inflateRawSync` dentro del bucle es de las cosas más fáciles de colar en una revisión:
+   * compila, funciona y sólo se nota con un paquete grande delante.
+   */
+  it('la extracción descomprime en asíncrono, no en el hilo principal', () => {
+    const body = zip.slice(zip.indexOf('export async function extractTo'));
+    assert.doesNotMatch(body, /inflateRawSync/);
+    assert.match(body, /await readEntryAsync\(/);
+  });
+
+  it('las instalaciones hashean sin bloquear el bucle de eventos', () => {
+    const install = readSource('src/main/services/toolchain-install.ts');
+    assert.doesNotMatch(install, /createHash\(/);
+    assert.match(install, /await sha256Async\(archive\)/);
+    assert.match(install, /await sha256Async\(contents\)/);
+  });
+
+  /**
+   * Ninguna de las dos superficies que se instalan puede leer del disco en síncrono: se ejecutan en
+   * el proceso principal y `existsSync`/`readFileSync` paran el bucle tanto como un `inflateRawSync`.
+   */
+  it('ni el instalador del toolchain ni el de extensiones usan E/S síncrona', () => {
+    for (const file of ['src/main/services/toolchain-install.ts', 'src/main/services/extension-installer.ts']) {
+      // Con paréntesis: los comentarios de esos mismos archivos explican por qué **no** se usa
+      // `existsSync`, y una aserción que casara con la explicación se pondría en rojo sola.
+      assert.doesNotMatch(readSource(file), /(existsSync|readFileSync|writeFileSync|statSync)\(/, file);
+    }
   });
 });
 

@@ -9,8 +9,6 @@
  * No importa `electron`: sólo `node:fs`, para que las pruebas puedan instalar un ZIP de mentira en
  * un directorio temporal, corromper un archivo a mano y comprobar que la verificación lo caza.
  */
-import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -25,7 +23,7 @@ import {
   type ManifestFile,
   type ObservedFile,
 } from '../../shared/toolchain-manifest.js';
-import { extractTo, sha256, type ZipEntry } from './zip.js';
+import { extractTo, sha256Async, type ZipEntry } from './zip.js';
 
 export interface InstallOptions {
   kind: string;
@@ -65,8 +63,10 @@ export async function installArchive(
   const written = await extractTo(archive, directory, {
     ...(options.filter ? { filter: options.filter } : {}),
     ...(options.strip !== undefined ? { strip: options.strip } : {}),
-    onFile: (relativePath, contents) => {
-      files.push({ path: relativePath, size: contents.length, sha256: sha256(contents) });
+    // Hash asíncrono: son cientos de archivos, y hashearlos de corrido en el hilo principal es
+    // exactamente lo que congelaba la ventana durante la instalación de una extensión.
+    onFile: async (relativePath, contents) => {
+      files.push({ path: relativePath, size: contents.length, sha256: await sha256Async(contents) });
     },
   });
 
@@ -75,7 +75,7 @@ export async function installArchive(
     kind: options.kind,
     packageVersion: options.packageVersion,
     rid: options.rid,
-    sourceSha256: sha256(archive),
+    sourceSha256: await sha256Async(archive),
     installedAtUtc: now().toISOString(),
     files,
   });
@@ -87,11 +87,12 @@ export async function installArchive(
 
 /** Lee el manifiesto de una instalación, o `null` si no hay o no se entiende. */
 export async function readInstallManifest(directory: string): Promise<InstallManifest | null> {
-  const path = join(directory, MANIFEST_FILE);
-  if (!existsSync(path)) return null;
   try {
-    return parseManifest(await readFile(path, 'utf8'));
+    return parseManifest(await readFile(join(directory, MANIFEST_FILE), 'utf8'));
   } catch {
+    // Sin manifiesto y con manifiesto ilegible se tratan igual: la instalación no consta. Se
+    // resuelve con el propio `readFile` en vez de con un `existsSync` previo, porque cualquier
+    // llamada síncrona de disco aquí la paga el hilo principal de Electron.
     return null;
   }
 }
@@ -131,7 +132,7 @@ export async function verifyInstall(directory: string, options: { deep?: boolean
 
       if (options.deep === true && info.size === file.size) {
         const contents = await readFile(target);
-        observed.set(file.path, { size: info.size, sha256: createHash('sha256').update(contents).digest('hex') });
+        observed.set(file.path, { size: info.size, sha256: await sha256Async(contents) });
       } else {
         observed.set(file.path, { size: info.size, sha256: null });
       }

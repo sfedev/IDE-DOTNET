@@ -8,11 +8,31 @@
  * Se leen la cabecera EOCD y el directorio central (no las cabeceras locales, cuyos tamaños
  * pueden venir a cero cuando el ZIP se escribió en streaming). Soporta los métodos 0 (stored) y
  * 8 (deflate), que son los únicos que usan estos artefactos.
+ *
+ * **Nada de esto puede bloquear el bucle de eventos.** `zlib` y `crypto` ofrecen las dos versiones
+ * de cada operación y la síncrona es la cómoda de escribir: `inflateRawSync` y `createHash().update()`
+ * hacen su trabajo en C++, sí, pero **en el hilo principal**. Instalar un `.vsix` de 30 MB son
+ * cientos de inflados y cientos de hashes seguidos sin una sola cesión del bucle, y eso en Electron
+ * no es "un poco lento": es la ventana sin repintar, el renderer sin recibir IPC y el usuario
+ * pensando que la aplicación se ha colgado. Las variantes asíncronas van al pool de libuv, así que
+ * cada `await` es además un respiro para el bucle. Ver ADR-051.
  */
 import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, join, normalize, sep } from 'node:path';
-import { inflateRawSync } from 'node:zlib';
+import { promisify } from 'node:util';
+import { inflateRaw, inflateRawSync } from 'node:zlib';
+
+const inflateRawAsync = promisify(inflateRaw);
+
+/**
+ * Tamaño de bloque para hashear sin bloquear.
+ *
+ * 4 MiB es un compromiso medido: bastante grande para que el coste por bloque sea despreciable y
+ * bastante pequeño para que ningún bloque pase de unos pocos milisegundos, que es lo que hace falta
+ * para que el bucle de eventos no se note parado.
+ */
+const HASH_CHUNK_BYTES = 4 * 1024 * 1024;
 
 const EOCD_SIGNATURE = 0x06054b50;
 const CENTRAL_SIGNATURE = 0x02014b50;
@@ -133,13 +153,43 @@ export function listEntries(buffer: Buffer): ZipEntry[] {
   return result;
 }
 
-/** Descomprime una entrada concreta. */
-export function readEntry(buffer: Buffer, entry: ZipEntry): Buffer {
+/** Datos comprimidos de una entrada, localizados a través de su cabecera local. */
+function rawDataOf(buffer: Buffer, entry: ZipEntry): Buffer {
   // La cabecera local sí hace falta para saber dónde empiezan los datos.
   const nameLength = buffer.readUInt16LE(entry.localHeaderOffset + 26);
   const extraLength = buffer.readUInt16LE(entry.localHeaderOffset + 28);
   const start = entry.localHeaderOffset + 30 + nameLength + extraLength;
-  const raw = buffer.subarray(start, start + entry.compressedSize);
+  return buffer.subarray(start, start + entry.compressedSize);
+}
+
+/**
+ * Descomprime una entrada concreta, **sin bloquear el bucle de eventos**.
+ *
+ * Es la que usa la extracción: `inflateRaw` va al pool de libuv, así que el hilo principal sigue
+ * atendiendo IPC y repintando mientras se descomprime cada archivo.
+ */
+export async function readEntryAsync(buffer: Buffer, entry: ZipEntry): Promise<Buffer> {
+  const raw = rawDataOf(buffer, entry);
+
+  switch (entry.compressionMethod) {
+    case 0:
+      return Buffer.from(raw);
+    case 8:
+      return inflateRawAsync(raw);
+    default:
+      throw new ZipError(`método de compresión no soportado (${entry.compressionMethod}) en "${entry.name}"`);
+  }
+}
+
+/**
+ * Variante síncrona, para leer **una** entrada suelta y pequeña.
+ *
+ * Sirve para mirar dentro de un paquete sin extraerlo (el `extension.vsixmanifest` de un `.vsix`
+ * son unos kilobytes). No debe usarse en bucle sobre un paquete entero: para eso está
+ * `readEntryAsync`, y hay una prueba de seguridad que vigila que la extracción no vuelva aquí.
+ */
+export function readEntry(buffer: Buffer, entry: ZipEntry): Buffer {
+  const raw = rawDataOf(buffer, entry);
 
   switch (entry.compressionMethod) {
     case 0:
@@ -179,7 +229,9 @@ function isMacPackagingArtifact(name: string): boolean {
  * @param filter opcional; devuelve false para saltarse una entrada.
  * @param onFile opcional; recibe cada archivo escrito **con su contenido ya descomprimido**. Es lo
  *               que permite anotar tamaño y hash de cada uno en el manifiesto de la instalación sin
- *               volver a leer del disco los 250 MB que se acaban de escribir.
+ *               volver a leer del disco los 250 MB que se acaban de escribir. Puede ser asíncrono:
+ *               se espera antes de seguir, para que quien anota el manifiesto pueda hashear sin
+ *               bloquear.
  */
 export async function extractTo(
   buffer: Buffer,
@@ -187,7 +239,7 @@ export async function extractTo(
   options: {
     strip?: number;
     filter?: (entry: ZipEntry) => boolean;
-    onFile?: (relativePath: string, contents: Buffer) => void;
+    onFile?: (relativePath: string, contents: Buffer) => void | Promise<void>;
   } = {},
 ): Promise<number> {
   const { strip = 0, filter, onFile } = options;
@@ -210,7 +262,7 @@ export async function extractTo(
     }
 
     const target = join(destination, relativePath);
-    const contents = readEntry(buffer, entry);
+    const contents = await readEntryAsync(buffer, entry);
 
     // El ZIP declara el tamaño descomprimido en el directorio central. Si lo que sale del inflate
     // no mide eso, el archivo está corrupto y escribirlo sólo sirve para que el fallo aparezca
@@ -223,14 +275,39 @@ export async function extractTo(
 
     await mkdir(dirname(target), { recursive: true });
     await writeFile(target, contents);
-    onFile?.(segments.join('/'), contents);
+    await onFile?.(segments.join('/'), contents);
     written++;
   }
 
   return written;
 }
 
-/** SHA-256 en hexadecimal, para verificar la integridad de lo descargado. */
+/**
+ * SHA-256 en hexadecimal, para verificar la integridad de lo descargado.
+ *
+ * Síncrona a propósito: la usan las pruebas y los caminos que hashean unos pocos kilobytes. Para
+ * un archivo grande —y el `.nupkg` del servidor de Roslyn son 250 MB— está `sha256Async`.
+ */
 export function sha256(buffer: Buffer): string {
   return createHash('sha256').update(buffer).digest('hex');
+}
+
+/**
+ * SHA-256 troceado, cediendo el bucle de eventos entre bloques.
+ *
+ * `hash.update(buffer)` sobre 250 MB es medio segundo de hilo principal parado en una sola
+ * llamada. Trocearlo cuesta lo mismo en total y no se nota: entre bloque y bloque el bucle atiende
+ * el IPC, el repintado y los temporizadores.
+ */
+export async function sha256Async(buffer: Buffer): Promise<string> {
+  const hash = createHash('sha256');
+
+  for (let offset = 0; offset < buffer.length; offset += HASH_CHUNK_BYTES) {
+    hash.update(buffer.subarray(offset, Math.min(offset + HASH_CHUNK_BYTES, buffer.length)));
+    // Una cesión de verdad al bucle: `setImmediate` corre después de la fase de I/O, así que lo
+    // que estuviera esperando (una respuesta IPC, un repintado) llega a ejecutarse.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+
+  return hash.digest('hex');
 }
