@@ -360,7 +360,10 @@ export class EditorView {
     const done = this.pending.begin('saving');
 
     try {
-      if (this.settings?.formatOnSave) {
+      // El formateo actúa sobre el editor, y el editor sólo tiene cargado el modelo de la pestaña
+      // activa. Guardando una que no lo es —el autoguardado de una pestaña de la que ya se ha
+      // salido— formatearía el archivo equivocado, así que no se formatea.
+      if (this.settings?.formatOnSave && tab.path === this.activePath) {
         await this.editor?.getAction('editor.action.formatDocument')?.run();
       }
 
