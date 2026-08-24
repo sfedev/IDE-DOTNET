@@ -108,7 +108,8 @@ IDE-DOTNET/
 │   │   │                       # http-client-service.ts (envío real de las peticiones .http),
 │   │   │                       # docker-service.ts (estado del motor), node-scripts.ts (package.json),
 │   │   │                       # test-service.ts (descubrimiento, dotnet test y lectura del TRX),
-│   │   │                       # tunnel-service.ts (devtunnel/ngrok), metrics-service.ts (contadores)
+│   │   │                       # tunnel-service.ts (devtunnel/ngrok), metrics-service.ts (contadores),
+│   │   │                       # toolchain-install.ts (instalación verificada: manifiesto y reparación)
 │   │   │   └── ai/             # * Asistente de IA: proveedores, streaming y claves cifradas
 │   │   │       ├── request-builder.ts  # Petición HTTP por proveedor (puro)
 │   │   │       ├── stream-parser.ts    # SSE/NDJSON -> deltas (puro)
@@ -358,6 +359,9 @@ npx electron . --smoke-test
   extraerla. Barata (`stat`) en cada arranque; profunda (hash) sólo después de un fallo, que es lo
   único que distingue "esta copia está corrupta" de "esta compilación está mal". Un marcador que
   guarda el hash del `.nupkg` no verifica nada: verifica un archivo que ya no está en el disco.
+  Vale para **todo** lo que se descarga: el servidor de lenguaje y NetCoreDbg pasan por
+  `installArchive` / `verifyInstall` de `src/main/services/toolchain-install.ts`, y una prueba de
+  seguridad vigila que ninguno de los dos vuelva a declararse su propio marcador de "listo".
 - **El manifiesto se escribe el último.** Una extracción interrumpida tiene que dejar un directorio
   sin manifiesto, porque eso se reinstala; un marcador escrito antes de tiempo es una mentira
   permanente.

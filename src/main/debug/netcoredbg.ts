@@ -8,13 +8,12 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { extractTo, sha256 } from '../services/zip.js';
+import { describeProblems } from '../../shared/toolchain-manifest.js';
+import { installArchive, verifyInstall } from '../services/toolchain-install.js';
 
 const RELEASES = 'https://api.github.com/repos/Samsung/netcoredbg/releases/latest';
-const MARKER = '.dotforge-ok';
 const HEADER_SEPARATOR = '\r\n\r\n';
 
 export interface DebuggerBinary {
@@ -33,6 +32,50 @@ export function assetNameForPlatform(): string | null {
     return process.arch === 'arm64' ? 'netcoredbg-osx-arm64.zip' : 'netcoredbg-osx-amd64.zip';
   }
   return null; // Linux se publica como .tar.gz; fuera del alcance de esta distribución.
+}
+
+/**
+ * Descarga el ZIP comprobando que llega entero.
+ *
+ * `arrayBuffer()` devuelve tan contento lo que haya llegado si la conexión se corta a medias, y un
+ * ZIP cortado puede conservar directorio central válido para parte de sus entradas: se extrae "bien"
+ * y el fallo aparece mucho después, dentro del proceso que carga el archivo que falta. Si el
+ * servidor anuncia `content-length`, se exige que cuadre.
+ */
+async function download(url: string, onProgress: (detail: string, ratio: number | null) => void): Promise<Buffer> {
+  onProgress('descargando NetCoreDbg', null);
+
+  const response = await fetch(url, {
+    signal: AbortSignal.timeout(10 * 60 * 1000),
+    headers: { 'User-Agent': 'DotForge-IDE/1.0' },
+  });
+
+  if (!response.ok) {
+    throw new Error(`descarga de NetCoreDbg fallida (${response.status})`);
+  }
+
+  const total = Number(response.headers.get('content-length') ?? 0);
+  const reader = response.body?.getReader();
+  if (!reader) return Buffer.from(await response.arrayBuffer());
+
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      chunks.push(value);
+      received += value.length;
+      onProgress(`descargando NetCoreDbg ${(received / 1048576).toFixed(1)} MB`, total > 0 ? received / total : null);
+    }
+  }
+
+  if (total > 0 && received !== total) {
+    throw new Error(`descarga incompleta de NetCoreDbg: ${received} de ${total} bytes`);
+  }
+
+  return Buffer.concat(chunks);
 }
 
 export async function acquireDebugger(
@@ -71,30 +114,40 @@ export async function acquireDebugger(
   const version = release.tag_name;
   const directory = join(toolchainDir, 'netcoredbg', version);
   const executableName = process.platform === 'win32' ? 'netcoredbg.exe' : 'netcoredbg';
+  const executable = join(directory, executableName);
 
-  if (!existsSync(join(directory, MARKER))) {
-    onProgress('descargando NetCoreDbg', null);
+  /**
+   * Comprobación de la instalación en cada arranque.
+   *
+   * Antes bastaba con que existiera un marcador `.dotforge-ok` que guardaba el SHA-256 del ZIP
+   * descargado. Eso verifica un archivo que ya no está en el disco y no dice nada de los que sí
+   * están, que es exactamente el agujero por el que un DLL truncado dejó el servidor de lenguaje
+   * inservible durante nueve versiones (ADR-041). El depurador se instalaba igual, y aquí falla
+   * peor: un `netcoredbg.exe` cortado no da un error claro, da una sesión que no arranca.
+   *
+   * Una instalación sin manifiesto —las de la v1.9 y anteriores— cuenta como no verificada y se
+   * reinstala sola: el usuario no tiene que borrar nada.
+   */
+  const check = await verifyInstall(directory);
+  const usable = check.verified && check.problems.length === 0 && existsSync(executable);
 
-    const download = await fetch(asset.browser_download_url, {
-      signal: AbortSignal.timeout(10 * 60 * 1000),
-      headers: { 'User-Agent': 'DotForge-IDE/1.0' },
-    });
-    if (!download.ok) {
-      throw new Error(`descarga de NetCoreDbg fallida (${download.status})`);
+  if (!usable) {
+    if (check.verified && check.problems.length > 0) {
+      onProgress(`la copia de NetCoreDbg ${version} está dañada (${describeProblems(check.problems)}); se reinstala`, null);
     }
 
-    const archive = Buffer.from(await download.arrayBuffer());
+    const archive = await download(asset.browser_download_url, onProgress);
 
     onProgress('extrayendo NetCoreDbg', null);
-    await rm(directory, { recursive: true, force: true });
-    await mkdir(directory, { recursive: true });
     // El zip trae todo bajo una carpeta `netcoredbg/`: se descarta ese primer nivel.
-    await extractTo(archive, directory, { strip: 1 });
-
-    await writeFile(join(directory, MARKER), `${version}\n${sha256(archive)}\n`, 'utf8');
+    await installArchive(archive, directory, {
+      kind: 'netcoredbg',
+      packageVersion: version,
+      rid: `${process.platform}-${process.arch}`,
+      strip: 1,
+    });
   }
 
-  const executable = join(directory, executableName);
   if (!existsSync(executable)) {
     throw new Error(`no se encuentra ${executableName} en ${directory}`);
   }

@@ -301,6 +301,10 @@ por tanto **compila** pero no **ejecuta** los proyectos generados. Se añade el 
 - [x] F16.11 Pruebas: 40 nuevas (política de versiones, detección, cuarentena, instalación y protocolo)
 - [x] F16.12 Verificado sobre la aplicación real: hover, completado, símbolos y 1440 números de
       tokens semánticos con Roslyn 4.14.0-3.26423.7, y OmniSharp v1.39.15 sirviendo lo mismo
+- [x] F16.13 NetCoreDbg se instala y se verifica por el mismo camino: `installArchive` + `verifyInstall`
+- [x] F16.14 Su descarga comprueba `content-length` e informa del progreso, que antes iba siempre a null
+- [x] F16.15 Prueba de seguridad que vigila que ningún adquisidor vuelva a declararse su marcador
+- [x] F16.16 Pruebas: 6 nuevas del depurador, con el constructor de ZIP movido a un fixture compartido
 
 ---
 
@@ -1884,6 +1888,12 @@ un archivo cuyo inflate no mida lo que declara el directorio central, y la desca
 la v1.9 y anteriores no tienen manifiesto, así que cuentan como no verificadas y se reinstalan solas
 la primera vez que se abre la v2.0: el usuario no tiene que borrar nada a mano. Los archivos **de
 más** no son un problema —el servidor escribe sus registros y cachés dentro de su directorio—.
+**Aplica a todo el toolchain, no sólo al servidor de lenguaje.** NetCoreDbg se instalaba con el mismo
+marcador, y ahí el fallo se manifestaría peor: un ensamblado de Roslyn truncado al menos deja un
+`PartDiscoveryException` en el registro, mientras que un `netcoredbg.exe` cortado no da ningún error
+legible —da una sesión de depuración que no arranca—. Los dos adquisidores pasan ahora por
+`installArchive` / `verifyInstall`, y una prueba de seguridad comprueba que ninguno vuelva a
+declararse un `MARKER` propio.
 
 ### ADR-042 — Un servidor roto se detecta por stderr y por nombre de tipo, nunca por el mensaje
 **Fecha:** 2026-08-24
@@ -2118,18 +2128,23 @@ abierta en el IDE, midiendo con `--probe=`, no mirando capturas):
   **1440 números** de tokens semánticos. La decisión de conmutar está cubierta por pruebas con el
   stderr real capturado; lo que no se ha podido montar es un Roslyn que falle **con la instalación
   íntegra**, así que ese tramo concreto está verificado por pruebas y no sobre la aplicación.
-- `npm test` en verde de punta a punta: **1100 pruebas** (944 unit, 43 security, 57 package, 56
-  scaffold), de las cuales 42 son nuevas de esta fase. La que estaba en rojo era del grupo de
+- `npm test` en verde de punta a punta: **1106 pruebas** (950 unit, 43 security, 57 package, 56
+  scaffold), de las cuales 48 son nuevas de esta fase. La que estaba en rojo era del grupo de
   seguridad y tenía razón: comprobaba por grep que `acquire.ts` calculase el hash de lo descargado,
   y ese cálculo se ha mudado al instalador. Se ha reescrito para comprobar la propiedad donde ahora
   vive —y de paso la verificación de `content-length` y la de la instalación—, no para ablandarla.
+  Ahora exige las tres cosas a **los dos** adquisidores, y que ninguno vuelva a declarar un `MARKER`.
 
 - `npx electron . --smoke-test` → `SMOKE_OK`, con la línea de adquisición encima.
+- Depurador: la prueba de integración descarga NetCoreDbg por el camino nuevo —su caché no tenía
+  manifiesto, así que se reinstaló sola—, deja un manifiesto de **7 archivos** con el prefijo
+  `netcoredbg/` descartado y `netcoredbg.exe` midiendo 2.115.072 bytes tanto en el manifiesto como
+  en el disco, y con esa instalación **para en el breakpoint y lee la pila y las variables**.
 - `prune:dist` liberó los 279,2 MB de artefactos de la 1.9.0 y `verify:dist` confirma el instalador
   NSIS (117,4 MB) y el ZIP portable (161,7 MB) de la 2.0.0, sin firmar como es esperado sin
   certificado.
 
-**Versión:** el marcador de instalación cambia de formato, `pickLatestVersion` deja de gobernar la
-elección y el contrato de lo que el cliente contesta al servidor cambia. Son cambios de
-comportamiento en la adquisición del toolchain, y la funcionalidad estrella del IDE pasa de no
-funcionar a funcionar: 1.9.0 → **2.0.0** (ADR-009).
+**Versión:** el marcador de instalación cambia de formato **para todo el toolchain** —servidor de
+lenguaje y depurador—, `pickLatestVersion` deja de gobernar la elección y el contrato de lo que el
+cliente contesta al servidor cambia. Son cambios de comportamiento en la adquisición, y la
+funcionalidad estrella del IDE pasa de no funcionar a funcionar: 1.9.0 → **2.0.0** (ADR-009).

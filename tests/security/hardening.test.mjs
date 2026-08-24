@@ -307,11 +307,12 @@ describe('descargas del toolchain', () => {
     }
   });
 
-  it('se registra el hash del artefacto descargado', () => {
-    // El depurador lo sigue calculando él mismo; el servidor de lenguaje delega en el instalador
-    // verificable, que además del hash del archivo descargado anota uno por cada archivo extraído.
-    assert.match(readSource('src/main/debug/netcoredbg.ts'), /sha256\(/);
-    assert.match(readSource('src/main/lsp/acquire.ts'), /installArchive\(/);
+  it('se registra el hash del artefacto descargado y el de cada archivo extraído', () => {
+    // Los dos adquisidores delegan en el instalador verificable, que anota el hash del archivo
+    // descargado *y* uno por cada archivo que escribe.
+    for (const source of sources) {
+      assert.match(source, /installArchive\(/);
+    }
 
     const install = readSource('src/main/services/toolchain-install.ts');
     assert.match(install, /sourceSha256: sha256\(archive\)/, 'el hash del artefacto descargado');
@@ -322,21 +323,31 @@ describe('descargas del toolchain', () => {
    * Una descarga cortada no puede pasar por buena.
    *
    * Un ZIP truncado puede conservar directorio central válido para parte de sus entradas, así que
-   * el error no aparece al extraer sino mucho después, dentro del proceso que carga el ensamblado
+   * el error no aparece al extraer sino mucho después, dentro del proceso que carga el archivo
    * mutilado. Se comprueba contra `content-length` antes de tocar el disco.
    */
-  it('la descarga del servidor de lenguaje comprueba la longitud anunciada', () => {
-    const source = readSource('src/main/lsp/acquire.ts');
-    assert.match(source, /content-length/);
-    assert.match(source, /received !== total/);
+  it('las descargas del toolchain comprueban la longitud anunciada', () => {
+    for (const source of sources) {
+      assert.match(source, /content-length/);
+      assert.match(source, /received !== total/);
+    }
   });
 
   /**
    * Y una instalación no se da por buena porque exista una marca: se comprueba archivo a archivo
-   * contra el manifiesto. Sin esto, un solo archivo truncado en disco es invisible para siempre.
+   * contra el manifiesto. Sin esto, un solo archivo truncado en disco es invisible para siempre
+   * —que es literalmente lo que le pasó al servidor de lenguaje desde la v1.1 hasta la v2.0—.
    */
-  it('la instalación del servidor de lenguaje se verifica antes de lanzarlo', () => {
-    assert.match(readSource('src/main/lsp/acquire.ts'), /verifyInstall\(directory\)/);
+  it('las instalaciones del toolchain se verifican antes de lanzar nada', () => {
+    for (const source of sources) {
+      assert.match(source, /verifyInstall\(directory\)/);
+    }
+
+    // Y ninguno declara ya su propio marcador de "listo": los comentarios pueden seguir contando
+    // por qué aquello no servía, pero el código no puede volver a escribirlo.
+    for (const source of sources) {
+      assert.doesNotMatch(source, /const MARKER\s*=/);
+    }
   });
 });
 

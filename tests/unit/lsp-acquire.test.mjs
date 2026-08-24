@@ -26,7 +26,6 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, stat, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { deflateRawSync } from 'node:zlib';
 
 import {
   addQuarantineEntry,
@@ -58,6 +57,7 @@ import {
   verifyInstall,
   ZipError,
 } from '../../build/toolchain.mjs';
+import { corruptDeclaredSize, makeZip } from './zip-fixture.mjs';
 
 /**
  * Trozo real del índice de `microsoft.codeanalysis.languageserver.win-x64`.
@@ -291,52 +291,6 @@ describe('cuarentena de versiones', () => {
 // Instalación verificable
 // ---------------------------------------------------------------------------------------------
 
-/** Construye un ZIP mínimo en memoria: es más honesto que fingir el extractor. */
-function makeZip(files) {
-  const locals = [];
-  const central = [];
-  let offset = 0;
-
-  for (const [name, contents] of files) {
-    const nameBytes = Buffer.from(name, 'utf8');
-    const body = deflateRawSync(contents);
-    const crc = 0; // El extractor no lo comprueba; lo que se prueba aquí son los tamaños.
-
-    const local = Buffer.alloc(30);
-    local.writeUInt32LE(0x04034b50, 0);
-    local.writeUInt16LE(20, 4);
-    local.writeUInt16LE(8, 8);
-    local.writeUInt32LE(crc, 14);
-    local.writeUInt32LE(body.length, 18);
-    local.writeUInt32LE(contents.length, 22);
-    local.writeUInt16LE(nameBytes.length, 26);
-
-    const header = Buffer.alloc(46);
-    header.writeUInt32LE(0x02014b50, 0);
-    header.writeUInt16LE(20, 6);
-    header.writeUInt16LE(8, 10);
-    header.writeUInt32LE(crc, 16);
-    header.writeUInt32LE(body.length, 20);
-    header.writeUInt32LE(contents.length, 24);
-    header.writeUInt16LE(nameBytes.length, 28);
-    header.writeUInt32LE(offset, 42);
-
-    locals.push(local, nameBytes, body);
-    central.push(header, nameBytes);
-    offset += local.length + nameBytes.length + body.length;
-  }
-
-  const centralBuffer = Buffer.concat(central);
-  const eocd = Buffer.alloc(22);
-  eocd.writeUInt32LE(0x06054b50, 0);
-  eocd.writeUInt16LE(files.length, 8);
-  eocd.writeUInt16LE(files.length, 10);
-  eocd.writeUInt32LE(centralBuffer.length, 12);
-  eocd.writeUInt32LE(offset, 16);
-
-  return Buffer.concat([...locals, centralBuffer, eocd]);
-}
-
 describe('instalación verificable del toolchain', () => {
   const ARCHIVE = makeZip([
     ['content/LanguageServer/win-x64/server.dll', Buffer.alloc(6396176, 7)],
@@ -485,8 +439,7 @@ describe('instalación verificable del toolchain', () => {
 
   it('el extractor se niega a escribir un archivo que no mide lo que declara el ZIP', async () => {
     // Un ZIP cuyo directorio central declara 100 bytes para una entrada que descomprime a 8.
-    const corrupto = makeZip([['x.dll', Buffer.from('ochoocho')]]);
-    corrupto.writeUInt32LE(100, corrupto.indexOf(Buffer.from('PK\u0001\u0002', 'latin1')) + 24);
+    const corrupto = corruptDeclaredSize(makeZip([['x.dll', Buffer.from('ochoocho')]]), 100);
 
     const root = await mkdtemp(join(tmpdir(), 'dotforge-zip-'));
     try {
