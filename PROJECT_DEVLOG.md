@@ -2413,3 +2413,62 @@ se generó ningún artefacto de la 2.1.0.
 **Lo que este hotfix no arregla:** el workflow sube artefactos pero **no publica la release**. El tag
 `v2.1.0` no creará la publicación con sus notas; eso sigue siendo manual mientras no se añada un paso
 de publicación.
+
+---
+
+### Iteración 23 — 2026-08-24 — El test del depurador tolera un runner de CI
+
+**Objetivo:** que la única prueba que seguía en rojo en `windows-latest` deje de serlo. Tras el
+hotfix de la iteración 22 (CRLF, Electron, API de GitHub, caché de NuGet), la ejecución sobre
+Windows Server 2025 falló en un solo punto, y por timeout:
+
+```text
+Error: el programa no se detuvo en el breakpoint
+    at Timeout._onTimeout (tests/scaffold/debugger.test.mjs:158:35)
+```
+
+El mensaje no distingue las dos averías que puede estar tapando: que el runner sea lento, o que el
+programa se muriera al arrancar y nadie llegara nunca al breakpoint. Los dos cambios de esta
+iteración atacan una cada uno, y ninguno toca código de producción.
+
+**Hecho:**
+
+1. **Márgenes de espera más anchos sólo en CI.** `IN_CI` mira `process.env.CI`, y de ahí salen
+   `BREAKPOINT_TIMEOUT_MS` (120 s → **240 s**), `RESUME_TIMEOUT_MS` (60 s → 120 s) y
+   `STATUS_TIMEOUT_MS` (30 s → 60 s). Un runner virtual arranca en frío, jitea, carga los PDB
+   portables y resuelve el bridge DAP sobre un disco compartido y sin caché de nada. **Fuera de CI
+   se mantienen los valores originales**: en una máquina de desarrollo un timeout largo sólo
+   consigue que un fallo real tarde más en verse.
+2. **Volcado de la salida del proceso depurado.** `collectOutput()` se suscribe a `output` del
+   controlador —que trae tanto el stdout/stderr del programa (eventos DAP) como el stderr del propio
+   NetCoreDbg (evento `log`)— y adjunta las últimas 40 líneas a *todos* los mensajes de fallo:
+   timeout, arranque fallido y segunda parada. Acotado a 40 para no volcar megas si el programa
+   entra en un bucle escribiendo.
+3. **Un final prematuro deja de esperar el timeout entero.** `waitForBreakpoint()` vigila tres
+   finales en vez de uno: que pare (bien), que la sesión pase a `idle`/`error` **después** de haber
+   llegado a `running` (el programa se ejecutó entero o murió), o que se agote el plazo. Los estados
+   de arranque (`acquiring`, `starting`) no cuentan como final. El oyente se registra **antes** de
+   `controller.start()`: el breakpoint puede golpear entre el arranque y la suscripción, y ese
+   evento no se repite.
+
+**Errores encontrados y solucionados:**
+
+1. *Síntoma:* con el diseño anterior, un programa que termina en dos segundos sin parar y un
+   programa que no responde en cuatro minutos daban **el mismo** mensaje, cuatro minutos después.
+   *Causa raíz:* la espera era un `Promise.race` entre el evento `stopped` y un `setTimeout`; nadie
+   miraba el estado de la sesión.
+   *Arreglo:* la vigilancia del evento `state` descrita arriba. En CI esto ahorra hasta 240 s por
+   ejecución cuando la avería es real, que es justo cuando interesa ver el log cuanto antes.
+
+**Verificado con comandos reales:**
+
+- `npm run build` en verde, y `npm test` completo: **56 pruebas de scaffold, 0 fallos**; la suite
+  entera OK (unit, security, package, scaffold).
+- `node --test tests/scaffold/debugger.test.mjs` pasa 3/3 y para en el breakpoint en **1,4 s** en
+  local: los 240 s de CI son margen, no una espera que se vaya a consumir.
+- La misma prueba con `CI=1`, para ejercitar la rama de los márgenes anchos: 3/3.
+- **El volcado, ejercitado de verdad:** con una copia de la prueba apuntando el breakpoint a una
+  línea inexistente (999), el fallo llega en **1,0 s** en vez de a los 240 s, y con el diagnóstico
+  dentro: `la sesión terminó antes de llegar al breakpoint (estado "idle")` seguido de los tres
+  eventos de stdout del programa (`1`, `3`, `6`, `total=6`). Es exactamente la traza que faltaba en
+  el fallo de Windows Server 2025.

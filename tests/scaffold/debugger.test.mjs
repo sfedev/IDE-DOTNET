@@ -54,6 +54,114 @@ const PROJECT = `<Project Sdk="Microsoft.NET.Sdk">
 </Project>
 `;
 
+/**
+ * Márgenes de espera, más anchos en integración continua.
+ *
+ * Un runner virtual de Windows arranca el proceso en frío, jitea, carga los PDB portables y resuelve
+ * el bridge DAP con un disco compartido y sin caché de nada. Los 120 s que sobran en una máquina de
+ * desarrollo se quedaron cortos en `windows-latest` con el tag v2.1.0: el fallo era un timeout, no
+ * un breakpoint que no se alcanza. Fuera de CI se mantienen los valores originales, porque ahí un
+ * timeout largo sólo consigue que un fallo real tarde más en verse.
+ */
+const IN_CI = process.env.CI === 'true' || process.env.CI === '1';
+
+/** Captura del primer golpe del breakpoint: es la espera que se agotó en CI. */
+const BREAKPOINT_TIMEOUT_MS = IN_CI ? 240_000 : 120_000;
+/** Segundo golpe tras `continue`: el proceso ya está caliente, pero el runner sigue siendo lento. */
+const RESUME_TIMEOUT_MS = IN_CI ? 120_000 : 60_000;
+/** Confirmación del estado `paused` una vez recibido el evento. */
+const STATUS_TIMEOUT_MS = IN_CI ? 60_000 : 30_000;
+
+/**
+ * Acumula la salida del proceso depurado.
+ *
+ * Cuando esto falla en una máquina que no es la tuya, la diferencia entre "se ha quedado colgado" y
+ * "el programa reventó al arrancar" está justo aquí: en lo que escribieron el programa y el propio
+ * NetCoreDbg antes de morir. Sin volcarlo, un timeout no dice absolutamente nada.
+ */
+function collectOutput(controller) {
+  const chunks = [];
+  const listener = (event) => chunks.push(`[${event.category}] ${event.text.replace(/\s+$/, '')}`);
+  controller.on('output', listener);
+
+  return {
+    stop: () => controller.off('output', listener),
+    /** Últimas líneas, para no volcar megas si el programa entró en un bucle escribiendo. */
+    transcript: () => {
+      if (chunks.length === 0) return '\n--- el proceso depurado no escribió nada ---';
+      return `\n--- salida del proceso depurado (${chunks.length} eventos) ---\n${chunks.slice(-40).join('\n')}`;
+    },
+  };
+}
+
+/**
+ * Espera al primer golpe del breakpoint.
+ *
+ * Vigila tres finales, no uno: que pare (bien), que la sesión termine sin haber parado (el programa
+ * se ejecutó entero o murió), o que se agote el plazo. Distinguir el segundo del tercero importa:
+ * un proceso que termina en dos segundos y un proceso que no responde en cuatro minutos son averías
+ * distintas, y esperar el timeout completo para contar la primera es tirar cuatro minutos.
+ *
+ * Se crea **antes** de `controller.start()`: el breakpoint puede golpear entre que arranca y que
+ * nos suscribiríamos, y ese evento no se repite.
+ */
+function waitForBreakpoint(controller, timeoutMs, transcript) {
+  let settle;
+  let running = false;
+
+  const promise = new Promise((resolve, reject) => {
+    settle = (error, value) => {
+      controller.off('stopped', onStopped);
+      controller.off('state', onState);
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve(value);
+    };
+
+    const timer = setTimeout(
+      () =>
+        settle(
+          new Error(
+            `el programa no se detuvo en el breakpoint en ${timeoutMs} ms; estado: ` +
+              `${JSON.stringify(controller.getState())}${transcript()}`,
+          ),
+        ),
+      timeoutMs,
+    );
+
+    function onStopped(payload) {
+      settle(null, payload);
+    }
+
+    function onState(state) {
+      // Sólo cuenta como final prematuro si la sesión llegó a correr: los estados por los que pasa
+      // el arranque (`acquiring`, `starting`) no son un final.
+      if (state.status === 'running') {
+        running = true;
+        return;
+      }
+      if (!running) return;
+      if (state.status === 'idle' || state.status === 'error') {
+        settle(
+          new Error(
+            `la sesión terminó antes de llegar al breakpoint (estado "${state.status}"` +
+              `${state.message ? `: ${state.message}` : ''})${transcript()}`,
+          ),
+        );
+      }
+    }
+
+    controller.on('stopped', onStopped);
+    controller.on('state', onState);
+  });
+
+  // Si el test falla antes de esperar a esta promesa, hay que poder soltar los oyentes y que nadie
+  // se quede con un rechazo sin atender.
+  promise.catch(() => undefined);
+
+  return { promise, cancel: () => settle(null, null) };
+}
+
 /** Espera a que el controlador alcance un estado, o falla con el estado real. */
 function waitForStatus(controller, statuses, timeoutMs) {
   return new Promise((resolve, reject) => {
@@ -145,21 +253,21 @@ describe('depuración con NetCoreDbg', { skip: SKIP }, () => {
       const target = await resolveDebugTarget(projectPath, workspace);
       const toolchainDir = join(root, '.toolchain-test');
 
-      const stopped = new Promise((resolve) => controller.once('stopped', resolve));
+      const output = collectOutput(controller);
+      const breakpoint = waitForBreakpoint(controller, BREAKPOINT_TIMEOUT_MS, output.transcript);
 
       await controller.start(target, [{ file: sourcePath, lines: [5] }], toolchainDir, false);
 
       const state = controller.getState();
-      assert.notEqual(state.status, 'error', `la sesión no arrancó: ${state.message}`);
+      if (state.status === 'error') {
+        breakpoint.cancel();
+        output.stop();
+        assert.fail(`la sesión no arrancó: ${state.message}${output.transcript()}`);
+      }
 
-      await Promise.race([
-        stopped,
-        new Promise((_resolve, reject) =>
-          setTimeout(() => reject(new Error('el programa no se detuvo en el breakpoint')), 120_000),
-        ),
-      ]);
+      await breakpoint.promise;
 
-      const paused = await waitForStatus(controller, ['paused'], 30_000);
+      const paused = await waitForStatus(controller, ['paused'], STATUS_TIMEOUT_MS);
       assert.equal(paused.status, 'paused');
       assert.notEqual(paused.threadId, null, 'no se ha recibido el hilo detenido');
 
@@ -198,11 +306,17 @@ describe('depuración con NetCoreDbg', { skip: SKIP }, () => {
       await Promise.race([
         stoppedAgain,
         new Promise((_resolve, reject) =>
-          setTimeout(() => reject(new Error('no volvió a detenerse en la segunda iteración')), 60_000),
+          setTimeout(
+            () =>
+              reject(
+                new Error(`no volvió a detenerse en la segunda iteración en ${RESUME_TIMEOUT_MS} ms${output.transcript()}`),
+              ),
+            RESUME_TIMEOUT_MS,
+          ),
         ),
       ]);
 
-      await waitForStatus(controller, ['paused'], 30_000);
+      await waitForStatus(controller, ['paused'], STATUS_TIMEOUT_MS);
       const secondFrames = await controller.stackTrace();
       const secondScopes = await controller.scopes(secondFrames[0].id);
 
@@ -216,6 +330,9 @@ describe('depuración con NetCoreDbg', { skip: SKIP }, () => {
 
       await controller.stop();
       assert.equal(controller.getState().status, 'idle');
+
+      // El recolector deja de escuchar sólo al final: hasta aquí, cualquier fallo quiere el volcado.
+      output.stop();
     },
   );
 });
