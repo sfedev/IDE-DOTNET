@@ -10,7 +10,7 @@
  */
 import type { AiProbeResult, AiProviderId, AiSettings, AiStatus } from '../../shared/ai.js';
 import { AI_PROVIDERS, providerInfo } from '../../shared/ai.js';
-import type { AppSettings } from '../../shared/contracts.js';
+import type { AppSettings, UpdateState } from '../../shared/contracts.js';
 import type { DotnetVerbosity } from '../../shared/dotnet-verbosity.js';
 import { DOTNET_VERBOSITY_INFO, verbosityInfo } from '../../shared/dotnet-verbosity.js';
 import { byId, clear, el } from '../dom.js';
@@ -18,6 +18,10 @@ import { icon, type IconName } from '../icons.js';
 
 export interface SettingsHost {
   apply(patch: Partial<AppSettings>): void;
+  /** Lanza una comprobación manual de actualizaciones y avisa del resultado. */
+  checkUpdates(): void;
+  /** Último estado conocido de la actualización, para decir en qué punto está. */
+  updateState(): UpdateState | null;
   /** Estado del asistente: proveedor activo, modelo y si hay credencial guardada. */
   aiStatus(): AiStatus | null;
   /** Guarda o borra (con null) la clave del proveedor. La clave nunca vuelve al renderer. */
@@ -108,6 +112,8 @@ export class SettingsView {
             'arrancar el servidor de lenguaje.',
         }),
       ]),
+
+      this.updatesGroup(settings.autoUpdateCheck),
 
       this.aiGroup(settings.ai),
     );
@@ -255,6 +261,48 @@ export class SettingsView {
     }
 
     return this.group('Herramientas de .NET', rows);
+  }
+
+  // --- Actualizaciones ------------------------------------------------------------------------
+
+  /**
+   * Actualizaciones automáticas.
+   *
+   * El interruptor gobierna sólo la comprobación **automática** del arranque. "Buscar ahora" sigue
+   * ahí con el interruptor apagado: apagarlo significa "no me preguntes tú", no "no quiero saberlo".
+   */
+  private updatesGroup(autoCheck: boolean): HTMLElement {
+    const state = this.host.updateState();
+
+    const rows: HTMLElement[] = [
+      this.toggleRow('Buscar actualizaciones automáticamente', autoCheck, (value) =>
+        this.host.apply({ autoUpdateCheck: value }),
+      ),
+      el('p', {
+        className: 'settings-note',
+        text: 'Se consulta la lista de versiones publicadas cinco segundos después de arrancar. No se envía nada del equipo.',
+      }),
+      el(
+        'div',
+        { className: 'settings-row settings-row-stacked' },
+        el(
+          'button',
+          {
+            className: 'btn ghost small',
+            disabled: state?.status === 'checking',
+            on: { click: () => this.host.checkUpdates() },
+          },
+          icon('download', { size: 13 }),
+          el('span', { text: state?.status === 'checking' ? 'Buscando…' : 'Buscar ahora' }),
+        ),
+      ),
+    ];
+
+    if (state !== null) {
+      rows.push(el('p', { className: `settings-note ${updateTone(state)}`, text: updateSummary(state) }));
+    }
+
+    return this.group('Actualizaciones', rows);
   }
 
   // --- Asistente de IA ---------------------------------------------------------------------------
@@ -471,5 +519,32 @@ export class SettingsView {
     }
 
     return row;
+  }
+}
+
+/** Tono de la nota de estado: verde cuando algo está resuelto, ámbar cuando hay que hacer algo. */
+function updateTone(state: UpdateState): string {
+  if (state.status === 'error') return 'warn';
+  if (state.status === 'up-to-date' || state.status === 'ready') return 'ok';
+  return '';
+}
+
+/** Estado de la actualización en una frase. Vive fuera de la clase porque no toca nada de ella. */
+function updateSummary(state: UpdateState): string {
+  switch (state.status) {
+    case 'checking':
+      return 'Comprobando si hay una versión más reciente…';
+    case 'up-to-date':
+      return `Estás en la última versión (v${state.currentVersion}).`;
+    case 'available':
+      return `Hay una versión nueva: v${state.version ?? ''}.`;
+    case 'downloading':
+      return `Descargando la v${state.version ?? ''}…`;
+    case 'ready':
+      return `La v${state.version ?? ''} está descargada y se instalará al cerrar el IDE.`;
+    case 'error':
+      return state.message ?? 'La última comprobación ha fallado.';
+    default:
+      return `Versión instalada: v${state.currentVersion}.`;
   }
 }

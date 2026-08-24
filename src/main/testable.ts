@@ -184,3 +184,21 @@ export { DEFAULT_SETTINGS } from '../shared/contracts.js';
  * verdad en un directorio temporal.
  */
 export { discoverProjectTests, discoverTests, parseTrx } from './services/test-service.js';
+
+/**
+ * Fase 17 — instalación de extensiones `.vsix`.
+ *
+ * El servicio no importa `electron` a propósito: la ruta de `userData` se le inyecta, así que las
+ * pruebas pueden instalar un `.vsix` de mentira en un directorio temporal y comprobar lo que queda
+ * en el disco, en vez de fiarse de que "debería funcionar".
+ */
+export {
+  extensionsDirectory,
+  findInstalled,
+  initialize as initializeExtensions,
+  installFromBuffer,
+  listInstalled,
+  readVsixManifest,
+  uninstall as uninstallExtension,
+} from './services/extension-installer.js';
+export type { InstallOutcome } from './services/extension-installer.js';

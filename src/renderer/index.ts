@@ -56,8 +56,19 @@ import { StartupBar } from './views/startup-bar.js';
 import { StatusBar } from './views/statusbar.js';
 import { WelcomeView } from './views/welcome.js';
 import { WizardView } from './views/wizard.js';
+import { ExtensionsView } from './views/extensions.js';
+import { UpdateCard } from './views/update-card.js';
 
-type SidebarView = 'explorer' | 'git' | 'nuget' | 'efcore' | 'containers' | 'tests' | 'settings' | 'ai';
+type SidebarView =
+  | 'explorer'
+  | 'git'
+  | 'nuget'
+  | 'efcore'
+  | 'containers'
+  | 'tests'
+  | 'extensions'
+  | 'settings'
+  | 'ai';
 
 class DotForgeApp {
   private info: AppInfo | null = null;
@@ -224,8 +235,22 @@ class DotForgeApp {
     statusChanged: () => void this.refreshGit(),
   });
 
+  /** Explorador de extensiones de Open VSX. Comparte contenedor con el resto de la barra lateral. */
+  private readonly extensionsView = new ExtensionsView({
+    notify: (message, level) => this.notify(message, level),
+    openUrl: (url) => void window.dotforge.app.openExternal(url),
+  });
+
+  /** Tarjeta flotante de actualización. No ocupa sitio en la interfaz hasta que hay algo que decir. */
+  private readonly updateCard = new UpdateCard({
+    notify: (message, level) => this.notify(message, level),
+    openUrl: (url) => void window.dotforge.app.openExternal(url),
+  });
+
   private readonly settingsView = new SettingsView({
     apply: (patch) => void this.applySettings(patch),
+    checkUpdates: () => void this.checkForUpdates(),
+    updateState: () => this.updateCard.getState(),
     aiStatus: () => this.aiStatus,
     setAiKey: async (provider, apiKey) => {
       await this.setAiKey(provider, apiKey);
@@ -316,6 +341,14 @@ class DotForgeApp {
 
     // Estado del asistente: proveedor, modelo y si hay credencial guardada.
     void this.refreshAiStatus();
+
+    // Estado de la actualización. Se **pregunta** en vez de esperar el evento: la comprobación
+    // automática ocurre cinco segundos después del arranque del proceso principal, y para entonces
+    // el renderer puede llevar rato montado o no haber llegado todavía.
+    void window.dotforge.updates
+      .state()
+      .then((state) => this.updateCard.setState(state))
+      .catch(() => undefined);
 
     // Contexto del autocompletado de la terminal: programas permitidos, contenedores de Docker,
     // imágenes locales y scripts del package.json. Se pide una vez al arrancar.
@@ -726,6 +759,7 @@ class DotForgeApp {
       this.testsButton(),
       button('Depuración', 'bug', false, () => this.panel.show('debug'), errors > 0),
       this.aiButton(),
+      button('Extensiones', 'puzzle', this.sidebarView === 'extensions', () => this.showExtensions()),
       el('div', { className: 'spacer' }),
       button('Ajustes', 'settings', this.sidebarView === 'settings', () => this.showSettings()),
     );
@@ -833,6 +867,7 @@ class DotForgeApp {
     this.efcoreView.setVisible(view === 'efcore');
     this.containersView.setVisible(view === 'containers');
     this.testsView.setVisible(view === 'tests');
+    this.extensionsView.setVisible(view === 'extensions');
     this.settingsView.setVisible(view === 'settings');
     this.aiChat.setVisible(view === 'ai');
     this.renderActivityBar();
@@ -852,6 +887,10 @@ class DotForgeApp {
 
   private showTests(): void {
     this.showSidebar('tests');
+  }
+
+  private showExtensions(): void {
+    this.showSidebar('extensions');
   }
 
   private showSettings(): void {
@@ -1271,6 +1310,26 @@ class DotForgeApp {
     return raw.replace(/^Error invoking remote method '[^']+':\s*/, '');
   }
 
+  /**
+   * Comprobación manual de actualizaciones.
+   *
+   * A diferencia de la automática, ésta **siempre** contesta algo: quien pulsa "Buscar ahora"
+   * espera una respuesta, y "ya estás en la última versión" es una respuesta.
+   */
+  private async checkForUpdates(): Promise<void> {
+    try {
+      const state = await window.dotforge.updates.check(true);
+      this.updateCard.setState(state);
+      if (this.sidebarView === 'settings') this.settingsView.render();
+
+      if (state.status === 'error') this.notify(state.message ?? 'No se ha podido comprobar.', 'warn');
+      else if (state.status === 'up-to-date') this.notify(state.message ?? 'Estás en la última versión.', 'ok');
+      else if (state.version !== null) this.notify(`Hay una versión nueva: v${state.version}.`, 'ok');
+    } catch (error) {
+      this.notify(`No se ha podido comprobar si hay actualizaciones: ${this.messageOf(error)}`, 'warn');
+    }
+  }
+
   // -------------------------------------------------------------------------------------------
   // Comandos
   // -------------------------------------------------------------------------------------------
@@ -1451,6 +1510,20 @@ class DotForgeApp {
         group: 'Ver',
         keybinding: `${modifier}+Shift+U`,
         run: () => this.showNuGet(),
+      },
+      {
+        id: 'view.extensions',
+        icon: 'puzzle',
+        title: 'Extensiones de Open VSX',
+        group: 'Ver',
+        run: () => this.showExtensions(),
+      },
+      {
+        id: 'update.check',
+        icon: 'download',
+        title: 'Buscar actualizaciones de DotForge',
+        group: 'Ayuda',
+        run: () => void this.checkForUpdates(),
       },
       {
         id: 'view.efcore',
@@ -2322,6 +2395,13 @@ class DotForgeApp {
 
   private installEventBridges(): void {
     window.dotforge.events.onMenuCommand((command: MenuCommand) => void this.runCommandById(command));
+
+    // La descarga de una actualización avanza sola: su progreso llega como evento, no como
+    // respuesta a nada que el renderer haya pedido.
+    window.dotforge.events.onUpdateState((state) => {
+      this.updateCard.setState(state);
+      if (this.sidebarView === 'settings') this.settingsView.render();
+    });
 
     window.dotforge.events.onWorkspaceChanged((solution) => this.applySolution(solution));
 

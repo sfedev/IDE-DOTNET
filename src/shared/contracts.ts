@@ -119,6 +119,19 @@ export type {
   VulnerabilitySeverity,
 } from './nuget-audit.js';
 export type { SemanticTokensLegend } from './semantic-tokens.js';
+
+// Fase 17: actualizaciones automáticas y extensiones de Open VSX. Sus modelos son puros y viven
+// en su propio archivo; su superficie IPC es parte del contrato.
+export type {
+  InstallPlan,
+  ReleaseAsset,
+  ReleaseInfo,
+  SemanticVersion,
+  UpdateState,
+  UpdateStatus,
+} from './updates.js';
+export type { MarketplaceExtension, SearchQuery, SearchResult } from './open-vsx.js';
+export type { ContributionSummary, InstalledExtension, VsixManifest } from './vsix.js';
 import type { EfMigrationList, EfDbContext, EfOperation, EfOperationOptions } from './efcore.js';
 import type { DatabaseSchema } from './efcore-schema.js';
 import type { HttpResponseResult, ResolvedHttpRequest } from './http-file.js';
@@ -129,6 +142,9 @@ import type { TunnelTool } from './dev-tunnel.js';
 import type { DotnetProcess, MetricsEvent, MetricsState } from './perf-counters.js';
 import type { AuditReport } from './nuget-audit.js';
 import type { SemanticTokensLegend } from './semantic-tokens.js';
+import type { UpdateState } from './updates.js';
+import type { MarketplaceExtension, SearchQuery, SearchResult } from './open-vsx.js';
+import type { InstalledExtension } from './vsix.js';
 import type { ConnectionStringInfo } from './efcore.js';
 
 // ---------------------------------------------------------------------------------------------
@@ -494,6 +510,13 @@ export interface AppSettings {
    * `clean`, `restore`, `format` y el entorno del proceso depurado.
    */
   dotnetVerbosity: DotnetVerbosity;
+  /**
+   * Buscar actualizaciones automáticamente al arrancar.
+   *
+   * Apagarlo no desactiva el botón "Buscar ahora": deja de preguntar solo, que es lo que molesta
+   * en una máquina sin red o detrás de un proxy corporativo.
+   */
+  autoUpdateCheck: boolean;
   /** Preferencias del asistente de IA. Las claves de API NO viven aquí: ver `secret-store.ts`. */
   ai: AiSettings;
 }
@@ -511,6 +534,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   recentWorkspaces: [],
   lspEnabled: true,
   dotnetVerbosity: DEFAULT_DOTNET_VERBOSITY,
+  autoUpdateCheck: true,
   ai: DEFAULT_AI_SETTINGS,
 };
 
@@ -621,6 +645,18 @@ export const IPC = {
   debugSetBreakpoints: 'debug:set-breakpoints',
   debugEvaluate: 'debug:evaluate',
 
+  updateState: 'update:state',
+  updateCheck: 'update:check',
+  updateDownload: 'update:download',
+  updateDismiss: 'update:dismiss',
+  updateApplyOnQuit: 'update:apply-on-quit',
+
+  extensionsSearch: 'extensions:search',
+  extensionsInstalled: 'extensions:installed',
+  extensionsInstall: 'extensions:install',
+  extensionsUninstall: 'extensions:uninstall',
+  extensionsOpenFolder: 'extensions:open-folder',
+
   aiStatus: 'ai:status',
   aiSetKey: 'ai:set-key',
   aiProbe: 'ai:probe',
@@ -644,6 +680,7 @@ export const IPC_EVENTS = {
   aiDelta: 'event:ai-delta',
   aiEnd: 'event:ai-end',
   metricsSample: 'event:metrics-sample',
+  updateState: 'event:update-state',
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];
@@ -667,6 +704,8 @@ export type MenuCommand =
   | 'tests.run-all'
   | 'tests.run-file'
   | 'view.metrics'
+  | 'view.extensions'
+  | 'update.check'
   | 'tunnel.create'
   | 'tunnel.stop'
   | 'view.efcore'
@@ -919,6 +958,38 @@ export interface DotForgeApi {
     evaluate(expression: string, frameId?: number): Promise<string>;
   };
 
+  /**
+   * Actualizaciones automáticas.
+   *
+   * `check` pregunta al feed, `download` baja el artefacto de esta plataforma y `dismiss` esconde
+   * la tarjeta dejando programada la instalación al cerrar. Los cambios de estado llegan también
+   * por `onUpdateState`: la descarga avanza sola y nadie está esperando una respuesta.
+   */
+  updates: {
+    state(): Promise<UpdateState>;
+    check(manual?: boolean): Promise<UpdateState>;
+    download(): Promise<UpdateState>;
+    dismiss(): Promise<UpdateState>;
+    /** Programa la instalación al cerrar; con `now`, cierra el IDE para aplicarla ya. */
+    applyOnQuit(now?: boolean): Promise<UpdateState>;
+  };
+
+  /**
+   * Extensiones de Open VSX.
+   *
+   * La búsqueda y la descarga las hace el proceso principal: la CSP del renderer no admite
+   * ningún origen remoto, y así el registro no ve nada del equipo salvo la propia consulta.
+   */
+  extensions: {
+    search(request: SearchQuery): Promise<SearchResult>;
+    installed(): Promise<InstalledExtension[]>;
+    /** Instala desde el registro. Devuelve la extensión ya instalada y leída del disco. */
+    install(extension: MarketplaceExtension): Promise<InstalledExtension>;
+    uninstall(id: string): Promise<boolean>;
+    /** Abre la carpeta de extensiones en el explorador del sistema. */
+    openFolder(): Promise<void>;
+  };
+
   ai: {
     /** Proveedor activo, modelo y si hay credencial. La clave nunca se devuelve. */
     status(): Promise<AiStatus>;
@@ -952,6 +1023,7 @@ export interface DotForgeApi {
     onAiDelta(handler: (payload: AiStreamDelta) => void): () => void;
     onAiEnd(handler: (payload: AiStreamEnd) => void): () => void;
     onMetricsSample(handler: (payload: MetricsEvent) => void): () => void;
+    onUpdateState(handler: (state: UpdateState) => void): () => void;
   };
 }
 

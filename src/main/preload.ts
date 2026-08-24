@@ -60,6 +60,11 @@ import type {
   MetricsEvent,
   MetricsState,
   SemanticTokensLegend,
+  UpdateState,
+  MarketplaceExtension,
+  SearchQuery,
+  SearchResult,
+  InstalledExtension,
 } from '../shared/contracts.js';
 import { IPC, IPC_EVENTS } from '../shared/contracts.js';
 import type { GitDiffRequest, GitRepositoryStatus } from '../shared/git.js';
@@ -224,6 +229,23 @@ const api: DotForgeApi = {
     evaluate: (expression, frameId) => ipcRenderer.invoke(IPC.debugEvaluate, expression, frameId) as Promise<string>,
   },
 
+  updates: {
+    state: () => ipcRenderer.invoke(IPC.updateState) as Promise<UpdateState>,
+    check: (manual) => ipcRenderer.invoke(IPC.updateCheck, manual ?? false) as Promise<UpdateState>,
+    download: () => ipcRenderer.invoke(IPC.updateDownload) as Promise<UpdateState>,
+    dismiss: () => ipcRenderer.invoke(IPC.updateDismiss) as Promise<UpdateState>,
+    applyOnQuit: (now) => ipcRenderer.invoke(IPC.updateApplyOnQuit, now ?? false) as Promise<UpdateState>,
+  },
+
+  extensions: {
+    search: (request: SearchQuery) => ipcRenderer.invoke(IPC.extensionsSearch, request) as Promise<SearchResult>,
+    installed: () => ipcRenderer.invoke(IPC.extensionsInstalled) as Promise<InstalledExtension[]>,
+    install: (extension: MarketplaceExtension) =>
+      ipcRenderer.invoke(IPC.extensionsInstall, extension) as Promise<InstalledExtension>,
+    uninstall: (id: string) => ipcRenderer.invoke(IPC.extensionsUninstall, id) as Promise<boolean>,
+    openFolder: () => ipcRenderer.invoke(IPC.extensionsOpenFolder) as Promise<void>,
+  },
+
   ai: {
     status: () => ipcRenderer.invoke(IPC.aiStatus) as Promise<AiStatus>,
     setKey: (provider: AiProviderId, apiKey: string | null) =>
@@ -251,6 +273,7 @@ const api: DotForgeApi = {
     onAiDelta: (handler) => subscribe<AiStreamDelta>(IPC_EVENTS.aiDelta, handler),
     onAiEnd: (handler) => subscribe<AiStreamEnd>(IPC_EVENTS.aiEnd, handler),
     onMetricsSample: (handler) => subscribe<MetricsEvent>(IPC_EVENTS.metricsSample, handler),
+    onUpdateState: (handler) => subscribe<UpdateState>(IPC_EVENTS.updateState, handler),
   },
 };
 

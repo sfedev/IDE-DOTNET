@@ -14,6 +14,12 @@ Su módulo estrella es el **Scaffolding Wizard**: un generador de arquitecturas 
 que produce soluciones .NET **compilables y ejecutables** siguiendo Clean Architecture,
 Arquitectura Hexagonal (Ports & Adapters) o Domain-Driven Design + CQRS.
 
+Desde la v2.1.0 el IDE **se actualiza solo**: comprueba si hay una versión posterior cinco segundos
+después de arrancar, lo dice en una tarjeta flotante con las notas de la publicación y aplica la
+instalación **al cerrar**, sin interrumpir a nadie. Y trae un **explorador de extensiones de Open
+VSX**: buscar, instalar y desinstalar `.vsix` desde el registro abierto, con la ficha diciendo qué
+aporta cada extensión y qué no tiene efecto aquí.
+
 Desde la v2.0.0 el **IntelliSense de C# funciona**: la versión del servidor de Roslyn está fijada y
 verificada en vez de tomarse la última compilación del feed, cada instalación se comprueba archivo a
 archivo antes de lanzarla, y si el servidor falla el IDE **conmuta solo a OmniSharp**.
@@ -88,6 +94,9 @@ IDE-DOTNET/
 │   │   ├── dev-tunnel.ts       # * Túneles: argumentos y reconocimiento de la URL pública (puro)
 │   │   ├── perf-counters.ts    # * dotnet-counters: dos generaciones de contadores (puro)
 │   │   ├── nuget-audit.ts      # * dotnet list package --vulnerable: JSON y tabla (puro)
+│   │   ├── updates.ts          # * Actualizaciones: SemVer, feed de releases y artefactos (puro)
+│   │   ├── open-vsx.ts         # * Registro de extensiones: URLs, respuestas y hosts (puro)
+│   │   ├── vsix.ts             # * Formato .vsix: manifiesto, carpeta y contribuciones (puro)
 │   │   └── dotnet-verbosity.ts # * Nivel de salida de la CLI -> argumentos y variables (puro)
 │   ├── scaffold/           # * MODULO ESTRELLA: generador de arquitecturas (Node puro)
 │   │   ├── engine.ts           # Micro motor de plantillas {{token}}
@@ -109,7 +118,10 @@ IDE-DOTNET/
 │   │   │                       # docker-service.ts (estado del motor), node-scripts.ts (package.json),
 │   │   │                       # test-service.ts (descubrimiento, dotnet test y lectura del TRX),
 │   │   │                       # tunnel-service.ts (devtunnel/ngrok), metrics-service.ts (contadores),
-│   │   │                       # toolchain-install.ts (instalación verificada: manifiesto y reparación)
+│   │   │                       # toolchain-install.ts (instalación verificada: manifiesto y reparación),
+│   │   │                       # updater-service.ts (comprobar, descargar y aplicar al cerrar),
+│   │   │                       # open-vsx-service.ts (búsqueda en el registro de extensiones),
+│   │   │                       # extension-installer.ts (instalación de .vsix en userData)
 │   │   │   └── ai/             # * Asistente de IA: proveedores, streaming y claves cifradas
 │   │   │       ├── request-builder.ts  # Petición HTTP por proveedor (puro)
 │   │   │       ├── stream-parser.ts    # SSE/NDJSON -> deltas (puro)
@@ -133,7 +145,8 @@ IDE-DOTNET/
 │       │                       # welcome, wizard, debug, startup-bar, ai-chat, ai-inline, git,
 │       │                       # efcore (panel de base de datos), http (cliente del panel inferior),
 │       │                       # containers (contenedores y Docker Compose),
-│       │                       # tests (explorador de pruebas), metrics (monitor de rendimiento)
+│       │                       # tests (explorador de pruebas), metrics (monitor de rendimiento),
+│       │                       # extensions (panel de Open VSX), update-card (tarjeta flotante)
 │       └── styles/             # theme.css (tokens), layout.css, components.css
 ├── resources/              # Iconos multirresolución, branding
 ├── scripts/                # Build, generación de iconos, fetch de toolchain, verificación
@@ -221,7 +234,9 @@ npx electron . --smoke-test
   un usuario (`wizard`, `settings`, `nuget`, `debug`, `ai`, `terminal`, `palette`, `light`,
   `nesting`, `startup`, `startup-dialog`, `terminal-suggest`, `git`, `git-diff`, `startup-play`,
   `startup-run-mode`, `ai-toggle`, `efcore`, `http`, `logs`, `startup-logs`, `containers`,
-  `tests`, `tests-run`, `metrics`, `audit`).
+  `tests`, `tests-run`, `metrics`, `audit`, `extensions`, `update`). `update` pinta la tarjeta de
+  actualización con un estado de ejemplo: publicar una versión de verdad para poder mirarla no es
+  una opción, y no mirarla nunca tampoco.
 - `--ui-wait=<ms>` — cuánto se espera antes de **pulsar** la acción de `--ui=`. Los 3,2 s por
   defecto no bastan si se arranca con una solución abierta: la interfaz todavía está cargando
   Monaco y el control que hay que pulsar aún no existe.
@@ -347,6 +362,44 @@ npx electron . --smoke-test
   contra la forma de un nombre cualificado de C#: la cadena del renderer no entra en un `argv`.
 - Los fallos van al panel de problemas con su propia lista: una compilación correcta no arregla una
   prueba que falla, así que no puede borrar su problema.
+
+### Actualizaciones automáticas (`src/main/services/updater-service.ts`, `src/shared/updates.ts`)
+
+- **Sin `electron-updater`** (ADR-045): exige artefactos firmados y un canal de publicación, y aquí
+  no hay certificado (`publish: null`). Se lee la API pública de releases con el mismo patrón que el
+  toolchain: HTTPS, `content-length` comprobado y artefacto en `userData/updates/`.
+- **La comparación es SemVer, no de cadenas.** `2.10.0` es posterior a `2.9.0`, y `2.1.0-rc.1` es
+  *anterior* a `2.1.0`. Una versión que no se entiende **no** es más nueva: como mucho no se ofrece
+  una actualización que existía; al revés se ofrecería una que no existe.
+- **El artefacto se elige por plataforma y arquitectura.** El `.zip` lo publican las tres
+  plataformas y sólo se distinguen por el `-win-` / `-mac-` del nombre, así que las marcas de las
+  *otras* plataformas se comprueban siempre, no sólo cuando la extensión es ambigua.
+- **El único camino de instalación es `before-quit`** (ADR-046). "Reiniciar y aplicar" cierra el IDE
+  para llegar ahí; "Descartar" esconde la tarjeta, sigue descargando y deja la instalación
+  programada. Lo pendiente se persiste: una promesa que sólo vive en memoria no es una promesa.
+- El instalador se lanza `detached` y con `stdio: 'ignore'`: el padre está desapareciendo, y un hijo
+  que hereda sus descriptores muere con él a mitad de la instalación. Por lo mismo no se usa
+  `shell.openPath`, que devuelve una promesa que nadie va a poder esperar.
+- El servicio **no importa `electron`**: `userData`, la versión y el cierre se le inyectan.
+
+### Extensiones de Open VSX (`src/main/services/extension-installer.ts`, `src/shared/open-vsx.ts`)
+
+- **La URL del `.vsix` llega dentro del JSON del registro** (ADR-047), o sea, es texto de la red que
+  acaba siendo el origen de algo que se escribe en el disco: se valida el host contra una lista
+  cerrada, comparando el hostname **entero**. `open-vsx.org.malo.dev` contiene el host bueno y no es
+  el host bueno. Si la respuesta trae otra descarga, se descarta y se construye la canónica.
+- **Se instala con `installArchive` + `verifyInstall`**, como el resto del toolchain (ADR-041). Nada
+  de marcadores propios: eso ya costó nueve versiones de IntelliSense roto.
+- Sólo se escribe el subárbol `extension/` del paquete, sin su primer nivel: `[Content_Types].xml` y
+  `extension.vsixmanifest` son envoltorio del canal de distribución.
+- `publisher` y `name` salen de un JSON descargado y acaban formando un **nombre de carpeta**: se
+  validan como identificadores al parsear el manifiesto y se vuelve a comprobar la ruta resultante
+  contra la raíz de extensiones antes de escribir o de borrar.
+- **Se instalan, no se ejecutan** (ADR-048). Lo aprovechable es lo declarativo —temas, fragmentos,
+  gramáticas, lenguajes— y la ficha reparte cada `contributes` entre lo que sirve aquí y lo que no.
+  Un gestor que instala y calla se percibe como roto.
+- Los iconos se dibujan localmente (ADR-049), como en NuGet: la CSP no admite imágenes remotas y
+  descargarlas le contaría al registro qué está mirando el usuario.
 
 ### Servidor de lenguaje (`src/main/lsp/`, `src/shared/lsp-*.ts`)
 
@@ -652,3 +705,16 @@ npm run fetch:toolchain -- --platform win32 --arch x64
   marcador que guarda el hash de lo descargado verifica un archivo que ya no está en el disco: hay
   que verificar lo extraído, archivo a archivo (ADR-041). Una cifra redonda —5.242.880— en el tamaño
   de un binario no la produce un compilador; la produce un archivo cortado.
+- **Un `.zip` de release no dice de qué plataforma es por su extensión.** electron-builder publica
+  `…-win-x64.zip` y `…-mac-arm64.zip`, y el filtro por extensión los acepta los dos. Elegir el
+  artefacto de una actualización exige descartar las marcas de las *otras* plataformas, no sólo
+  quedarse con la extensión correcta; si no, un Linux se baja el portable de Windows.
+- **`GET /releases` de un repositorio sin publicar responde 404, no `[]`.** Un repositorio público
+  con cero releases devuelve una lista vacía; uno privado o inexistente, un 404. Enseñar
+  "404 Not Found" a quien pulsa "Buscar ahora" convierte un estado normal en un error incomprensible.
+- **Añadir una herramienta a la barra de actividad desplaza los índices de `--ui=`** (otra vez). La
+  Fase 17 metió "Extensiones" en el 9 y "Ajustes" pasó al 10, lo que habría roto en silencio
+  `settings`, `light`, `probe-theme` y `ai-toggle`.
+- **Un modelo de texto que ya trae su marca no se pinta dentro de una `<ul>`.** Las notas de una
+  release convierten `- ` en `· ` a propósito —los encabezados no llevan marca y las viñetas sí—, y
+  meterlas en una lista de verdad pinta dos viñetas en unas líneas y ninguna en otras.

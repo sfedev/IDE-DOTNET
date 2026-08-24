@@ -75,6 +75,10 @@
       <footer class="statusbar" id="statusbar"></footer>
 
       <div class="overlay" id="overlay" hidden></div>
+
+      <!-- Tarjeta flotante de actualización. Vacía y oculta salvo cuando hay una versión nueva:
+           enterarse no debe interrumpir lo que se está escribiendo, así que no es un modal. -->
+      <div class="update-host" id="update-host" hidden></div>
     </div>
 
     <script src="vendor/monaco/vs/loader.js"></script>

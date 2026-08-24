@@ -306,6 +306,38 @@ por tanto **compila** pero no **ejecuta** los proyectos generados. Se añade el 
 - [x] F16.15 Prueba de seguridad que vigila que ningún adquisidor vuelva a declararse su marcador
 - [x] F16.16 Pruebas: 6 nuevas del depurador, con el constructor de ZIP movido a un fixture compartido
 
+
+### Fase 17 — Actualizaciones automáticas y explorador de extensiones de Open VSX
+- [x] F17.1 Modelo puro de actualizaciones (`src/shared/updates.ts`): SemVer con prelanzamientos,
+      lectura del feed de releases, elección de artefacto por plataforma y arquitectura (ADR-045)
+- [x] F17.2 `updater-service.ts`: comprobación 5 s después del arranque y bajo demanda, descarga con
+      verificación de `content-length` y estado en streaming hacia el renderer
+- [x] F17.3 La instalación se aplica al cerrar (`before-quit`), con el instalador desprendido del
+      proceso; lo pendiente se persiste en `updates/pending.json` y sobrevive a un cierre feo (ADR-046)
+- [x] F17.4 Canales `update:state`, `update:check`, `update:download`, `update:dismiss` y
+      `update:apply-on-quit`, más el evento `event:update-state`
+- [x] F17.5 Tarjeta flotante (`src/renderer/views/update-card.ts`): título con la versión, notas de
+      la publicación, barra de descarga y "Reiniciar y aplicar"
+- [x] F17.6 "Descartar" no es "no quiero": oculta la tarjeta, sigue descargando e instala al cerrar
+- [x] F17.7 Interruptor "Buscar actualizaciones automáticamente" y botón "Buscar ahora" en Ajustes,
+      con el estado de la última comprobación
+- [x] F17.8 Modelo puro del registro (`src/shared/open-vsx.ts`): URLs, lectura de la respuesta,
+      identidad válida y lista blanca de hosts de descarga (ADR-047)
+- [x] F17.9 Modelo puro del formato `.vsix` (`src/shared/vsix.ts`): manifiesto, carpeta de destino y
+      reparto de las contribuciones entre las que aquí sirven y las que no (ADR-048)
+- [x] F17.10 `open-vsx-service.ts`: búsqueda y ficha contra `https://open-vsx.org/api`, con caché corta
+- [x] F17.11 `extension-installer.ts`: descarga verificada del `.vsix` e instalación en
+      `userData/extensions/` con `installArchive` + `verifyInstall`, sin marcador propio (ADR-041)
+- [x] F17.12 Panel lateral "Extensiones" con buscador, filtro por categoría, instaladas arriba y
+      resultados debajo; los iconos se dibujan localmente (ADR-049)
+- [x] F17.13 Cada extensión instalada dice qué aporta de verdad y qué no tiene efecto en DotForge
+- [x] F17.14 Menú, paleta de comandos y modos de diagnóstico `--ui=extensions` y `--ui=update`
+- [x] F17.15 Pruebas: 90 nuevas — 82 unitarias (SemVer y feed de releases 35, cliente de Open VSX 26,
+      formato `.vsix` con instalación real en disco 21) y 8 de seguridad de las dos superficies de
+      descarga nuevas
+- [x] F17.16 Verificado sobre la aplicación real: búsqueda en Open VSX con 16 920 extensiones,
+      instalación y desinstalación de un `.vsix` de verdad, y la tarjeta de actualización a la vista
+
 ---
 
 ## Decisiones técnicas (ADR corto)
@@ -336,6 +368,72 @@ MediatR es el estándar de facto, pero pasó a licencia comercial en versiones r
 dependencias, y el código queda didáctico. A cambio no hay pipeline behaviors de terceros:
 se incluye un pipeline de comportamientos propio (logging + validación) para cubrir el caso común.
 
+### ADR-045 — Actualizaciones sin `electron-updater`
+**Fecha:** 2026-08-24
+**Contexto:** El IDE tiene que saber que hay una versión nueva y aplicarla sin que el usuario vaya a
+buscar un instalador a mano.
+**Opciones:** (a) `electron-updater`; (b) leer la API pública de releases y descargar el artefacto.
+**Decisión:** (b).
+**Consecuencias:** `electron-updater` da actualizaciones diferenciales y verificación de firma, pero
+exige artefactos **firmados** y un canal de publicación (`latest.yml`, que genera el publicador de
+electron-builder). Aquí no hay certificado y `electron-builder.yml` declara `publish: null`, así que
+ese camino no está disponible hoy. La alternativa reutiliza exactamente el patrón que ya sostiene el
+toolchain: feed público, descarga con `content-length` comprobado y artefacto guardado en `userData`.
+A cambio, la actualización es completa (unos 120 MB) y la integridad depende de HTTPS, no de una
+firma; cuando haya certificado, migrar es cambiar este servicio, no la interfaz.
+
+### ADR-046 — La actualización se aplica al cerrar, y "Descartar" no significa "no"
+**Fecha:** 2026-08-24
+**Contexto:** Reemplazar los archivos de la aplicación mientras está abierta no se puede hacer, y
+pedir "reinicia ahora" a alguien que está a mitad de un método es la forma más rápida de que las
+actualizaciones se ignoren para siempre.
+**Decisión:** el único camino de instalación es `app.on('before-quit')`. "Reiniciar y aplicar" cierra
+el IDE para llegar ahí; "Descartar" esconde la tarjeta, **sigue descargando en segundo plano** y deja
+la instalación programada para el próximo cierre.
+**Consecuencias:** un solo camino que probar, y una actualización que se aplica sola sin que nadie
+haya tenido que parar de trabajar. Lo pendiente se persiste en `updates/pending.json`: una promesa
+que sólo vive en memoria no sobrevive a un cierre inesperado, y prometer una instalación que luego no
+ocurre es peor que no prometerla. El instalador se lanza `detached`, porque el padre está
+desapareciendo. En macOS no hay instalación silenciosa posible sin firma ni framework de
+actualización: se abre el `.dmg` y se dice explícitamente que hay que arrastrar la app a
+Aplicaciones, en vez de fingir que se ha instalado.
+
+### ADR-047 — Extensiones de Open VSX, con el host de descarga en lista blanca
+**Fecha:** 2026-08-24
+**Contexto:** El marketplace de Microsoft no permite por licencia que lo consuma un producto que no
+sea VS Code. Open VSX (Eclipse Foundation) sirve los mismos `.vsix` y sí lo permite; es lo que se
+anticipó en la ADR-001.
+**Decisión:** cliente propio contra `https://open-vsx.org/api`, con la petición hecha **desde el
+proceso principal** y la URL de descarga validada contra una lista de hosts antes de pedirla.
+**Consecuencias:** la CSP del renderer sigue sin permitir ningún origen remoto y el registro no ve
+nada del equipo salvo la propia consulta. La validación del host no es ceremonia: la URL del `.vsix`
+llega **dentro del JSON del registro**, es decir, es texto de la red que acaba siendo el origen de
+algo que se escribe en el disco; sin comprobarla, quien pueda alterar esa respuesta elige de dónde se
+baja el archivo. Si la respuesta trae una descarga de otro host, se descarta y se construye la
+canónica. El paquete se instala con `installArchive` + `verifyInstall` (ADR-041), nunca con un
+marcador propio.
+
+### ADR-048 — Las extensiones se instalan; su código no se ejecuta, y se dice
+**Fecha:** 2026-08-24
+**Contexto:** DotForge no es VS Code: no tiene su host de extensiones ni su API. Un `.vsix` trae dos
+cosas distintas —contribuciones declarativas (temas, fragmentos, gramáticas, lenguajes) y código de
+activación— y sólo las primeras se pueden aprovechar sin implementar ese host entero.
+**Opciones:** (a) no ofrecer extensiones hasta poder ejecutarlas; (b) instalarlas y callar; (c)
+instalarlas y decir en cada ficha qué aporta y qué no tiene efecto aquí.
+**Decisión:** (c). `describeContributions` reparte cada clave de `contributes` entre las dos listas.
+**Consecuencias:** quien instale un depurador de Python ve, en la propia ficha, que su depurador no
+va a funcionar aquí, en vez de deducirlo esperando a que pase algo. Un gestor que instala y calla se
+percibe como roto; uno que explica su alcance se percibe como honesto. Cuando el IDE sepa consumir
+gramáticas TextMate o temas de VS Code, la lista de "sirve" crece y no hay que tocar nada más.
+
+### ADR-049 — Los iconos de las extensiones se dibujan, no se descargan
+**Fecha:** 2026-08-24
+**Contexto:** Cada extensión del registro publica un icono en una URL remota.
+**Decisión:** se pinta una pastilla con las iniciales y un color derivado del identificador.
+**Consecuencias:** es la misma decisión que ya se tomó con NuGet y por los mismos dos motivos: la CSP
+del renderer declara `img-src 'self' data:` y no se va a relajar por unos iconos, y descargarlos le
+contaría al registro qué extensiones está mirando el usuario. El color sale de un hash del
+identificador, así que la misma extensión se ve siempre igual y la lista sigue siendo escaneable.
 ---
 
 ## Bitácora de iteraciones
@@ -2148,3 +2246,71 @@ abierta en el IDE, midiendo con `--probe=`, no mirando capturas):
 lenguaje y depurador—, `pickLatestVersion` deja de gobernar la elección y el contrato de lo que el
 cliente contesta al servidor cambia. Son cambios de comportamiento en la adquisición, y la
 funcionalidad estrella del IDE pasa de no funcionar a funcionar: 1.9.0 → **2.0.0** (ADR-009).
+---
+
+### Iteración 21 — 2026-08-24 — Fase 17: actualizaciones automáticas y extensiones de Open VSX
+
+**Objetivo:** que el IDE sepa actualizarse solo sin interrumpir a nadie, y que se puedan instalar
+extensiones del registro abierto sin salir de la aplicación.
+
+**Hecho:**
+
+- **Actualizaciones.** Modelo puro (`src/shared/updates.ts`) con SemVer de verdad, lectura del feed
+  de releases y elección del artefacto por plataforma y arquitectura; servicio
+  (`updater-service.ts`) que comprueba cinco segundos después del arranque y bajo demanda, descarga
+  con verificación de `content-length` y persiste lo que queda pendiente; tarjeta flotante con las
+  notas de la publicación, barra de descarga y "Reiniciar y aplicar"; interruptor "Buscar
+  actualizaciones automáticamente" y botón "Buscar ahora" en Ajustes.
+- **Extensiones.** Cliente de Open VSX (búsqueda, categorías y ficha), instalador de `.vsix` montado
+  sobre el instalador verificable del toolchain, y panel lateral con las instaladas arriba y los
+  resultados del registro debajo.
+- 90 pruebas nuevas: 82 unitarias y 8 de seguridad sobre las dos superficies de descarga nuevas.
+
+**Decisiones registradas:** ADR-045 (sin `electron-updater`), ADR-046 (se aplica al cerrar, y
+"Descartar" es "ahora no"), ADR-047 (host de descarga en lista blanca), ADR-048 (se instalan pero no
+se ejecutan, y se dice), ADR-049 (los iconos se dibujan).
+
+**Errores encontrados y solucionados:**
+
+1. *Síntoma:* en Linux, la elección de artefacto se quedaba con el portable de **Windows**.
+   *Causa raíz:* el filtro por extensión acepta `.zip` en las tres plataformas, y las exclusiones por
+   nombre sólo estaban escritas para Windows y macOS. Un `DotForge IDE-2.2.0-win-x64.zip` pasa el
+   filtro de un Linux perfectamente.
+   *Arreglo:* tabla `FOREIGN_MARKERS` con las marcas de las **otras** plataformas, comprobada siempre
+   y no sólo cuando la extensión es ambigua. Lo cazó la prueba antes que ningún usuario.
+2. *Síntoma:* las notas de la versión salían con dos viñetas por línea.
+   *Causa raíz:* `releaseNotesLines` ya convierte `- ` en `· ` —lo necesita, porque los encabezados
+   no llevan marca y las viñetas sí— y encima se pintaban dentro de una `<ul>`.
+   *Arreglo:* la tarjeta pinta líneas, no una lista: el modelo ya trae la marca que corresponde.
+3. *Síntoma:* "Buscar ahora" contestaba `404 Not Found`.
+   *Causa raíz:* el repositorio todavía no publica releases, y GitHub responde 404 a `/releases` de
+   un repositorio privado o sin publicar. No es un fallo de red: es el estado normal de un producto
+   que aún no ha publicado su primera versión.
+   *Arreglo:* el 404 se traduce a lo que significa. El resto de códigos siguen saliendo tal cual.
+4. *Trampa conocida que volvió a morder:* los índices de `--ui=` son posicionales sobre
+   `.activity-item`. Añadir "Extensiones" desplazó "Ajustes" del 9 al 10 y habría roto en silencio
+   `settings`, `light`, `probe-theme` y `ai-toggle`. Se actualizaron los cuatro y el comentario que
+   lleva el orden escrito.
+
+**Verificado sobre la aplicación real** (no mirando capturas: midiendo con `--probe=`):
+
+- Búsqueda contra Open VSX de verdad: **16 920 extensiones**, con sus descargas, valoraciones y
+  descripciones, pintadas en el panel.
+- Instalación de un `.vsix` real de punta a punta:
+  `{"id":"Shuzzy.dracula-shuzzyos","version":"1.2.1","contrib":{"supported":["temas de color"]}}`,
+  descargado del registro, extraído sin el envoltorio de OPC, verificado archivo a archivo y listado
+  en "Instaladas"; y desinstalado después (`removed: true`), sin dejar rastro en
+  `userData/extensions/`.
+- Comprobación contra el feed real: `{"status":"error","current":"2.1.0","version":null,...}` con el
+  mensaje ya traducido —el repositorio no publica releases todavía—, que es la respuesta honesta y la
+  que verá cualquiera que pulse "Buscar ahora" hoy.
+- `--ui=update` pinta la tarjeta con un estado de ejemplo y `--ui=extensions` el panel; Ajustes sigue
+  enseñando sus grupos, ahora con "Actualizaciones" entre "Lenguaje" y el asistente.
+- `npx electron . --smoke-test` → `SMOKE_OK`.
+- `npm test` en verde de punta a punta.
+- `prune:dist` liberó los 279,2 MB de artefactos de la 2.0.0, y `verify:dist` confirma los de la
+  2.1.0: instalador NSIS (117,4 MB) y ZIP portable (161,8 MB), sin firmar como es esperado sin
+  certificado.
+
+**Versión:** dos funcionalidades nuevas, compatibles hacia atrás y sin cambios de comportamiento en
+lo existente: 2.0.0 → **2.1.0** (ADR-009).

@@ -25,6 +25,9 @@ import * as metricsService from './services/metrics-service.js';
 import * as processRegistry from './services/process-registry.js';
 import * as settingsService from './services/settings-service.js';
 import * as startupService from './services/startup-service.js';
+import * as updaterService from './services/updater-service.js';
+import * as extensionInstaller from './services/extension-installer.js';
+import { STARTUP_CHECK_DELAY_MS } from '../shared/updates.js';
 
 const isDevelopment = process.argv.includes('--dev') || !app.isPackaged;
 
@@ -383,9 +386,10 @@ const uiAction = (() => {
 
 const UI_ACTIONS: Record<string, string> = {
   // La barra de actividad, en orden: solución, control de código fuente, generador, NuGet,
-  // base de datos, contenedores, pruebas, depuración, IA, [spacer], ajustes. Los índices son
-  // posicionales: si se añade una herramienta, hay que moverlos aquí, y por eso el orden está
-  // escrito arriba. La Fase 15 metió "pruebas" en el 6 y desplazó todo lo que venía detrás.
+  // base de datos, contenedores, pruebas, depuración, IA, extensiones, [spacer], ajustes. Los
+  // índices son posicionales: si se añade una herramienta, hay que moverlos aquí, y por eso el
+  // orden está escrito arriba. La Fase 15 metió "pruebas" en el 6 y desplazó todo lo que venía
+  // detrás; la Fase 17 metió "extensiones" en el 9 y desplazó "ajustes" al 10.
   git: "document.querySelectorAll('.activity-item')[1]?.click()",
   wizard: "document.querySelectorAll('.activity-item')[2]?.click()",
   nuget: "document.querySelectorAll('.activity-item')[3]?.click()",
@@ -394,7 +398,11 @@ const UI_ACTIONS: Record<string, string> = {
   tests: "document.querySelectorAll('.activity-item')[6]?.click()",
   debug: "document.querySelectorAll('.activity-item')[7]?.click()",
   ai: "document.querySelectorAll('.activity-item')[8]?.click()",
-  settings: "document.querySelectorAll('.activity-item')[9]?.click()",
+  extensions: "document.querySelectorAll('.activity-item')[9]?.click()",
+  settings: "document.querySelectorAll('.activity-item')[10]?.click()",
+  // La tarjeta de actualización con un estado de ejemplo: publicar una versión de verdad en
+  // GitHub para poder mirarla no es una opción, y no mirarla nunca tampoco.
+  update: 'window.__dotforgeUpdatePreview && window.__dotforgeUpdatePreview()',
   // Cliente HTTP y visor de registro: pestañas del panel inferior.
   http: "[...document.querySelectorAll('.panel-tab')].find((tab) => tab.textContent?.includes('HTTP'))?.click()",
   logs: "[...document.querySelectorAll('.panel-tab')].find((tab) => tab.textContent?.includes('Registro'))?.click()",
@@ -417,12 +425,12 @@ const UI_ACTIONS: Record<string, string> = {
   // Dos pasos: abrir ajustes y pulsar "Claro". Se encadenan con un retardo porque la vista se
   // repinta entre uno y otro.
   light:
-    "document.querySelectorAll('.activity-item')[9]?.click();" +
+    "document.querySelectorAll('.activity-item')[10]?.click();" +
     "setTimeout(() => [...document.querySelectorAll('.segmented button')]" +
     ".find((button) => button.textContent?.includes('Claro'))?.click(), 400)",
   // Despliega el grupo de archivos satélite de appsettings.json.
   'probe-theme':
-    "document.querySelectorAll('.activity-item')[9]?.click();" +
+    "document.querySelectorAll('.activity-item')[10]?.click();" +
     "setTimeout(() => {" +
     "  [...document.querySelectorAll('.segmented button')].find((b) => b.textContent?.includes('Claro'))?.click();" +
     "  setTimeout(() => {" +
@@ -464,7 +472,7 @@ const UI_ACTIONS: Record<string, string> = {
   // Fase 11: conmuta "Activar el asistente" en Ajustes. Sirve para revisar a ojo el icono
   // atenuado de la barra de actividad; ejecutarlo dos veces deja la preferencia como estaba.
   'ai-toggle':
-    "document.querySelectorAll('.activity-item')[9]?.click();" +
+    "document.querySelectorAll('.activity-item')[10]?.click();" +
     'setTimeout(() => {' +
     "  const row = [...document.querySelectorAll('.settings-toggle')]" +
     "    .find((label) => label.textContent?.includes('Activar el asistente'));" +
@@ -617,6 +625,18 @@ app.whenReady().then(async () => {
     configured: () => aiSecrets.configuredProviders(),
   });
 
+  extensionInstaller.initialize(app.getPath('userData'));
+
+  // El actualizador recupera aquí lo que quedó descargado en una sesión anterior: si el usuario
+  // pulsó "Descartar" y el IDE se fue abajo, la promesa de instalar al cerrar sigue en pie.
+  await updaterService.initialize({
+    userDataPath: app.getPath('userData'),
+    currentVersion: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+    quit: () => app.quit(),
+  });
+
   registerIpcHandlers();
   installApplicationMenu();
 
@@ -643,6 +663,18 @@ app.whenReady().then(async () => {
 
   createWindow();
 
+  /**
+   * Comprobación automática, cinco segundos después de arrancar.
+   *
+   * No es en el momento del arranque a propósito: los primeros segundos se los llevan Monaco, la
+   * lectura de la solución y el servidor de lenguaje, y una consulta de red compitiendo con eso
+   * sólo consigue que el IDE tarde más en estar utilizable. Se omite en los modos de diagnóstico,
+   * que deben partir siempre del mismo estado y no depender de la red.
+   */
+  if (!isSmokeTest && !uiAction && screenshotTarget === null && settingsService.current().autoUpdateCheck) {
+    setTimeout(() => void updaterService.check(), STARTUP_CHECK_DELAY_MS);
+  }
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -657,6 +689,18 @@ app.on('window-all-closed', () => {
  * al cierre del IDE ocupando puertos o bloqueando archivos del workspace.
  */
 app.on('before-quit', () => {
+  /**
+   * Actualización pendiente: éste es el único momento en el que se puede aplicar.
+   *
+   * Va lo primero, antes de parar nada: si algo de lo que viene detrás lanzase una excepción, el
+   * instalador ya se habría lanzado. Y se lanza desprendido del proceso, porque el padre está a
+   * punto de desaparecer.
+   */
+  if (updaterService.hasPendingInstall()) {
+    const detail = updaterService.runPendingInstaller();
+    if (detail !== null) console.log(`[updater] ${detail}`);
+  }
+
   void lspClient.stop();
   // Una petición en streaming sigue consumiendo tokens aunque nadie mire la respuesta.
   aiService.cancelAll();

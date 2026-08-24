@@ -86,6 +86,7 @@ export function buildApplicationMenu(): Menu {
         item('Contenedores y Docker Compose', 'view.containers', 'CmdOrCtrl+Shift+K'),
         item('Explorador de pruebas', 'view.tests', 'CmdOrCtrl+Shift+Y'),
         item('Métricas de rendimiento', 'view.metrics'),
+        item('Extensiones', 'view.extensions'),
         item('Problemas', 'view.problems', 'CmdOrCtrl+Shift+M'),
         item('Registro de la aplicación', 'view.logs', 'CmdOrCtrl+Shift+L'),
         item('Salida y terminal', 'view.terminal', 'CmdOrCtrl+J'),
@@ -189,6 +190,7 @@ export function buildApplicationMenu(): Menu {
       label: 'Ayuda',
       submenu: [
         item('Acerca de DotForge IDE', 'help.about'),
+        item('Buscar actualizaciones…', 'update.check'),
         {
           label: 'Documentación de .NET',
           click: () => void shell.openExternal('https://learn.microsoft.com/dotnet/'),

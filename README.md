@@ -36,6 +36,9 @@ La v2.0.0 hace que todo eso descanse sobre algo que por fin funciona: el **Intel
 La versión del servidor de Roslyn se fija y se verifica en vez de coger la última compilación
 publicada, cada instalación se comprueba archivo a archivo antes de lanzarla, y si el servidor
 falla el IDE **conmuta solo a OmniSharp** sin que tengas que enterarte.
+La v2.1.0 añade lo que le faltaba a la distribución: el IDE **se actualiza solo** —te avisa en una
+tarjeta y se instala al cerrar, sin interrumpirte— y trae un **explorador de extensiones de Open
+VSX** para buscar, instalar y desinstalar `.vsix` desde el registro abierto.
 
 ![DotForge IDE con una solución DDD abierta](docs/screenshot-workspace.png)
 
@@ -55,6 +58,8 @@ falla el IDE **conmuta solo a OmniSharp** sin que tengas que enterarte.
 - [Monitor de rendimiento](#monitor-de-rendimiento)
 - [Túnel público para webhooks](#túnel-público-para-webhooks)
 - [Auditoría de seguridad de NuGet](#auditoría-de-seguridad-de-nuget)
+- [Extensiones de Open VSX](#extensiones-de-open-vsx)
+- [Actualizaciones automáticas](#actualizaciones-automáticas)
 - [Instalación](#instalación)
 - [El generador de arquitecturas](#el-generador-de-arquitecturas)
   - [Clean Architecture](#clean-architecture)
@@ -415,6 +420,35 @@ avisos de GitHub Security Advisories (`dotnet list package --vulnerable`).
 - Panel visual: buscar en nuget.org, ver lo instalado, elegir versión, instalar y desinstalar.
 - Los iconos de los paquetes se dibujan localmente: el panel no revela a terceros qué estás mirando.
 
+### Extensiones de Open VSX
+
+Panel lateral para buscar, instalar y desinstalar extensiones del registro abierto
+[open-vsx.org](https://open-vsx.org), que sirve los mismos `.vsix` que el marketplace de VS Code con
+una licencia que sí permite consumirlos desde otro producto.
+
+- Buscador por texto y filtro por categoría; sin término de búsqueda, las más descargadas.
+- Las instaladas van arriba, con su versión y el botón de desinstalar; se guardan en
+  `userData/extensions/` y se verifican archivo a archivo al instalarse.
+- **Cada ficha dice qué aporta de verdad.** DotForge no ejecuta el código de activación de una
+  extensión: aprovecha lo declarativo (temas de color, fragmentos, gramáticas de resaltado,
+  definiciones de lenguaje) y lo dice en la propia tarjeta, junto a lo que no tendrá efecto aquí.
+- La búsqueda y la descarga las hace el proceso principal, y sólo desde los hosts de Open VSX. Los
+  iconos se dibujan localmente: el panel no revela a terceros qué estás mirando.
+
+### Actualizaciones automáticas
+
+- El IDE comprueba si hay una versión posterior **cinco segundos después de arrancar**, y también
+  cuando pulsas "Buscar ahora" en Ajustes.
+- Si la hay, aparece una tarjeta flotante con la versión, las notas de la publicación y dos
+  opciones: **Actualizar**, que descarga con barra de progreso y deja el botón "Reiniciar y
+  aplicar"; o **Descartar**, que esconde el aviso, sigue descargando en segundo plano e instala
+  sola la próxima vez que cierres el IDE.
+- La comprobación automática se apaga desde Ajustes → **Actualizaciones**. El botón "Buscar ahora"
+  sigue funcionando con ella apagada.
+- En Windows la instalación es silenciosa (instalador NSIS). En macOS se abre la imagen de disco al
+  cerrar y hay que arrastrar la app a Aplicaciones: sin certificado de firma no hay forma honesta
+  de hacerlo solo, y la tarjeta lo dice en vez de fingir lo contrario.
+
 ### Producto
 
 - Tema **DotForge Purple** (oscuro) y variante clara, con contraste AA. Tonos apagados, sin negros
@@ -423,7 +457,7 @@ avisos de GitHub Security Advisories (`dotnet list package --vulnerable`).
 - **61 iconos vectoriales propios** en una sola rejilla, incluidas las marcas del ecosistema (C#,
   Razor, solución, proyecto) y de las carpetas con significado: `Controllers`, `Models`,
   `Services`, `Pages`, `Components`, `Domain`, `Ports`, `wwwroot`…
-- Barra de actividad reducida a seis herramientas y barra de estado con lo imprescindible: SDK
+- Barra de actividad con una herramienta por dominio y barra de estado con lo imprescindible: SDK
   activo, estado del servidor de lenguaje, rama de Git y errores.
 - **Ajustes** en la barra lateral, con efecto inmediato: tema, tamaño de fuente, tabulación,
   minimapa, ajuste de línea, formateo al guardar e IntelliSense.

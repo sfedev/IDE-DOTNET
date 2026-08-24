@@ -308,3 +308,62 @@ export {
   worstSeverity,
 } from '../shared/nuget-audit.js';
 export type { AuditReport, VulnerablePackage, VulnerabilitySeverity } from '../shared/nuget-audit.js';
+
+/**
+ * Fase 17 — actualizaciones automáticas y registro de extensiones.
+ *
+ * Los tres modelos son puros y tienen mucho caso borde: SemVer con prelanzamientos, artefactos por
+ * plataforma y arquitectura, respuestas del registro y manifiestos de `.vsix`. Se prueban con
+ * respuestas reales y sin red.
+ */
+export {
+  assetFor,
+  compareVersions,
+  emptyUpdateState,
+  installPlan,
+  isNewerVersion,
+  parseReleaseFeed,
+  parseVersion,
+  releaseNotesLines,
+  selectUpdate,
+  STARTUP_CHECK_DELAY_MS,
+  updateHeadline,
+  UPDATE_FEED,
+} from '../shared/updates.js';
+export type { InstallPlan, ReleaseAsset, ReleaseInfo, SemanticVersion, UpdateState } from '../shared/updates.js';
+
+export {
+  downloadUrl,
+  extensionHue,
+  extensionId,
+  extensionInitials,
+  extensionUrl,
+  EXTENSION_CATEGORIES,
+  formatDownloads,
+  formatRating,
+  isTrustedDownload,
+  isValidSegment,
+  OPEN_VSX_API,
+  parseExtension,
+  parseExtensionId,
+  parseSearch,
+  searchUrl,
+  SEARCH_PAGE_SIZE,
+} from '../shared/open-vsx.js';
+export type { MarketplaceExtension, SearchQuery, SearchResult } from '../shared/open-vsx.js';
+
+export {
+  describeContributions,
+  extensionFolderName,
+  hasNewerVersion,
+  installedFrom,
+  isExtensionEntry,
+  manifestId,
+  parseVsixManifest,
+  sortInstalled,
+  STATIC_CONTRIBUTIONS,
+  VsixError,
+  VSIX_MANIFEST,
+  VSIX_ROOT,
+} from '../shared/vsix.js';
+export type { ContributionSummary, InstalledExtension, VsixManifest } from '../shared/vsix.js';

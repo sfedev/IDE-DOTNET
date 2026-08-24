@@ -36,6 +36,10 @@ import { EF_OPERATIONS } from '../../shared/efcore.js';
 import { TUNNEL_TOOLS, isValidPort, missingToolMessage } from '../../shared/dev-tunnel.js';
 import type { TunnelTool } from '../../shared/dev-tunnel.js';
 import type { MetricsState } from '../../shared/perf-counters.js';
+import type { UpdateState } from '../../shared/updates.js';
+import type { MarketplaceExtension, SearchQuery, SearchResult } from '../../shared/open-vsx.js';
+import { isTrustedDownload, isValidSegment, SEARCH_PAGE_SIZE } from '../../shared/open-vsx.js';
+import type { InstalledExtension } from '../../shared/vsix.js';
 import { describeFault, type ServerFault } from '../../shared/lsp-health.js';
 import { legendFromCapabilities } from '../../shared/semantic-tokens.js';
 import { filterForClass, filterForTests } from '../../shared/test-explorer.js';
@@ -73,6 +77,9 @@ import * as metricsService from '../services/metrics-service.js';
 import * as nugetService from '../services/nuget-service.js';
 import * as testService from '../services/test-service.js';
 import * as tunnelService from '../services/tunnel-service.js';
+import * as updaterService from '../services/updater-service.js';
+import * as openVsxService from '../services/open-vsx-service.js';
+import * as extensionInstaller from '../services/extension-installer.js';
 import * as settingsService from '../services/settings-service.js';
 import * as startupService from '../services/startup-service.js';
 import { loadSolution } from '../services/solution-service.js';
@@ -1062,6 +1069,87 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC.lspLegend, () => legendFromCapabilities(lspClient.getServerCapabilities()));
+
+  // --- Actualizaciones ---------------------------------------------------------------------------
+
+  /**
+   * El estado de la actualización cambia solo.
+   *
+   * La descarga avanza sin que nadie la haya pedido en ese instante —"Descartar" la lanza en
+   * segundo plano—, así que el progreso viaja como evento y no como respuesta a una llamada.
+   */
+  updaterService.setListener((state: UpdateState) => broadcast(IPC_EVENTS.updateState, state));
+
+  ipcMain.handle(IPC.updateState, (): UpdateState => updaterService.getState());
+
+  ipcMain.handle(IPC.updateCheck, (_event, manual: unknown): Promise<UpdateState> =>
+    updaterService.check({ manual: manual === true }),
+  );
+
+  ipcMain.handle(IPC.updateDownload, (): Promise<UpdateState> => updaterService.download());
+
+  ipcMain.handle(IPC.updateDismiss, (): UpdateState => updaterService.dismiss());
+
+  ipcMain.handle(IPC.updateApplyOnQuit, (_event, now: unknown): Promise<UpdateState> =>
+    updaterService.applyOnQuit(now === true),
+  );
+
+  // --- Extensiones (Open VSX) ---------------------------------------------------------------------
+
+  ipcMain.handle(IPC.extensionsSearch, (_event, request: unknown): Promise<SearchResult> => {
+    if (typeof request !== 'object' || request === null) throw new Error('la consulta debe ser un objeto');
+
+    const source = request as Record<string, unknown>;
+    const query: SearchQuery = {
+      query: typeof source['query'] === 'string' ? source['query'].slice(0, 200) : '',
+      category: typeof source['category'] === 'string' ? source['category'].slice(0, 80) : '',
+      size: typeof source['size'] === 'number' ? source['size'] : SEARCH_PAGE_SIZE,
+      offset: typeof source['offset'] === 'number' ? source['offset'] : 0,
+    };
+
+    return openVsxService.search(query);
+  });
+
+  ipcMain.handle(IPC.extensionsInstalled, (): Promise<InstalledExtension[]> => extensionInstaller.listInstalled());
+
+  /**
+   * Instalación desde el registro.
+   *
+   * Del objeto que manda el renderer sólo se usa la URL de descarga, y sólo si viene de Open VSX:
+   * lo demás es presentación. Todo lo que importa —manifiesto, identidad, carpeta— sale después
+   * del propio `.vsix`, que es la única fuente que no puede falsear quien llame a este canal.
+   */
+  ipcMain.handle(IPC.extensionsInstall, async (_event, extension: unknown): Promise<InstalledExtension> => {
+    if (typeof extension !== 'object' || extension === null) throw new Error('falta la extensión a instalar');
+
+    const source = extension as Partial<MarketplaceExtension>;
+    const url = typeof source.download === 'string' ? source.download : '';
+
+    if (!isTrustedDownload(url)) throw new Error('la extensión no declara una descarga válida de Open VSX');
+
+    const outcome = await extensionInstaller.installFromUrl(url);
+    return outcome.extension;
+  });
+
+  ipcMain.handle(IPC.extensionsUninstall, (_event, id: unknown): Promise<boolean> => {
+    const value = requireString(id, 'id');
+    const [namespace, name] = value.split('.');
+
+    // El identificador acaba en una comparación contra nombres de carpeta: se valida su forma
+    // antes de que llegue a tocar el disco.
+    if (namespace === undefined || name === undefined || !isValidSegment(namespace) || !isValidSegment(name)) {
+      throw new Error(`identificador de extensión no válido: ${value}`);
+    }
+
+    return extensionInstaller.uninstall(value);
+  });
+
+  ipcMain.handle(IPC.extensionsOpenFolder, async (): Promise<void> => {
+    const directory = extensionInstaller.extensionsDirectory();
+    const { mkdir } = await import('node:fs/promises');
+    await mkdir(directory, { recursive: true });
+    await shell.openPath(directory);
+  });
 
   // --- Asistente de IA ---------------------------------------------------------------------------
   ipcMain.handle(IPC.aiStatus, (): AiStatus => aiService.status(settingsService.current().ai));

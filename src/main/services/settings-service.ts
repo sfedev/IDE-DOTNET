@@ -40,7 +40,7 @@ function coerce(raw: unknown): AppSettings {
   if (typeof source['tabSize'] === 'number' && source['tabSize'] >= 1 && source['tabSize'] <= 8) {
     settings.tabSize = Math.round(source['tabSize']);
   }
-  for (const flag of ['wordWrap', 'minimap', 'formatOnSave', 'lspEnabled'] as const) {
+  for (const flag of ['wordWrap', 'minimap', 'formatOnSave', 'lspEnabled', 'autoUpdateCheck'] as const) {
     if (typeof source[flag] === 'boolean') settings[flag] = source[flag];
   }
   if (source['autoSave'] === 'off' || source['autoSave'] === 'afterDelay') {

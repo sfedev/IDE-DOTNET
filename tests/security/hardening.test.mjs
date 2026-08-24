@@ -351,6 +351,73 @@ describe('descargas del toolchain', () => {
   });
 });
 
+/**
+ * Fase 17: dos superficies nuevas que descargan y **ejecutan o escriben** lo descargado. Son, con
+ * el toolchain, lo más peligroso que hace el IDE, así que se vigilan igual.
+ */
+describe('actualizaciones y extensiones', () => {
+  const updater = readSource('src/main/services/updater-service.ts');
+  const installer = readSource('src/main/services/extension-installer.ts');
+  const openVsx = readSource('src/shared/open-vsx.ts');
+  const updates = readSource('src/shared/updates.ts');
+
+  it('todas las URLs son HTTPS', () => {
+    for (const source of [updater, installer, openVsx, updates]) {
+      for (const url of source.match(/'https?:\/\/[^']+'/g) ?? []) {
+        assert.ok(url.startsWith("'https://"), `URL no segura: ${url}`);
+      }
+    }
+  });
+
+  /**
+   * El artefacto de una actualización se **ejecuta** en la máquina del usuario. Un `http://` en el
+   * feed sería una actualización manipulable en tránsito, así que el asset ni se lista.
+   */
+  it('un artefacto de actualización servido por HTTP se descarta al leer el feed', () => {
+    assert.match(updates, /if \(!url\.startsWith\('https:\/\/'\)\) return null;/);
+  });
+
+  it('la descarga de la actualización comprueba la longitud anunciada', () => {
+    assert.match(updater, /content-length/);
+    assert.match(updater, /received !== total/);
+  });
+
+  /**
+   * La URL del `.vsix` llega dentro del JSON del registro: es texto de la red que acaba siendo el
+   * origen de algo que se escribe en el disco. Se comprueba el host antes de pedir nada, y también
+   * en el handler IPC, porque el objeto lo manda el renderer.
+   */
+  it('sólo se descargan extensiones de Open VSX', () => {
+    assert.match(installer, /isTrustedDownload\(url\)/);
+    assert.match(readSource('src/main/ipc/register.ts'), /isTrustedDownload\(url\)/);
+  });
+
+  it('el host de descarga se compara entero, no por prefijo ni por inclusión', () => {
+    assert.match(openVsx, /TRUSTED_HOSTS\.includes\(parsed\.hostname\.toLowerCase\(\)\)/);
+    assert.match(openVsx, /parsed\.protocol === 'https:'/);
+  });
+
+  it('la carpeta de una extensión se comprueba contra la raíz de extensiones', () => {
+    assert.match(installer, /function insideExtensions/);
+    assert.match(installer, /se sale del directorio de extensiones/);
+  });
+
+  it('la extensión se instala con el instalador verificable, sin marcador propio', () => {
+    assert.match(installer, /installArchive\(/);
+    assert.match(installer, /verifyInstall\(directory\)/);
+    assert.doesNotMatch(installer, /const MARKER\s*=/);
+  });
+
+  /**
+   * El instalador se lanza cuando el IDE ya se está cerrando: si heredase los descriptores del
+   * padre moriría con él a mitad de la instalación.
+   */
+  it('el instalador se lanza desprendido y con los argumentos como array', () => {
+    assert.match(updater, /spawn\(command, args, \{ detached: true/);
+    assert.doesNotMatch(updater, /shell:\s*true/);
+  });
+});
+
 describe('extracción de archivos comprimidos', () => {
   const zip = readSource('src/main/services/zip.ts');
 
