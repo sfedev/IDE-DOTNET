@@ -228,7 +228,10 @@ export class EditorView {
   }
 
   /** Abre un archivo (o activa su pestaña si ya está abierto). */
-  async open(document: EditorDocument, options: { line?: number; column?: number } = {}): Promise<void> {
+  async open(
+    document: EditorDocument,
+    options: { line?: number; column?: number; length?: number } = {},
+  ): Promise<void> {
     const monaco = getMonaco();
     let tab = this.tabs.get(document.path);
 
@@ -272,8 +275,21 @@ export class EditorView {
     this.activate(document.path);
 
     if (options.line !== undefined && this.editor) {
-      const position = { lineNumber: options.line, column: options.column ?? 1 };
-      this.editor.setPosition(position);
+      const column = options.column ?? 1;
+
+      // Con longitud, lo encontrado queda seleccionado y no sólo señalado: es la diferencia entre
+      // "esta es la línea" y "esto es lo que buscabas", y permite sustituirlo escribiendo encima.
+      if (options.length !== undefined && options.length > 0) {
+        this.editor.setSelection({
+          startLineNumber: options.line,
+          startColumn: column,
+          endLineNumber: options.line,
+          endColumn: column + options.length,
+        });
+      } else {
+        this.editor.setPosition({ lineNumber: options.line, column });
+      }
+
       this.editor.revealLineInCenter(options.line);
       this.editor.focus();
     }

@@ -162,10 +162,12 @@ export function buildMenuTemplate(options: MenuTemplateOptions): MenuSection[] {
         role('selectAll', 'Seleccionar todo'),
         separator,
         command('Buscar en el archivo', 'edit.find', 'CmdOrCtrl+F'),
-        // El nombre dice lo que hace. DotForge todavía no busca dentro del contenido de los
-        // archivos: esto filtra el árbol del explorador por nombre. Poner "Buscar en los archivos…"
-        // sería prometer una cosa y hacer otra, que es peor que no ofrecerlo.
-        command('Buscar archivos por nombre…', 'edit.find-in-files', 'CmdOrCtrl+Shift+F'),
+        // Dos entradas porque son dos cosas distintas, y confundirlas es lo que se quería evitar
+        // cuando aquí sólo estaba la segunda: una busca **dentro** de los archivos y abre el
+        // resultado en su línea y su columna; la otra filtra el árbol del explorador por nombre.
+        // `Ctrl+Shift+F` es la primera, que es donde la busca quien viene de cualquier otro editor.
+        command('Buscar en los archivos…', 'search.findInFiles', 'CmdOrCtrl+Shift+F'),
+        command('Buscar archivos por nombre…', 'edit.find-in-files', 'CmdOrCtrl+P'),
         separator,
         command('Formatear documento', 'edit.format', 'Alt+Shift+F'),
         command('Ir a la definición', 'edit.go-to-definition', 'F12'),
@@ -180,6 +182,7 @@ export function buildMenuTemplate(options: MenuTemplateOptions): MenuSection[] {
         command('Paleta de comandos', 'view.command-palette', 'CmdOrCtrl+Shift+P'),
         separator,
         command('Explorador de soluciones', 'view.explorer', 'CmdOrCtrl+Shift+E'),
+        command('Buscar en los archivos', 'search.findInFiles'),
         command('Control de código fuente', 'view.source-control', 'CmdOrCtrl+Shift+G'),
         command('Base de datos y EF Core', 'view.efcore', 'CmdOrCtrl+Shift+D'),
         command('Contenedores y Docker Compose', 'view.containers', 'CmdOrCtrl+Shift+K'),

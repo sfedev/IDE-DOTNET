@@ -394,6 +394,17 @@ const UI_ACTIONS: Record<string, string> = {
   // desplazó "ajustes" al 10), y desde que el usuario puede reordenar la barra arrastrando ya no
   // hay ninguna posición que se pueda dar por buena.
   git: "document.querySelector('.activity-item[data-tool-id=git]')?.click()",
+  // Fase 20: la búsqueda en los archivos, escribiendo en la caja como lo haría una persona — el
+  // panel no enseña nada hasta que hay una consulta, así que abrirlo y ya no revisa nada.
+  search:
+    "document.querySelector('.activity-item[data-tool-id=search]')?.click();" +
+    'setTimeout(() => {' +
+    "  const input = document.querySelector('.search-query input');" +
+    '  if (!input) return;' +
+    '  input.focus();' +
+    "  input.value = 'Product';" +
+    "  input.dispatchEvent(new Event('input', { bubbles: true }));" +
+    '}, 600)',
   wizard: "document.querySelector('.activity-item[data-tool-id=wizard]')?.click()",
   nuget: "document.querySelector('.activity-item[data-tool-id=nuget]')?.click()",
   efcore: "document.querySelector('.activity-item[data-tool-id=efcore]')?.click()",

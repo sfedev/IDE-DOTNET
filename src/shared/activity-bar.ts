@@ -29,6 +29,7 @@
  */
 export const ACTIVITY_TOOLS = [
   'explorer',
+  'search',
   'git',
   'wizard',
   'nuget',

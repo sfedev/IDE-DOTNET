@@ -754,6 +754,7 @@ export type MenuCommand =
   | 'file.close-tab'
   | 'edit.find'
   | 'edit.find-in-files'
+  | 'search.findInFiles'
   | 'edit.format'
   | 'edit.go-to-definition'
   | 'edit.rename'

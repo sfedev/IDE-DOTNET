@@ -187,8 +187,11 @@ export function buildSearchRegExp(options: SearchOptions): RegExp {
   try {
     return new RegExp(source, flags);
   } catch (error) {
-    // El mensaje del motor es lo único que dice *dónde* está el paréntesis sin cerrar.
-    throw new SearchPatternError(error instanceof Error ? error.message : String(error));
+    // El mensaje del motor viene en inglés y no se puede traducir, pero es lo único que dice
+    // *dónde* está el paréntesis sin cerrar: se antepone la explicación en el idioma de la
+    // interfaz y se conserva entero detrás.
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new SearchPatternError(`La expresión regular no es válida — ${detail}`);
   }
 }
 

@@ -45,6 +45,7 @@ import { EditorView, type OpenTab } from './views/editor.js';
 import { ContainersView } from './views/containers.js';
 import { EfCoreView } from './views/efcore.js';
 import { ExplorerView } from './views/explorer.js';
+import { SearchView } from './views/search.js';
 import { HttpClientView } from './views/http.js';
 import { GitView } from './views/git.js';
 import { NuGetView } from './views/nuget.js';
@@ -63,6 +64,7 @@ import { UpdateCard } from './views/update-card.js';
 
 type SidebarView =
   | 'explorer'
+  | 'search'
   | 'git'
   | 'nuget'
   | 'efcore'
@@ -150,6 +152,12 @@ class DotForgeApp {
     showPackagesFor: (project) => this.showNuGet(project),
     refresh: () => void this.openFolderDialog(),
     askAi: (action, path) => void this.askAiAboutFile(action, path),
+  });
+
+  /** Búsqueda de texto en los archivos. Comparte contenedor con el resto de la barra lateral. */
+  private readonly searchView = new SearchView({
+    openMatch: (path, line, column, length) => void this.openFile(path, line, column, length),
+    notify: (message, level) => this.notify(message, level),
   });
 
   private readonly nuget = new NuGetView({
@@ -486,6 +494,9 @@ class DotForgeApp {
     }
     this.explorer.setSolution(solution);
     this.nuget.setSolution(solution);
+    // Los resultados son de la solución anterior: sus rutas ya no existen. Se tiran al cambiar de
+    // solución de verdad, nunca en una relectura (ADR-053 es la misma idea en NuGet).
+    this.searchView.reset();
     this.efcoreView.setSolution(solution);
     this.containersView.setSolution(solution);
     this.testsView.setSolution(solution);
@@ -521,12 +532,20 @@ class DotForgeApp {
   // Archivos
   // -------------------------------------------------------------------------------------------
 
-  private async openFile(path: string, line?: number, column?: number): Promise<void> {
+  /**
+   * Abre un archivo y, si se le dice dónde, coloca el cursor ahí.
+   *
+   * `length` es lo que separa "ir a la línea" de "ir a la coincidencia": con él, lo encontrado
+   * queda **seleccionado**, que es lo que uno espera al pulsar un resultado de la búsqueda — se ve
+   * qué se ha encontrado y se puede sustituir escribiendo encima.
+   */
+  private async openFile(path: string, line?: number, column?: number, length?: number): Promise<void> {
     try {
       const document = await window.dotforge.fs.readFile(path);
       await this.editor.open(document, {
         ...(line === undefined ? {} : { line }),
         ...(column === undefined ? {} : { column }),
+        ...(length === undefined ? {} : { length }),
       });
       this.editor.renderTabs();
       this.editor.setBreakpoints(path, this.debug.linesFor(path));
@@ -902,6 +921,10 @@ class DotForgeApp {
         return this.activityEntry('explorer', 'Explorador de soluciones', 'solution', this.sidebarView === 'explorer', () =>
           this.showExplorer(),
         );
+      case 'search':
+        return this.activityEntry('search', 'Buscar en los archivos', 'search', this.sidebarView === 'search', () =>
+          this.showSearch(),
+        );
       case 'git':
         return this.sourceControlButton(changes);
       case 'wizard':
@@ -1018,6 +1041,7 @@ class DotForgeApp {
   private showSidebar(view: SidebarView): void {
     this.sidebarView = view;
     this.explorer.setVisible(view === 'explorer');
+    this.searchView.setVisible(view === 'search');
     this.gitView.setVisible(view === 'git');
     this.nuget.setVisible(view === 'nuget');
     this.efcoreView.setVisible(view === 'efcore');
@@ -1031,6 +1055,21 @@ class DotForgeApp {
 
   private showGit(): void {
     this.showSidebar('git');
+  }
+
+  /**
+   * Abre la búsqueda y deja el cursor en la caja.
+   *
+   * Con una selección viva en el editor, se busca eso: es lo que hace cualquier IDE con
+   * `Ctrl+Shift+F`, y teclear otra vez lo que ya está seleccionado no lo hace nadie.
+   */
+  private showSearch(): void {
+    this.showSidebar('search');
+
+    const selection = this.editor.currentSelection();
+    if (selection !== null) this.searchView.searchFor(selection.text);
+
+    this.searchView.focusInput();
   }
 
   private showEfCore(): void {
@@ -1937,14 +1976,23 @@ class DotForgeApp {
       },
       { id: 'edit.find', title: 'Buscar en el archivo', group: 'Editar', keybinding: `${modifier}+F`, run: () => this.editor.runAction('actions.find') },
       {
-        id: 'edit.find-in-files',
+        id: 'search.findInFiles',
         icon: 'search',
-        // El nombre dice lo que hace: filtra el árbol por nombre de archivo. DotForge todavía no
-        // busca dentro del contenido de los archivos, y llamarlo "buscar en los archivos" sería
-        // prometer una cosa y hacer otra.
-        title: 'Buscar archivos por nombre en el explorador',
+        title: 'Buscar en los archivos',
         group: 'Editar',
         keybinding: `${modifier}+Shift+F`,
+        run: () => this.showSearch(),
+      },
+      {
+        id: 'edit.find-in-files',
+        icon: 'search',
+        // El nombre dice lo que hace: filtra el árbol por **nombre de archivo**. Es otra cosa que
+        // buscar dentro del contenido, y por eso conserva su comando y su sitio; lo que cambió en
+        // la Fase 20 es que `Ctrl+Shift+F` pasa a la búsqueda de contenido, que es donde lo busca
+        // quien viene de cualquier otro editor.
+        title: 'Buscar archivos por nombre en el explorador',
+        group: 'Editar',
+        keybinding: `${modifier}+P`,
         run: () => {
           this.showExplorer();
           this.explorer.focusFilter();
@@ -2633,6 +2681,10 @@ class DotForgeApp {
     });
 
     window.dotforge.events.onWorkspaceChanged((solution) => this.applySolution(solution));
+
+    // Los resultados de la búsqueda llegan por lotes mientras el recorrido sigue: nadie está
+    // esperando esta respuesta, y por eso es un evento y no el valor de `search.inFiles`.
+    window.dotforge.events.onSearchProgress((progress) => this.searchView.onProgress(progress));
 
     window.dotforge.events.onTaskStarted((task) => {
       this.panel.taskStarted(task);

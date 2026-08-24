@@ -4880,3 +4880,235 @@ select.input {
   flex-wrap: wrap;
   margin-top: 2px;
 }
+
+/* --- Buscar en los archivos ----------------------------------------------------------------- */
+
+.search-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  min-height: 0;
+}
+
+.search-query {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.search-query .input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.search-toggles {
+  display: flex;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+/* Aa / ab / .* — las tres banderas de cualquier editor. Son texto y no icono a propósito: un
+   glifo de "palabra completa" no lo reconoce nadie sin pasar el ratón por encima. */
+.search-toggle {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.search-toggle:hover {
+  background: var(--surface-hover);
+  color: var(--text-strong);
+}
+
+.search-toggle.active {
+  border-color: var(--accent-strong);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.search-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.search-filters-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px;
+  border: 0;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.search-filters-head:hover {
+  color: var(--text-muted);
+}
+
+.search-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+}
+
+.search-hint {
+  padding: 2px 2px 4px;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.search-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.search-elapsed {
+  margin-left: auto;
+  color: var(--text-faint);
+}
+
+.search-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 7px;
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-sm);
+  background: var(--warning-soft);
+  color: var(--text);
+  font-size: var(--text-xs);
+}
+
+.search-error svg {
+  flex: 0 0 auto;
+  color: var(--warning);
+}
+
+.search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.search-group {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Cabecera del archivo: nombre, carpeta atenuada y el número de coincidencias a la derecha. */
+.search-file {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  height: 26px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.search-file:hover {
+  background: var(--surface-hover);
+}
+
+.search-file-name {
+  flex: 0 0 auto;
+  color: var(--text-strong);
+}
+
+.search-file-folder {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+}
+
+.search-file-count {
+  flex: 0 0 auto;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-muted);
+  font-size: 9.5px;
+  line-height: 15px;
+}
+
+.search-match {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 26px;
+  padding: 0 4px 0 19px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.search-match:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.search-line-number {
+  flex: 0 0 auto;
+  min-width: 28px;
+  text-align: right;
+  color: var(--text-faint);
+}
+
+.search-preview {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+
+/* La coincidencia dentro de la línea. `mark` trae fondo amarillo del navegador: se sustituye por
+   el acento del tema, que es el único color que en este IDE significa "esto es lo que buscas". */
+.search-preview mark {
+  padding: 0 1px;
+  border-radius: 2px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.search-match:hover .search-preview mark {
+  background: var(--accent-softer);
+}

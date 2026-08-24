@@ -149,6 +149,25 @@ describe('reconocer el orden de fábrica', () => {
  * herramienta —Fase 15 y Fase 17, las dos anotadas en `CLAUDE.md`—, y ahora además el usuario puede
  * reordenar la barra: no hay ninguna posición que se pueda dar por buena.
  */
+describe('la búsqueda es una herramienta más de la barra', () => {
+  it('está dada de alta', () => {
+    // Darla de alta aquí es lo que la hace reordenable, persistible y pulsable por `--ui=`. Es el
+    // paso que se olvidó dos veces al añadir una herramienta (Fase 15 y Fase 17).
+    assert.ok(isActivityTool('search'));
+    assert.ok(DEFAULT_ACTIVITY_ORDER.includes('search'));
+  });
+
+  it('a quien ya tenía la barra colocada le aparece al final, sin moverle nada', () => {
+    // El orden guardado por una versión anterior no la conoce: se completa por detrás en vez de
+    // insertarla en medio y desplazarle a alguien todo lo que tenía debajo.
+    const guardado = DEFAULT_ACTIVITY_ORDER.filter((id) => id !== 'search');
+    const orden = normalizeActivityOrder(guardado);
+
+    assert.deepEqual(orden.slice(0, guardado.length), guardado);
+    assert.equal(orden.at(-1), 'search');
+  });
+});
+
 describe('los modos de diagnóstico pulsan por identificador', () => {
   const main = readFileSync(join(root, 'src', 'main', 'main.ts'), 'utf8');
   const renderer = readFileSync(join(root, 'src', 'renderer', 'index.ts'), 'utf8');

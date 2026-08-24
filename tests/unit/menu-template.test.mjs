@@ -132,7 +132,11 @@ describe('lo que pide cada menú', () => {
 
     assert.ok(roles.includes('undo') && roles.includes('redo'));
     assert.ok(commands.includes('edit.find'));
-    assert.ok(commands.includes('edit.find-in-files'));
+    // Dos entradas distintas y las dos tienen que estar: buscar **dentro** de los archivos y
+    // filtrar el árbol por nombre. Tener sólo la segunda llamándose "buscar en archivos" fue lo
+    // que se evitó en la Fase 19 y lo que se arregla de verdad en la 20.
+    assert.ok(commands.includes('search.findInFiles'), 'falta la búsqueda de contenido');
+    assert.ok(commands.includes('edit.find-in-files'), 'falta el filtro por nombre del explorador');
     assert.ok(commands.includes('edit.format'));
     assert.ok(commands.includes('ai.inline'), 'el asistente en línea se pide desde Editar');
   });
@@ -153,6 +157,17 @@ describe('lo que pide cada menú', () => {
     ]) {
       assert.ok(commands.includes(expected), `falta ${expected} en Ver`);
     }
+  });
+
+  it('el atajo de toda la vida abre la búsqueda de contenido, no el filtro por nombre', () => {
+    // `Ctrl+Shift+F` es "buscar en los archivos" en cualquier editor. Mientras DotForge no supo
+    // buscar dentro, lo tenía el filtro del explorador; ahora que sabe, vuelve a su sitio.
+    const items = section(windows, 'Editar').items;
+    const buscar = items.find((item) => item.kind === 'command' && item.command === 'search.findInFiles');
+    const porNombre = items.find((item) => item.kind === 'command' && item.command === 'edit.find-in-files');
+
+    assert.equal(acceleratorOf(buscar), 'CmdOrCtrl+Shift+F');
+    assert.notEqual(acceleratorOf(porNombre), 'CmdOrCtrl+Shift+F');
   });
 
   /**
