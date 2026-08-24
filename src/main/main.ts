@@ -385,21 +385,22 @@ const uiAction = (() => {
 })();
 
 const UI_ACTIONS: Record<string, string> = {
-  // La barra de actividad, en orden: solución, control de código fuente, generador, NuGet,
-  // base de datos, contenedores, pruebas, depuración, IA, extensiones, [spacer], ajustes. Los
-  // índices son posicionales: si se añade una herramienta, hay que moverlos aquí, y por eso el
-  // orden está escrito arriba. La Fase 15 metió "pruebas" en el 6 y desplazó todo lo que venía
-  // detrás; la Fase 17 metió "extensiones" en el 9 y desplazó "ajustes" al 10.
-  git: "document.querySelectorAll('.activity-item')[1]?.click()",
-  wizard: "document.querySelectorAll('.activity-item')[2]?.click()",
-  nuget: "document.querySelectorAll('.activity-item')[3]?.click()",
-  efcore: "document.querySelectorAll('.activity-item')[4]?.click()",
-  containers: "document.querySelectorAll('.activity-item')[5]?.click()",
-  tests: "document.querySelectorAll('.activity-item')[6]?.click()",
-  debug: "document.querySelectorAll('.activity-item')[7]?.click()",
-  ai: "document.querySelectorAll('.activity-item')[8]?.click()",
-  extensions: "document.querySelectorAll('.activity-item')[9]?.click()",
-  settings: "document.querySelectorAll('.activity-item')[10]?.click()",
+  // La barra de actividad se pulsa por `data-tool-id`, no por posición.
+  //
+  // Los índices posicionales sobre `.activity-item` se rompieron en silencio dos veces al añadir
+  // una herramienta (la Fase 15 metió "pruebas" en el 6; la Fase 17, "extensiones" en el 9, que
+  // desplazó "ajustes" al 10), y desde que el usuario puede reordenar la barra arrastrando ya no
+  // hay ninguna posición que se pueda dar por buena.
+  git: "document.querySelector('.activity-item[data-tool-id=git]')?.click()",
+  wizard: "document.querySelector('.activity-item[data-tool-id=wizard]')?.click()",
+  nuget: "document.querySelector('.activity-item[data-tool-id=nuget]')?.click()",
+  efcore: "document.querySelector('.activity-item[data-tool-id=efcore]')?.click()",
+  containers: "document.querySelector('.activity-item[data-tool-id=containers]')?.click()",
+  tests: "document.querySelector('.activity-item[data-tool-id=tests]')?.click()",
+  debug: "document.querySelector('.activity-item[data-tool-id=debug]')?.click()",
+  ai: "document.querySelector('.activity-item[data-tool-id=ai]')?.click()",
+  extensions: "document.querySelector('.activity-item[data-tool-id=extensions]')?.click()",
+  settings: "document.querySelector('.activity-item[data-tool-id=settings]')?.click()",
   // La tarjeta de actualización con un estado de ejemplo: publicar una versión de verdad en
   // GitHub para poder mirarla no es una opción, y no mirarla nunca tampoco.
   update: 'window.__dotforgeUpdatePreview && window.__dotforgeUpdatePreview()',
@@ -414,10 +415,10 @@ const UI_ACTIONS: Record<string, string> = {
     ".find((button) => button.textContent?.includes('Monitorizar'))?.click(), 3000)",
   // Fase 15: el explorador de pruebas con el árbol ya descubierto, y la auditoría de NuGet.
   'tests-run':
-    "document.querySelectorAll('.activity-item')[6]?.click();" +
+    "document.querySelector('.activity-item[data-tool-id=tests]')?.click();" +
     'setTimeout(() => document.querySelector(".tests-run-all")?.click(), 4000)',
   audit:
-    "document.querySelectorAll('.activity-item')[3]?.click();" +
+    "document.querySelector('.activity-item[data-tool-id=nuget]')?.click();" +
     'setTimeout(() => [...document.querySelectorAll(".nuget-audit-head button")]' +
     ".find((button) => button.textContent?.includes('Analizar'))?.click(), 900)",
   palette: "document.querySelector('#statusbar button:last-of-type')?.click()",
@@ -425,12 +426,12 @@ const UI_ACTIONS: Record<string, string> = {
   // Dos pasos: abrir ajustes y pulsar "Claro". Se encadenan con un retardo porque la vista se
   // repinta entre uno y otro.
   light:
-    "document.querySelectorAll('.activity-item')[10]?.click();" +
+    "document.querySelector('.activity-item[data-tool-id=settings]')?.click();" +
     "setTimeout(() => [...document.querySelectorAll('.segmented button')]" +
     ".find((button) => button.textContent?.includes('Claro'))?.click(), 400)",
   // Despliega el grupo de archivos satélite de appsettings.json.
   'probe-theme':
-    "document.querySelectorAll('.activity-item')[10]?.click();" +
+    "document.querySelector('.activity-item[data-tool-id=settings]')?.click();" +
     "setTimeout(() => {" +
     "  [...document.querySelectorAll('.segmented button')].find((b) => b.textContent?.includes('Claro'))?.click();" +
     "  setTimeout(() => {" +
@@ -472,7 +473,7 @@ const UI_ACTIONS: Record<string, string> = {
   // Fase 11: conmuta "Activar el asistente" en Ajustes. Sirve para revisar a ojo el icono
   // atenuado de la barra de actividad; ejecutarlo dos veces deja la preferencia como estaba.
   'ai-toggle':
-    "document.querySelectorAll('.activity-item')[10]?.click();" +
+    "document.querySelector('.activity-item[data-tool-id=settings]')?.click();" +
     'setTimeout(() => {' +
     "  const row = [...document.querySelectorAll('.settings-toggle')]" +
     "    .find((label) => label.textContent?.includes('Activar el asistente'));" +
@@ -480,7 +481,7 @@ const UI_ACTIONS: Record<string, string> = {
     '}, 500)',
   // Fase 11: el panel de control de fuentes con una comparación abierta.
   'git-diff':
-    "document.querySelectorAll('.activity-item')[1]?.click();" +
+    "document.querySelector('.activity-item[data-tool-id=git]')?.click();" +
     "setTimeout(() => document.querySelector('.git-row')?.click(), 700)",
   nesting:
     "[...document.querySelectorAll('.tree-row')]" +

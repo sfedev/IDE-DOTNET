@@ -93,6 +93,23 @@ export type {
 } from '../shared/nuget-install.js';
 
 /**
+ * Orden de la barra de actividad.
+ *
+ * Lo guardado lo puede haber escrito otra versión del IDE o una mano humana, así que normalizarlo
+ * es una regla con casos borde de verdad: se prueba, no se supone.
+ */
+export {
+  ACTIVITY_TOOLS,
+  DEFAULT_ACTIVITY_ORDER,
+  isActivityTool,
+  isDefaultActivityOrder,
+  moveActivityTool,
+  normalizeActivityOrder,
+  PINNED_ACTIVITY_TOOL,
+} from '../shared/activity-bar.js';
+export type { ActivityToolId } from '../shared/activity-bar.js';
+
+/**
  * Cuándo se puede escribir en el editor.
  *
  * Es una regla con consecuencias muy visibles —un `readOnly` colado deja el editor mudo hasta

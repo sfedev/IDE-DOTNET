@@ -130,6 +130,27 @@
   background: var(--accent-soft);
 }
 
+/* --- Reordenar arrastrando ------------------------------------------------------------------
+   El icono que se arrastra se atenúa en vez de desaparecer: quien arrastra necesita seguir viendo
+   de dónde salió para saber cuánto lo ha movido. */
+.activity-item.dragging {
+  opacity: 0.4;
+  cursor: grabbing;
+}
+
+/* El destino se marca con la misma barra de acento que la herramienta activa, pero arriba: dice
+   "aquí es donde va a caer" sin inventarse un color nuevo. */
+.activity-item.drop-target::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  top: -3px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
 /* Barra fina a la izquierda: marca la herramienta activa sin añadir otro color. */
 .activity-item.active::before {
   content: '';
@@ -1590,6 +1611,12 @@ select.input {
   color: var(--text-faint);
   font-size: var(--text-xs);
   line-height: var(--leading-normal);
+}
+
+/* Pista al final de una fila de ajustes: dice cómo se hace algo que no se hace desde aquí. */
+.settings-hint {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
 }
 
 .section-title {

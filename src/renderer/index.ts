@@ -31,6 +31,8 @@ import { aiEntryState, AI_DISABLED_MESSAGE } from './ai-availability.js';
 import type { TunnelTool } from '../shared/dev-tunnel.js';
 import { TUNNEL_TOOLS, TunnelOutputScanner, TUNNEL_WARNING, tunnelInfo } from '../shared/dev-tunnel.js';
 import { findTests } from '../shared/test-explorer.js';
+import type { ActivityToolId } from '../shared/activity-bar.js';
+import { moveActivityTool, normalizeActivityOrder, PINNED_ACTIVITY_TOOL } from '../shared/activity-bar.js';
 import { byId, clear, el } from './dom.js';
 import { installIconGallery } from './icon-gallery.js';
 import { icon, type IconName } from './icons.js';
@@ -73,6 +75,8 @@ type SidebarView =
 class DotForgeApp {
   private info: AppInfo | null = null;
   private settings: AppSettings | null = null;
+  /** Herramienta que se está arrastrando en la barra de actividad. */
+  private draggedTool: string | null = null;
   private solution: SolutionInfo | null = null;
   private lsp: LspState = { status: 'idle', server: null, version: null, message: null, progress: null };
   private cursor: { line: number; column: number } | null = null;
@@ -716,54 +720,165 @@ class DotForgeApp {
     });
   }
 
-/**
+  /**
    * Barra de actividad.
    *
-   * Seis herramientas y nada más: solución, generador, NuGet, depuración, asistente y ajustes.
-   * Antes había también atajos de tema y paleta que ya viven en la barra de estado y en el
-   * teclado; tener la misma acción en tres sitios no la hace más accesible, sólo hace la barra
-   * más ruidosa.
+   * Diez herramientas y ajustes, y el usuario decide en qué orden. El orden vive en las
+   * preferencias (`activityBar.order`) y se cambia arrastrando los iconos: quien vive en el control
+   * de código fuente no tiene por qué bajar la vista hasta el sexto icono.
+   *
+   * Cada botón lleva su `data-tool-id`, y eso no es decoración: es lo que hace que los modos de
+   * diagnóstico `--ui=` sigan encontrando lo que buscan. Antes pulsaban por índice posicional y eso
+   * se rompió en silencio dos veces al añadir una herramienta; con un orden que además cambia el
+   * usuario, la posición ya no significa nada.
    */
   private renderActivityBar(): void {
     const bar = byId('activitybar');
     clear(bar);
 
-    const button = (
-      label: string,
-      iconName: IconName,
-      active: boolean,
-      onClick: () => void,
-      badge = false,
-    ): HTMLElement =>
-      el(
-        'button',
-        {
-          className: `activity-item${active ? ' active' : ''}`,
-          title: label,
-          attrs: { 'aria-label': label },
-          on: { click: onClick },
-        },
-        icon(iconName, { size: 20 }),
-        badge ? el('span', { className: 'badge-dot' }) : null,
-      );
+    for (const id of this.activityOrder()) {
+      bar.appendChild(this.activityButton(id));
+    }
 
+    bar.append(
+      el('div', { className: 'spacer' }),
+      // Ajustes no se arrastra: vive bajo el separador, al fondo, que es donde se busca.
+      this.activityEntry(PINNED_ACTIVITY_TOOL, 'Ajustes', 'settings', this.sidebarView === 'settings', () =>
+        this.showSettings(),
+      ),
+    );
+  }
+
+  private activityOrder(): ActivityToolId[] {
+    return normalizeActivityOrder(this.settings?.activityBar.order);
+  }
+
+  /**
+   * Un botón de la barra, ya arrastrable.
+   *
+   * `dragover` tiene que llamar a `preventDefault()` o el navegador no considera el elemento un
+   * destino válido y el `drop` no llega nunca — es el error clásico de HTML5 Drag and Drop, y falla
+   * en silencio: se ve el icono moverse con el ratón y al soltar no pasa nada.
+   */
+  private activityEntry(
+    id: string,
+    label: string,
+    iconName: IconName,
+    active: boolean,
+    onClick: () => void,
+    extra: HTMLElement | null = null,
+  ): HTMLElement {
+    const draggable = id !== PINNED_ACTIVITY_TOOL;
+
+    const node = el(
+      'button',
+      {
+        className: `activity-item${active ? ' active' : ''}`,
+        title: draggable ? `${label} — arrástralo para cambiarlo de sitio` : label,
+        attrs: { 'aria-label': label, 'data-tool-id': id },
+        on: { click: onClick },
+      },
+      icon(iconName, { size: 20 }),
+      extra,
+    );
+
+    if (!draggable) return node;
+
+    node.draggable = true;
+
+    node.addEventListener('dragstart', (event) => {
+      this.draggedTool = id;
+      node.classList.add('dragging');
+      event.dataTransfer?.setData('text/plain', id);
+      if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+    });
+
+    node.addEventListener('dragend', () => {
+      this.draggedTool = null;
+      node.classList.remove('dragging');
+      for (const item of byId('activitybar').querySelectorAll('.drop-target')) {
+        item.classList.remove('drop-target');
+      }
+    });
+
+    node.addEventListener('dragover', (event) => {
+      if (this.draggedTool === null || this.draggedTool === id) return;
+      // Sin esto el `drop` no llega: el destino se considera no válido.
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+      node.classList.add('drop-target');
+    });
+
+    node.addEventListener('dragleave', () => node.classList.remove('drop-target'));
+
+    node.addEventListener('drop', (event) => {
+      event.preventDefault();
+      node.classList.remove('drop-target');
+
+      const dragged = this.draggedTool ?? event.dataTransfer?.getData('text/plain') ?? null;
+      this.draggedTool = null;
+      if (dragged === null) return;
+
+      // El array actual se guarda en una variable: `moveActivityTool` devuelve **el mismo** cuando
+      // no hay nada que mover, y compararlo contra otra llamada a `activityOrder()` no serviría de
+      // nada porque cada llamada normaliza y devuelve uno nuevo. Así un arrastre que acaba donde
+      // empezó no escribe las preferencias por nada.
+      const current = this.activityOrder();
+      const order = moveActivityTool(current, dragged, id);
+      if (order === current) return;
+
+      void this.applySettings({ activityBar: { order } });
+    });
+
+    return node;
+  }
+
+  /** Traduce un identificador de herramienta a su botón, con su estado y su insignia. */
+  private activityButton(id: ActivityToolId): HTMLElement {
     const errors = this.panel.getDiagnostics().filter((diagnostic) => diagnostic.severity === 'error').length;
     const changes = this.git?.dirtyFiles ?? 0;
 
-    bar.append(
-      button('Explorador de soluciones', 'solution', this.sidebarView === 'explorer', () => this.showExplorer()),
-      this.sourceControlButton(changes),
-      button('Generador de arquitecturas', 'wand', false, () => void this.wizard.open()),
-      this.nugetButton(),
-      button('Base de datos y EF Core', 'database', this.sidebarView === 'efcore', () => this.showEfCore()),
-      button('Contenedores y Docker Compose', 'package', this.sidebarView === 'containers', () => this.showContainers()),
-      this.testsButton(),
-      button('Depuración', 'bug', false, () => this.panel.show('debug'), errors > 0),
-      this.aiButton(),
-      button('Extensiones', 'puzzle', this.sidebarView === 'extensions', () => this.showExtensions()),
-      el('div', { className: 'spacer' }),
-      button('Ajustes', 'settings', this.sidebarView === 'settings', () => this.showSettings()),
-    );
+    switch (id) {
+      case 'explorer':
+        return this.activityEntry('explorer', 'Explorador de soluciones', 'solution', this.sidebarView === 'explorer', () =>
+          this.showExplorer(),
+        );
+      case 'git':
+        return this.sourceControlButton(changes);
+      case 'wizard':
+        return this.activityEntry('wizard', 'Generador de arquitecturas', 'wand', false, () => void this.wizard.open());
+      case 'nuget':
+        return this.nugetButton();
+      case 'efcore':
+        return this.activityEntry('efcore', 'Base de datos y EF Core', 'database', this.sidebarView === 'efcore', () =>
+          this.showEfCore(),
+        );
+      case 'containers':
+        return this.activityEntry(
+          'containers',
+          'Contenedores y Docker Compose',
+          'package',
+          this.sidebarView === 'containers',
+          () => this.showContainers(),
+        );
+      case 'tests':
+        return this.testsButton();
+      case 'debug':
+        return this.activityEntry(
+          'debug',
+          'Depuración',
+          'bug',
+          false,
+          () => this.panel.show('debug'),
+          errors > 0 ? el('span', { className: 'badge-dot' }) : null,
+        );
+      case 'ai':
+        return this.aiButton();
+      case 'extensions':
+        return this.activityEntry('extensions', 'Extensiones', 'puzzle', this.sidebarView === 'extensions', () =>
+          this.showExtensions(),
+        );
+    }
   }
 
   /**
@@ -775,15 +890,12 @@ class DotForgeApp {
   private testsButton(): HTMLElement {
     const failed = this.testsView.failedCount();
 
-    return el(
-      'button',
-      {
-        className: `activity-item${this.sidebarView === 'tests' ? ' active' : ''}`,
-        title: failed > 0 ? `Explorador de pruebas — ${failed} en rojo` : 'Explorador de pruebas',
-        attrs: { 'aria-label': 'Explorador de pruebas' },
-        on: { click: () => this.showTests() },
-      },
-      icon('flask', { size: 20 }),
+    return this.activityEntry(
+      'tests',
+      failed > 0 ? `Explorador de pruebas — ${failed} en rojo` : 'Explorador de pruebas',
+      'flask',
+      this.sidebarView === 'tests',
+      () => this.showTests(),
       failed > 0 ? el('span', { className: 'activity-count danger', text: failed > 99 ? '99+' : String(failed) }) : null,
     );
   }
@@ -792,18 +904,12 @@ class DotForgeApp {
   private nugetButton(): HTMLElement {
     const vulnerable = this.nuget.vulnerableCount();
 
-    return el(
-      'button',
-      {
-        className: `activity-item${this.sidebarView === 'nuget' ? ' active' : ''}`,
-        title:
-          vulnerable > 0
-            ? `Paquetes NuGet — ${vulnerable} con aviso de seguridad`
-            : 'Paquetes NuGet',
-        attrs: { 'aria-label': 'Paquetes NuGet' },
-        on: { click: () => this.showNuGet() },
-      },
-      icon('package', { size: 20 }),
+    return this.activityEntry(
+      'nuget',
+      vulnerable > 0 ? `Paquetes NuGet — ${vulnerable} con aviso de seguridad` : 'Paquetes NuGet',
+      'package',
+      this.sidebarView === 'nuget',
+      () => this.showNuGet(),
       vulnerable > 0
         ? el('span', { className: 'activity-count danger', text: vulnerable > 99 ? '99+' : String(vulnerable) })
         : null,
@@ -812,15 +918,12 @@ class DotForgeApp {
 
   /** Control de código fuente, con el número de archivos con cambios como insignia. */
   private sourceControlButton(changes: number): HTMLElement {
-    return el(
-      'button',
-      {
-        className: `activity-item${this.sidebarView === 'git' ? ' active' : ''}`,
-        title: changes > 0 ? `Control de código fuente — ${changes} cambio(s)` : 'Control de código fuente',
-        attrs: { 'aria-label': 'Control de código fuente' },
-        on: { click: () => this.showGit() },
-      },
-      icon('source-control', { size: 20 }),
+    return this.activityEntry(
+      'git',
+      changes > 0 ? `Control de código fuente — ${changes} cambio(s)` : 'Control de código fuente',
+      'source-control',
+      this.sidebarView === 'git',
+      () => this.showGit(),
       changes > 0 ? el('span', { className: 'activity-count', text: changes > 99 ? '99+' : String(changes) }) : null,
     );
   }
@@ -838,25 +941,18 @@ class DotForgeApp {
       this.aiStatus?.ready === true,
     );
 
-    return el(
-      'button',
-      {
-        className: `${state.className}${this.sidebarView === 'ai' && state.navigates ? ' active' : ''}`,
-        title: state.title,
-        attrs: {
-          'aria-label': state.title,
-          'aria-disabled': String(state.disabled),
-        },
-        on: {
-          click: () => {
-            // Deshabilitado: se bloquea la navegación y no se hace absolutamente nada.
-            if (!state.navigates) return;
-            this.showAi();
-          },
-        },
-      },
-      icon('sparkles', { size: 20 }),
-    );
+    const node = this.activityEntry('ai', state.title, 'sparkles', this.sidebarView === 'ai' && state.navigates, () => {
+      // Deshabilitado: se bloquea la navegación y no se hace absolutamente nada.
+      if (!state.navigates) return;
+      this.showAi();
+    });
+
+    // El estado atenuado lo decide `aiEntryState` (ADR-023) y trae su propia clase: se aplica
+    // encima, conservando la marca de activa que haya puesto `activityEntry`.
+    node.className = `${state.className}${node.classList.contains('active') ? ' active' : ''}`;
+    node.setAttribute('aria-disabled', String(state.disabled));
+
+    return node;
   }
 
   /** Deja visible una sola vista de la barra lateral: comparten contenedor. */
@@ -1038,6 +1134,11 @@ class DotForgeApp {
       this.renderActivityBar();
       void this.refreshAiStatus();
     }
+
+    // Reordenar la barra: se repinta desde lo que ha confirmado el proceso principal, no desde lo
+    // que se le mandó. Sin esto, soltar un icono no movía nada a la vista hasta el siguiente
+    // repintado por otro motivo, y parecía que el arrastre no había funcionado.
+    if (patch.activityBar !== undefined) this.renderActivityBar();
 
     // El nivel de salida cambia el comando de la próxima tarea, no la que ya está corriendo:
     // decirlo evita el "pues a mí me sigue saliendo lo mismo".

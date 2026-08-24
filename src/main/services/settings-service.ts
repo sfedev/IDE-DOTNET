@@ -10,6 +10,7 @@ import { dirname, join } from 'node:path';
 
 import type { AppSettings } from '../../shared/contracts.js';
 import { DEFAULT_SETTINGS } from '../../shared/contracts.js';
+import { normalizeActivityOrder } from '../../shared/activity-bar.js';
 import { coerceVerbosity } from '../../shared/dotnet-verbosity.js';
 import { coerceAiSettings } from './ai/preferences.js';
 
@@ -52,6 +53,12 @@ function coerce(raw: unknown): AppSettings {
   // Un nivel desconocido (de otra versión, o escrito a mano) vuelve al de por defecto en vez de
   // acabar como argumento de `dotnet build`.
   settings.dotnetVerbosity = coerceVerbosity(source['dotnetVerbosity']);
+
+  // El orden de la barra lo puede haber escrito otra versión del IDE o una mano humana: se
+  // normaliza a un orden completo en vez de creérselo. Una barra a la que le falta una herramienta
+  // porque el archivo venía de la versión anterior es un icono que desaparece sin explicación.
+  const activityBar = (source['activityBar'] ?? {}) as Record<string, unknown>;
+  settings.activityBar = { order: normalizeActivityOrder(activityBar['order']) };
 
   // El asistente valida sus propias preferencias: el endpoint acaba siendo el destino de una
   // petición con la clave de API dentro, así que no basta con "es una cadena".

@@ -10,6 +10,7 @@
  */
 import type { AiProbeResult, AiProviderId, AiSettings, AiStatus } from '../../shared/ai.js';
 import { AI_PROVIDERS, providerInfo } from '../../shared/ai.js';
+import { DEFAULT_ACTIVITY_ORDER, isDefaultActivityOrder } from '../../shared/activity-bar.js';
 import type { AppSettings, UpdateState } from '../../shared/contracts.js';
 import type { DotnetVerbosity } from '../../shared/dotnet-verbosity.js';
 import { DOTNET_VERBOSITY_INFO, verbosityInfo } from '../../shared/dotnet-verbosity.js';
@@ -82,6 +83,7 @@ export class SettingsView {
         this.stepperRow('Tabulación', settings.tabSize, 1, 8, (value) => this.host.apply({ tabSize: value })),
         this.toggleRow('Minimapa', settings.minimap, (value) => this.host.apply({ minimap: value })),
         this.toggleRow('Ajuste de línea', settings.wordWrap, (value) => this.host.apply({ wordWrap: value })),
+        this.activityOrderRow(settings.activityBar.order),
       ]),
 
       this.group('Editor', [
@@ -119,6 +121,31 @@ export class SettingsView {
     );
 
     container.appendChild(body);
+  }
+
+  /**
+   * Orden de la barra de actividad.
+   *
+   * No hay aquí una lista para reordenar: se reordena arrastrando los propios iconos, que es donde
+   * están y donde se ve el resultado. Lo que sí hace falta es la salida de emergencia — quien
+   * arrastre hasta dejarla irreconocible tiene que poder volver sin editar un JSON—, y sólo se
+   * ofrece cuando hay algo que deshacer.
+   */
+  private activityOrderRow(order: readonly string[]): HTMLElement {
+    const isDefault = isDefaultActivityOrder(order);
+
+    return el(
+      'div',
+      { className: 'settings-row' },
+      el('span', { text: 'Barra de actividad' }),
+      isDefault
+        ? el('span', { className: 'settings-hint', text: 'Arrastra los iconos para ordenarla' })
+        : el('button', {
+            className: 'btn small',
+            text: 'Restaurar el orden',
+            on: { click: () => this.host.apply({ activityBar: { order: [...DEFAULT_ACTIVITY_ORDER] } }) },
+          }),
+    );
   }
 
   // --- Piezas -----------------------------------------------------------------------------------

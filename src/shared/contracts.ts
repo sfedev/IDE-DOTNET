@@ -37,6 +37,12 @@ import type { RunMode, StartupConfig } from './startup.js';
 import type { DotnetVerbosity } from './dotnet-verbosity.js';
 import { DEFAULT_DOTNET_VERBOSITY } from './dotnet-verbosity.js';
 
+// El orden de la barra de actividad lo personaliza el usuario y se guarda en las preferencias; su
+// modelo (identificadores, orden de fábrica y normalización) es puro y vive aparte.
+export type { ActivityToolId } from './activity-bar.js';
+import type { ActivityToolId } from './activity-bar.js';
+import { DEFAULT_ACTIVITY_ORDER } from './activity-bar.js';
+
 // El control de código fuente tiene su propio módulo de modelo (parseo de `git status`, diffs),
 // pero su superficie IPC es parte del contrato: se reexporta para que preload, los handlers y el
 // renderer importen de un único sitio.
@@ -517,8 +523,20 @@ export interface AppSettings {
    * en una máquina sin red o detrás de un proxy corporativo.
    */
   autoUpdateCheck: boolean;
+  /**
+   * Personalización de la barra de actividad.
+   *
+   * `order` son identificadores de herramienta (`ACTIVITY_TOOLS` en `src/shared/activity-bar.ts`),
+   * no posiciones: un orden guardado por otra versión del IDE tiene que seguir dando una barra
+   * completa, y `normalizeActivityOrder` se encarga de eso al leerlo.
+   */
+  activityBar: ActivityBarSettings;
   /** Preferencias del asistente de IA. Las claves de API NO viven aquí: ver `secret-store.ts`. */
   ai: AiSettings;
+}
+
+export interface ActivityBarSettings {
+  order: ActivityToolId[];
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -535,6 +553,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   lspEnabled: true,
   dotnetVerbosity: DEFAULT_DOTNET_VERBOSITY,
   autoUpdateCheck: true,
+  activityBar: { order: DEFAULT_ACTIVITY_ORDER },
   ai: DEFAULT_AI_SETTINGS,
 };
 
