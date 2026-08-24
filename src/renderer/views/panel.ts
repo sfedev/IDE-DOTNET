@@ -11,10 +11,17 @@
  *    peor, destruía el input de la terminal mientras se escribía en él. Ahora se añade sólo la
  *    línea nueva al log visible.
  */
-import type { BuildDiagnostic, DotnetTaskExit, DotnetTaskStarted, ProjectKind } from '../../shared/contracts.js';
+import type {
+  BuildDiagnostic,
+  DotnetTaskExit,
+  DotnetTaskStarted,
+  ProjectKind,
+  TerminalCwd,
+} from '../../shared/contracts.js';
 import type { LogEvent, LogLevel } from '../../shared/log-events.js';
 import { countByLevel, filterEvents, firstNavigableFrame, LEVEL_LABEL, parseLogEvents } from '../../shared/log-events.js';
-import { byId, clear, el } from '../dom.js';
+import { byId, clear, el, repaintPreservingFocus } from '../dom.js';
+import { FOCUS_KEY_ATTRIBUTE } from '../focus-guard.js';
 import { presentProject } from '../file-icons.js';
 import { icon, type IconName } from '../icons.js';
 import { detectListeningUrl, portOf } from '../run-output.js';
@@ -196,6 +203,9 @@ export class PanelView {
   private suggestionIndex = 0;
   private suggestMenuOpen = false;
   private terminalInput: HTMLInputElement | null = null;
+  /** Ruta del prompt, para poder repintarla sin reconstruir la terminal. */
+  private promptPath: HTMLElement | null = null;
+  private terminalCwd: TerminalCwd | null = null;
 
   constructor(private readonly host: PanelHost) {}
 
@@ -457,6 +467,35 @@ export class PanelView {
     this.taskChannel.set(taskId, TERMINAL_CHANNEL);
   }
 
+  /**
+   * Directorio de trabajo de la terminal.
+   *
+   * Se guarda entero (ruta y forma corta) y no sólo la forma corta: el `title` del prompt enseña la
+   * ruta completa al pasar el ratón, y una forma corta no se puede volver a expandir.
+   */
+  setTerminalCwd(cwd: TerminalCwd): void {
+    this.terminalCwd = cwd;
+    this.paintPrompt();
+  }
+
+  /** Escribe una línea en el canal de la terminal, sin que la haya producido ningún proceso. */
+  appendTerminalLine(text: string, stream: 'stdout' | 'stderr' = 'stdout'): void {
+    this.push(TERMINAL_CHANNEL, text, stream === 'stderr' ? 'error' : 'plain');
+  }
+
+  /**
+   * Repinta sólo la ruta del prompt.
+   *
+   * En sitio, sin volver a construir la terminal: repintar la pestaña entera destruiría el `<input>`
+   * enfocado a mitad de escritura, que es exactamente el fallo que costó caro en los paneles de
+   * búsqueda (ADR-052). Aquí ni siquiera hace falta conservar el foco: no se toca el campo.
+   */
+  private paintPrompt(): void {
+    if (!this.promptPath) return;
+    this.promptPath.textContent = this.terminalCwd?.display ?? '';
+    this.promptPath.title = this.terminalCwd?.path ?? '';
+  }
+
   taskStarted(task: DotnetTaskStarted): void {
     this.runningTasks.set(task.taskId, task);
 
@@ -550,7 +589,20 @@ export class PanelView {
 
   // --- Render ---------------------------------------------------------------------------------
 
+  /**
+   * Repinta el panel.
+   *
+   * Va envuelto en `repaintPreservingFocus` (ADR-052) por un motivo muy concreto: `taskStarted` y
+   * `taskFinished` llaman aquí, y con la terminal a la vista eso reconstruye el `<input>` en el que
+   * se está escribiendo. Se notaba justo cuando más molesta — al lanzar un comando, que es cuando
+   * uno se dispone a escribir el siguiente — y también con cualquier tarea de fondo que terminara
+   * mientras se tecleaba.
+   */
   render(): void {
+    repaintPreservingFocus(byId('panel-content'), () => this.paint());
+  }
+
+  private paint(): void {
     this.renderTabs();
 
     const content = byId('panel-content');
@@ -1085,6 +1137,7 @@ export class PanelView {
       log.append(
         el('div', { text: `Programas disponibles: ${this.allowedCommands.join(', ') || 'dotnet, git, npm'}` }),
         el('div', { text: 'Escribe "git " o "dotnet " y pulsa Tab o → para completar la sugerencia.' }),
+        el('div', { text: 'Navega con "cd", vuelve a la solución con "cd" a secas y mira dónde estás con "pwd".' }),
         el('div', {
           text: 'Sin pseudoterminal: los programas interactivos (REPL, editores de consola) no funcionarán.',
         }),
@@ -1100,8 +1153,14 @@ export class PanelView {
 
     const input = el('input', {
       className: 'input',
-      placeholder: 'dotnet build   ·   git status   ·   ↑↓ historial   ·   Tab completa',
-      attrs: { 'aria-label': 'Comando', autocomplete: 'off', spellcheck: 'false' },
+      placeholder: 'cd src   ·   dotnet build   ·   git status   ·   ↑↓ historial   ·   Tab completa',
+      attrs: {
+        'aria-label': 'Comando',
+        autocomplete: 'off',
+        spellcheck: 'false',
+        // Sobrevive a los repintados del panel: ver la nota de `render()`.
+        [FOCUS_KEY_ATTRIBUTE]: 'terminal-input',
+      },
     }) as HTMLInputElement;
 
     this.terminalInput = input;
@@ -1207,7 +1266,25 @@ export class PanelView {
       }
     });
 
-    container.append(log, el('div', { className: 'terminal-prompt' }, el('span', { className: 'caret', text: '❯' }), wrap));
+    // El prompt lleva la ruta delante, como cualquier terminal del sistema: sin ella no hay forma
+    // de saber dónde acaba de dejarte un `cd`, y navegar a ciegas no es navegar.
+    const promptPath = el('span', {
+      className: 'terminal-cwd',
+      text: this.terminalCwd?.display ?? '',
+      title: this.terminalCwd?.path ?? '',
+    });
+    this.promptPath = promptPath;
+
+    container.append(
+      log,
+      el(
+        'div',
+        { className: 'terminal-prompt' },
+        promptPath,
+        el('span', { className: 'caret', text: '❯' }),
+        wrap,
+      ),
+    );
 
     setTimeout(() => {
       input.focus();

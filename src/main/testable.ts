@@ -50,6 +50,32 @@ export {
 export { readNpmScripts } from './services/node-scripts.js';
 export { describeRecents, firstAvailable, isOpenableWorkspace } from './services/workspace-recents.js';
 export { ALLOWED_COMMANDS, CommandError, tokenize } from './services/command-runner.js';
+
+/**
+ * Sesión de la terminal: el directorio de trabajo y las órdenes que no lanzan proceso.
+ *
+ * Se exporta el módulo entero porque su estado es de sesión (dónde está el usuario) y las pruebas
+ * necesitan poder fijarlo, moverlo y devolverlo a cero.
+ */
+/**
+ * Navegación de la terminal: qué línea es un `cd` y cómo se enseña la ruta en el prompt.
+ *
+ * Lo consume el proceso principal —es él quien resuelve contra el disco y quien compone el prompt
+ * que manda al renderer—, así que se prueba desde este bundle y no desde el de la interfaz.
+ */
+export {
+  classifyLine,
+  elide,
+  isBareDrive,
+  isInsideDirectory,
+  resolveTarget,
+  shortenPath,
+  TerminalCwdError,
+} from '../shared/terminal-cwd.js';
+export type { DirectoryTarget, ResolveContext, ShortenOptions, TerminalIntent } from '../shared/terminal-cwd.js';
+
+export * as terminalSession from './services/terminal-session.js';
+export type { SessionContext, TerminalLineOutcome } from './services/terminal-session.js';
 export {
   environmentFromProfile,
   parseLaunchSettings,

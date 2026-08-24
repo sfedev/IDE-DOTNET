@@ -453,6 +453,26 @@ export interface TerminalContext {
   dockerAvailable: boolean;
 }
 
+/** Directorio de trabajo de la terminal: la ruta real y cómo se enseña en el prompt. */
+export interface TerminalCwd {
+  path: string;
+  display: string;
+}
+
+/**
+ * Resultado de mandarle una línea a la terminal.
+ *
+ * `task` es null cuando la línea no lanza ningún proceso —un `cd`, un `pwd`—, y en ese caso lo que
+ * hay que enseñar viene en `output`. Un único canal para las dos cosas: la alternativa era que el
+ * renderer decidiera antes de enviar si la línea era un `cd`, y entonces habría dos sitios que
+ * saben qué es un cambio de directorio.
+ */
+export interface TerminalRunResult {
+  task: DotnetTaskStarted | null;
+  cwd: TerminalCwd;
+  output: string[];
+}
+
 /**
  * Estado del motor de Docker.
  *
@@ -628,6 +648,7 @@ export const IPC = {
   terminalRun: 'terminal:run',
   terminalAllowed: 'terminal:allowed',
   terminalContext: 'terminal:context',
+  terminalCwd: 'terminal:cwd',
 
   nugetSearch: 'nuget:search',
   nugetVersions: 'nuget:versions',
@@ -893,8 +914,13 @@ export interface DotForgeApi {
     listTasks(): Promise<DotnetTaskStarted[]>;
   };
   terminal: {
-    /** Ejecuta una línea de comandos en el workspace. Devuelve la tarea para poder cancelarla. */
-    run(line: string): Promise<DotnetTaskStarted>;
+    /**
+     * Ejecuta una línea en el directorio actual de la terminal.
+     *
+     * Un `cd` o un `pwd` no lanzan proceso: vuelven con `task: null` y lo que haya que imprimir en
+     * `output`. El resto devuelven la tarea, para poder cancelarla.
+     */
+    run(line: string): Promise<TerminalRunResult>;
     /** Programas que la terminal admite. La UI los muestra como ayuda. */
     allowed(): Promise<string[]>;
     /**
@@ -902,6 +928,8 @@ export interface DotForgeApi {
      * Las ramas de git y los proyectos los pone el renderer, que ya los tiene.
      */
     context(): Promise<TerminalContext>;
+    /** Directorio de trabajo actual. Lo pide el panel al pintar el prompt. */
+    cwd(): Promise<TerminalCwd>;
   };
   nuget: {
     search(query: string, includePrerelease: boolean): Promise<NuGetSearchResult[]>;

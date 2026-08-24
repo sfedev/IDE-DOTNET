@@ -27,6 +27,8 @@ import type {
   RecentWorkspace,
   SolutionInfo,
   TerminalContext,
+  TerminalCwd,
+  TerminalRunResult,
 } from '../../shared/contracts.js';
 import type { GitDiffRequest } from '../../shared/git.js';
 import type { EfOperation, EfOperationOptions } from '../../shared/efcore.js';
@@ -66,6 +68,7 @@ import * as aiService from '../services/ai/ai-service.js';
 import * as aiSecrets from '../services/ai/secret-store.js';
 import { AiRequestError, coerceChatRequest } from '../services/ai/validate.js';
 import * as commandRunner from '../services/command-runner.js';
+import * as terminalSession from '../services/terminal-session.js';
 import * as dockerService from '../services/docker-service.js';
 import * as dotnetService from '../services/dotnet-service.js';
 import * as efcoreService from '../services/efcore-service.js';
@@ -173,6 +176,9 @@ async function openWorkspaceDirectory(directory: string): Promise<SolutionInfo> 
   currentSolution = await loadSolution(directory);
 
   await settingsService.rememberWorkspace(directory);
+  // La terminal se muda con la solución: seguir en la carpeta de la anterior es defendible en la
+  // teoría y desconcertante en la práctica.
+  syncTerminalContext();
   broadcast(IPC_EVENTS.workspaceChanged, currentSolution);
 
   // El LSP se arranca en segundo plano: abrir una carpeta no debe bloquearse por una descarga.
@@ -352,7 +358,25 @@ async function startLanguageServer(): Promise<LspState> {
 // Registro
 // ---------------------------------------------------------------------------------------------
 
+/**
+ * Pone al día el contexto de la terminal con el workspace abierto.
+ *
+ * Vive aparte porque hay tres momentos que lo necesitan —abrir, cerrar y arrancar— y en los tres
+ * hay que decirle lo mismo: dónde está el hogar, cuál es la raíz y cómo se llama.
+ */
+function syncTerminalContext(): void {
+  terminalSession.setContext({
+    home: app.getPath('home'),
+    workspace: currentSolution?.directory ?? null,
+    workspaceName: currentSolution?.name ?? null,
+  });
+}
+
 export function registerIpcHandlers(): void {
+  // Sin workspace la terminal arranca en la carpeta personal, que es donde arranca cualquier
+  // terminal del sistema.
+  syncTerminalContext();
+
   debugController.on('state', (state: DebugState) => broadcast(IPC_EVENTS.debugStateChanged, state));
   debugController.on('stopped', (payload) => broadcast(IPC_EVENTS.debugStopped, payload));
   debugController.on('output', (payload) => broadcast(IPC_EVENTS.debugOutput, payload));
@@ -469,6 +493,7 @@ export function registerIpcHandlers(): void {
     await lspClient.stop();
     currentSolution = null;
     setWorkspaceRoot(null);
+    syncTerminalContext();
     broadcast(IPC_EVENTS.workspaceChanged, null);
   });
 
@@ -828,15 +853,35 @@ export function registerIpcHandlers(): void {
     };
   });
 
-  ipcMain.handle(IPC.terminalRun, (_event, line: unknown) => {
-    if (!currentSolution) throw new Error('abre una carpeta antes de usar la terminal');
+  ipcMain.handle(IPC.terminalCwd, (): TerminalCwd => terminalSession.cwd());
 
-    return commandRunner.runCommand(requireString(line, 'line'), currentSolution.directory, {
+  /**
+   * Ejecuta una línea en el directorio actual de la terminal.
+   *
+   * El orden importa: **primero se mira si la línea es una orden del intérprete** (`cd`, `pwd`) y
+   * sólo si no lo es se lanza un programa. Al revés, `cd src` buscaría un programa llamado `cd`,
+   * que es exactamente lo que pasaba antes y por lo que no se podía navegar.
+   *
+   * Ya no hace falta tener una solución abierta: la terminal arranca en la carpeta personal y desde
+   * ahí se puede ir a donde sea. Exigir un workspace para poder escribir `git status` en otra
+   * carpeta era una restricción sin nada detrás.
+   */
+  ipcMain.handle(IPC.terminalRun, async (_event, line: unknown): Promise<TerminalRunResult> => {
+    const text = requireString(line, 'line');
+    const argv = commandRunner.tokenize(text);
+
+    const builtin = await terminalSession.handleBuiltin(argv);
+    if (builtin !== null) return { task: null, cwd: builtin.cwd, output: builtin.output };
+
+    const here = terminalSession.cwd();
+    const task = commandRunner.runCommand(text, here.path, {
       onStarted: (payload) => broadcast(IPC_EVENTS.taskStarted, payload),
       onOutput: (payload) => broadcast(IPC_EVENTS.taskOutput, payload),
       onExit: (payload) =>
         broadcast(IPC_EVENTS.taskExit, { ...payload, diagnostics: [], applicationUrl: null }),
     });
+
+    return { task, cwd: here, output: [] };
   });
 
   // --- NuGet ----------------------------------------------------------------------------------
@@ -1240,6 +1285,11 @@ export async function openWorkspaceFromCli(path: string): Promise<SolutionInfo |
     setWorkspaceRoot(directory);
     currentSolution = await loadSolution(directory);
     await settingsService.rememberWorkspace(directory);
+    // Este camino no pasa por `openWorkspaceDirectory` —no hay renderer al que avisar todavía—, así
+    // que tiene que poner al día el contexto de la terminal por su cuenta. Sin esto, arrancar con
+    // `--open=` o con `dotforge-ide .` dejaba la terminal en la carpeta personal mientras el
+    // explorador enseñaba la solución: dos verdades a la vez.
+    syncTerminalContext();
 
     return currentSolution;
   } catch (error) {

@@ -668,6 +668,27 @@
   background: var(--surface-1);
 }
 
+/* Ruta del prompt.
+   En `--text-muted` y no en el acento: es contexto permanente, y algo que está siempre en pantalla
+   no puede competir en atención con lo que sí cambia — el acento marca lo activo, y si todo es
+   acento el acento no significa nada. `flex: none` para que sea el `<input>` el que se lleve el
+   hueco sobrante, y `max-width` para que una ruta larga en una ventana estrecha no deje la caja de
+   escritura sin sitio. */
+.terminal-cwd {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.terminal-cwd:empty {
+  display: none;
+}
+
 .terminal-prompt .caret {
   color: var(--accent);
   font-family: var(--font-mono);

@@ -51,6 +51,8 @@ import type {
   RecentWorkspace,
   SolutionInfo,
   TerminalContext,
+  TerminalCwd,
+  TerminalRunResult,
   AuditReport,
   TestCase,
   TestRunRequest,
@@ -172,9 +174,10 @@ const api: DotForgeApi = {
   },
 
   terminal: {
-    run: (line) => ipcRenderer.invoke(IPC.terminalRun, line) as Promise<DotnetTaskStarted>,
+    run: (line) => ipcRenderer.invoke(IPC.terminalRun, line) as Promise<TerminalRunResult>,
     allowed: () => ipcRenderer.invoke(IPC.terminalAllowed) as Promise<string[]>,
     context: () => ipcRenderer.invoke(IPC.terminalContext) as Promise<TerminalContext>,
+    cwd: () => ipcRenderer.invoke(IPC.terminalCwd) as Promise<TerminalCwd>,
   },
 
   nuget: {

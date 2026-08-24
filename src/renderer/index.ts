@@ -646,20 +646,27 @@ class DotForgeApp {
     this.startupBar.render();
   }
 
-  /** Ejecuta una línea escrita en la terminal integrada. */
+  /**
+   * Ejecuta una línea escrita en la terminal integrada.
+   *
+   * Ya no se exige tener una carpeta abierta: la terminal arranca en la carpeta personal y desde
+   * ahí se navega con `cd`. Pedir un workspace para poder escribir `git status` en otro sitio era
+   * una restricción sin nada detrás.
+   *
+   * Una línea puede no lanzar ningún proceso —`cd`, `pwd`—: entonces vuelve con `task: null` y lo
+   * que hay que enseñar viene en `output`.
+   */
   private async runTerminalCommand(line: string): Promise<void> {
-    if (!this.solution) {
-      this.notify('Abre una carpeta antes de usar la terminal.', 'warn');
-      return;
-    }
-
     try {
-      const started = await window.dotforge.terminal.run(line);
+      const result = await window.dotforge.terminal.run(line);
+
+      this.panel.setTerminalCwd(result.cwd);
+      for (const text of result.output) this.panel.appendTerminalLine(text);
+
       // La salida de la terminal va a su propio canal, no al de compilación.
-      this.panel.attachTerminalTask(started.taskId);
+      if (result.task !== null) this.panel.attachTerminalTask(result.task.taskId);
     } catch (error) {
-      this.panel.append(`${this.messageOf(error)}
-`, 'stderr');
+      this.panel.appendTerminalLine(this.messageOf(error), 'stderr');
     }
   }
 
@@ -1306,6 +1313,15 @@ class DotForgeApp {
       this.panel.setAllowedCommands(context.programs);
     } catch {
       // Sin contexto se sigue autocompletando lo que no depende de él (git, dotnet).
+    }
+
+    // El directorio va aparte: es barato, no depende de Docker y tiene que llegar aunque la
+    // consulta de arriba se caiga. Si el contexto y el prompt compartieran `try`, quedarse sin
+    // Docker dejaría el prompt en blanco, que es peor que quedarse sin autocompletado.
+    try {
+      this.panel.setTerminalCwd(await window.dotforge.terminal.cwd());
+    } catch {
+      // Sin ruta, el prompt se queda con la que tuviera: es sólo presentación.
     }
   }
 

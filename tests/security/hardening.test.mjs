@@ -601,6 +601,32 @@ describe('terminal integrada', () => {
     }
   });
 
+  /**
+   * La frontera de la terminal es **qué se ejecuta**, no **desde dónde** (ADR-055).
+   *
+   * Desde la v2.3.0 el usuario navega libremente con `cd`, así que el `cwd` ya no está atado al
+   * workspace. Eso hace que las dos garantías que sí importan pesen más, no menos: sin shell y con
+   * lista blanca. Estas aserciones existen para que relajar el `cwd` no acabe arrastrando consigo
+   * lo demás en una revisión futura.
+   */
+  it('la navegación libre no ha relajado el aislamiento del ejecutor', () => {
+    const runner = readSource('src/main/services/command-runner.ts');
+
+    assert.match(runner, /shell: false/);
+    assert.match(runner, /ALLOWED_COMMANDS\.has\(program\.toLowerCase\(\)\)/);
+    // El argv se pasa como array; una línea de shell reintroduciría la inyección de comandos.
+    assert.match(runner, /spawn\(program, argv\.slice\(1\)/);
+  });
+
+  it('el cambio de directorio comprueba que el destino existe y es una carpeta', () => {
+    const session = readSource('src/main/services/terminal-session.ts');
+
+    assert.match(session, /info\.isDirectory\(\)/);
+    assert.match(session, /TerminalCwdError/);
+    // Resuelto antes de tocar el disco: lo que se comprueba y lo que se usa son la misma ruta.
+    assert.match(session, /resolve\(/);
+  });
+
   it('incluye lo necesario para un flujo .NET', () => {
     for (const expected of ['dotnet', 'git', 'npm']) {
       assert.ok(ALLOWED_COMMANDS.has(expected), `falta "${expected}"`);
