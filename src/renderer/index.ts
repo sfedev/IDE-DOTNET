@@ -2421,6 +2421,9 @@ class DotForgeApp {
     window.dotforge.events.onTaskExit((exit) => {
       this.panel.taskFinished(exit);
       // Si la tarea era una operación de EF Core o de Docker, su panel se relee solo.
+      // La instalación de un paquete en varios proyectos encadena una tarea por proyecto: es este
+      // aviso el que la hace avanzar al siguiente.
+      this.nuget.noteTaskExit(exit.taskId, exit.code);
       this.efcoreView.noteTaskExit(exit.taskId, exit.code);
       this.containersView.noteTaskExit(exit.taskId, exit.code);
       void this.testsView.noteTaskExit(exit.taskId);

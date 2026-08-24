@@ -7,7 +7,19 @@
  */
 import type { AuditReport, NuGetSearchResult, ProjectInfo, SolutionInfo, VulnerablePackage } from '../../shared/contracts.js';
 import { countBySeverity, describeAudit, SEVERITY_LABEL } from '../../shared/nuget-audit.js';
-import { byId, clear, compactNumber, debounce, el } from '../dom.js';
+import {
+  createPlan,
+  describeProgress,
+  isComplete,
+  markFailed,
+  markRunning,
+  nextPending,
+  noteExit,
+  summarizeInstall,
+  type PackageInstallPlan,
+} from '../../shared/nuget-install.js';
+import { byId, clear, compactNumber, debounce, el, repaintPreservingFocus } from '../dom.js';
+import { FOCUS_KEY_ATTRIBUTE } from '../focus-guard.js';
 import { icon } from '../icons.js';
 
 export interface NuGetHost {
@@ -26,7 +38,15 @@ export interface NuGetHost {
 
 export class NuGetView {
   private solution: SolutionInfo | null = null;
-  private selectedProjectPath: string | null = null;
+  /**
+   * Proyectos marcados como destino de la instalación.
+   *
+   * El primero marcado es además el que manda en "Instalados en…": el panel enseña los paquetes de
+   * un proyecto concreto, no la unión de varios, porque la unión no se puede desinstalar.
+   */
+  private readonly targets = new Set<string>();
+  /** Instalación en varios proyectos en curso. Null si no hay ninguna. */
+  private plan: PackageInstallPlan | null = null;
   private results: NuGetSearchResult[] = [];
   private query = '';
   private includePrerelease = false;
@@ -34,6 +54,8 @@ export class NuGetView {
   /** Sólo la vista activa escribe en la barra lateral. Ver la nota en ExplorerView. */
   private visible = false;
   private error: string | null = null;
+  /** Número de orden de la búsqueda en vuelo: descarta las respuestas que llegan tarde. */
+  private searchToken = 0;
   private readonly versionChoice = new Map<string, string>();
 
   /** Última auditoría de seguridad. Null si no se ha ejecutado en esta solución. */
@@ -45,11 +67,39 @@ export class NuGetView {
 
   constructor(private readonly host: NuGetHost) {}
 
+  /**
+   * Llega al abrir una solución **y en cada relectura**.
+   *
+   * La distinción importa mucho más de lo que parece: instalar un paquete cambia el `.csproj`, así
+   * que el renderer relee la solución al terminar **cada** tarea de `dotnet`. Tratar toda relectura
+   * como "otra solución" tiraba la selección de proyectos del usuario a media instalación, y con
+   * ella el plan en marcha: la cadena moría después del segundo proyecto sin decir nada. Sólo se
+   * reinicia el estado cuando de verdad se ha cambiado de solución.
+   */
   setSolution(solution: SolutionInfo | null): void {
+    const previous = this.solution;
+    const sameSolution =
+      solution !== null && previous !== null && solution.directory === previous.directory && solution.path === previous.path;
+
     this.solution = solution;
-    this.selectedProjectPath = solution?.projects[0]?.path ?? null;
-    // La auditoría es de la solución que se cierra: no vale para la siguiente.
-    this.auditReport = null;
+
+    if (sameSolution) {
+      // Un proyecto puede haber desaparecido del `.sln` entre relecturas.
+      const alive = new Set(solution.projects.map((project) => project.path));
+      for (const path of [...this.targets]) {
+        if (!alive.has(path)) this.targets.delete(path);
+      }
+    } else {
+      this.targets.clear();
+      const first = solution?.projects[0]?.path;
+      if (first !== undefined) this.targets.add(first);
+
+      // La auditoría es de la solución que se cierra: no vale para la siguiente. Y un plan a medias
+      // sobre la anterior no significa nada aquí.
+      this.auditReport = null;
+      this.plan = null;
+    }
+
     this.render();
   }
 
@@ -92,19 +142,47 @@ export class NuGetView {
     }
   }
 
+  /** Llega del menú del explorador: "ver los paquetes de este proyecto". */
   focusProject(project: ProjectInfo): void {
-    this.selectedProjectPath = project.path;
+    this.targets.clear();
+    this.targets.add(project.path);
     this.render();
   }
 
-  private selectedProject(): ProjectInfo | null {
-    if (!this.solution) return null;
-    return this.solution.projects.find((project) => project.path === this.selectedProjectPath) ?? null;
+  /**
+   * Proyectos marcados, en el orden de la solución.
+   *
+   * El orden importa: es el de la instalación y el que se enseña en el progreso, y el de un `Set`
+   * es el de inserción, que sería el orden en el que se pulsaron las casillas.
+   */
+  private selectedProjects(): ProjectInfo[] {
+    return (this.solution?.projects ?? []).filter((project) => this.targets.has(project.path));
   }
 
+  /** Proyecto cuyos paquetes instalados se enseñan: el primero de los marcados. */
+  private selectedProject(): ProjectInfo | null {
+    return this.selectedProjects()[0] ?? null;
+  }
+
+  private toggleTarget(path: string): void {
+    if (this.targets.has(path)) this.targets.delete(path);
+    else this.targets.add(path);
+    this.render();
+  }
+
+  /**
+   * Consulta nuget.org.
+   *
+   * Cada búsqueda lleva su número de orden y sólo la última manda: dos consultas en vuelo pueden
+   * volver al revés —la de "Seri" tarda más que la de "Serilog"— y sin esto el panel acabaría
+   * enseñando los resultados de lo que el usuario ya había terminado de escribir.
+   */
   private async performSearch(): Promise<void> {
+    const request = ++this.searchToken;
+
     if (this.query.trim() === '') {
       this.results = [];
+      this.loading = false;
       this.render();
       return;
     }
@@ -114,13 +192,18 @@ export class NuGetView {
     this.render();
 
     try {
-      this.results = await window.dotforge.nuget.search(this.query, this.includePrerelease);
+      const results = await window.dotforge.nuget.search(this.query, this.includePrerelease);
+      if (request !== this.searchToken) return;
+      this.results = results;
     } catch (error) {
+      if (request !== this.searchToken) return;
       this.results = [];
       this.error = error instanceof Error ? error.message : String(error);
     } finally {
-      this.loading = false;
-      this.render();
+      if (request === this.searchToken) {
+        this.loading = false;
+        this.render();
+      }
     }
   }
 
@@ -129,9 +212,20 @@ export class NuGetView {
     if (visible) this.render();
   }
 
+  /**
+   * Repinta el panel.
+   *
+   * Va envuelto en `repaintPreservingFocus` porque este panel se repinta **mientras se escribe**:
+   * el rebote de la búsqueda dispara `performSearch`, que pinta el estado "Buscando…" y después los
+   * resultados. Sin esa envoltura, cada pausa breve al teclear destruía el `<input>` enfocado y el
+   * cursor se perdía a mitad de palabra.
+   */
   render(): void {
     if (!this.visible) return;
+    repaintPreservingFocus(byId('sidebar-content'), () => this.paint());
+  }
 
+  private paint(): void {
     const container = byId('sidebar-content');
     clear(container);
     byId('sidebar-title').textContent = 'Paquetes NuGet';
@@ -146,6 +240,12 @@ export class NuGetView {
 
     container.appendChild(this.renderProjectPicker());
     container.appendChild(this.renderSearchBar());
+
+    // El progreso va aquí y no dentro de los resultados: la instalación dura minutos y el usuario
+    // puede haber borrado la búsqueda mientras tanto. Una operación en marcha que desaparece de la
+    // vista al cambiar de sitio no está en marcha para quien la lanzó.
+    const progress = this.renderInstallProgress();
+    if (progress !== null) container.appendChild(progress);
 
     if (this.error) {
       container.appendChild(el('div', { className: 'notice error', text: this.error }));
@@ -162,24 +262,73 @@ export class NuGetView {
     container.appendChild(this.query.trim() === '' ? this.renderInstalled() : this.renderResults());
   }
 
+  /**
+   * Selector de proyectos, con casilla por proyecto.
+   *
+   * Era un desplegable de selección única, y por eso añadir Serilog a una solución Clean costaba
+   * cuatro viajes por el mismo sitio. Ahora la selección es explícita y visible: se ve en qué
+   * proyectos va a entrar el paquete **antes** de pulsar Instalar, que es cuando sirve de algo.
+   *
+   * "Todos" y "Ninguno" están porque el caso frecuente de verdad es "en todos menos en el de
+   * pruebas": marcar cuatro casillas a mano para desmarcar una es peor que pulsar dos botones.
+   */
   private renderProjectPicker(): HTMLElement {
-    const select = el('select', {
-      className: 'input',
-      on: {
-        change: (event) => {
-          this.selectedProjectPath = (event.target as HTMLSelectElement).value;
-          this.render();
-        },
-      },
-    }) as HTMLSelectElement;
+    const projects = this.solution!.projects;
+    const chosen = this.targets.size;
 
-    for (const project of this.solution!.projects) {
-      const option = el('option', { value: project.path, text: project.name }) as HTMLOptionElement;
-      if (project.path === this.selectedProjectPath) option.selected = true;
-      select.appendChild(option);
+    const head = el(
+      'div',
+      { className: 'nuget-projects-head' },
+      icon('project', { size: 13, className: 'tone-muted' }),
+      el('span', {
+        className: 'nuget-projects-title',
+        text: chosen === 1 ? '1 proyecto seleccionado' : `${chosen} proyectos seleccionados`,
+      }),
+      el('button', {
+        className: 'link-btn',
+        text: 'Todos',
+        disabled: chosen === projects.length,
+        on: {
+          click: () => {
+            for (const project of projects) this.targets.add(project.path);
+            this.render();
+          },
+        },
+      }),
+      el('button', {
+        className: 'link-btn',
+        text: 'Ninguno',
+        disabled: chosen === 0,
+        on: {
+          click: () => {
+            this.targets.clear();
+            this.render();
+          },
+        },
+      }),
+    );
+
+    const list = el('div', { className: 'nuget-projects' });
+
+    for (const project of projects) {
+      const box = el('input', {
+        type: 'checkbox',
+        on: { change: () => this.toggleTarget(project.path) },
+      }) as HTMLInputElement;
+      box.checked = this.targets.has(project.path);
+
+      list.appendChild(
+        el(
+          'label',
+          { className: `nuget-project${box.checked ? ' checked' : ''}`, title: project.path },
+          box,
+          el('span', { className: 'nuget-project-name', text: project.name }),
+          el('span', { className: 'nuget-project-count', text: String(project.packageReferences.length) }),
+        ),
+      );
     }
 
-    return el('div', { className: 'nuget-search' }, select);
+    return el('div', { className: 'nuget-projects-box' }, head, list);
   }
 
   private renderSearchBar(): HTMLElement {
@@ -187,6 +336,7 @@ export class NuGetView {
       className: 'input',
       placeholder: 'Buscar paquetes en nuget.org…',
       value: this.query,
+      attrs: { [FOCUS_KEY_ATTRIBUTE]: 'nuget-search' },
       on: {
         input: (event) => {
           this.query = (event.target as HTMLInputElement).value;
@@ -195,18 +345,23 @@ export class NuGetView {
       },
     });
 
+    // La casilla se pinta desde el estado, no "en blanco": el panel se repinta en cada búsqueda y
+    // sin esto la marca desaparecía a la vista mientras la preferencia seguía activa por dentro.
+    const prereleaseBox = el('input', {
+      type: 'checkbox',
+      on: {
+        change: (event) => {
+          this.includePrerelease = (event.target as HTMLInputElement).checked;
+          void this.performSearch();
+        },
+      },
+    }) as HTMLInputElement;
+    prereleaseBox.checked = this.includePrerelease;
+
     const prerelease = el(
       'label',
       { className: 'checkbox', title: 'Incluir versiones preliminares' },
-      el('input', {
-        type: 'checkbox',
-        on: {
-          change: (event) => {
-            this.includePrerelease = (event.target as HTMLInputElement).checked;
-            void this.performSearch();
-          },
-        },
-      }),
+      prereleaseBox,
       'pre',
     );
 
@@ -416,8 +571,36 @@ export class NuGetView {
     return container;
   }
 
+  /**
+   * Barra de progreso de la instalación en curso.
+   *
+   * Con un solo proyecto la notificación bastaba; con cuatro y una restauración por proyecto, no:
+   * la operación dura minutos y hay que poder mirar en qué va sin leer el panel inferior.
+   */
+  private renderInstallProgress(): HTMLElement | null {
+    const plan = this.plan;
+    if (plan === null) return null;
+
+    const progress = describeProgress(plan);
+    const bar = el('div', { className: 'nuget-progress-fill' });
+    bar.style.width = `${Math.round((progress.done / Math.max(progress.total, 1)) * 100)}%`;
+
+    return el(
+      'div',
+      { className: 'nuget-progress' },
+      el(
+        'div',
+        { className: 'nuget-progress-head' },
+        el('span', { className: 'spinner' }),
+        el('span', { text: progress.text }),
+      ),
+      el('div', { className: 'nuget-progress-track' }, bar),
+    );
+  }
+
   private renderResults(): HTMLElement {
     const project = this.selectedProject();
+    const targets = this.selectedProjects();
     const container = el('div');
 
     if (this.results.length === 0) {
@@ -471,17 +654,28 @@ export class NuGetView {
               'div',
               { className: 'package-actions' },
               versionSelect,
-              el('button', {
-                className: 'btn primary',
-                text: current ? 'Actualizar' : 'Instalar',
-                disabled: !project,
-                on: {
-                  click: () => {
-                    if (!project) return;
-                    void this.install(project, result.id, versionSelect.value);
-                  },
+              el(
+                'button',
+                {
+                  className: 'btn primary',
+                  // El botón dice en cuántos proyectos va a entrar: "Instalar" a secas, con cuatro
+                  // marcados, no avisa de lo que va a pasar hasta que ya ha pasado.
+                  title:
+                    targets.length === 0
+                      ? 'Marca al menos un proyecto'
+                      : `${current ? 'Actualiza' : 'Instala'} en ${targets.map((entry) => entry.name).join(', ')}`,
+                  disabled: targets.length === 0 || this.plan !== null,
+                  on: { click: () => this.startInstall(result.id, versionSelect.value) },
                 },
-              }),
+                el('span', {
+                  text:
+                    targets.length > 1
+                      ? `${current ? 'Actualizar' : 'Instalar'} en ${targets.length}`
+                      : current
+                        ? 'Actualizar'
+                        : 'Instalar',
+                }),
+              ),
               result.projectUrl
                 ? el('button', {
                     className: 'btn ghost',
@@ -504,13 +698,98 @@ export class NuGetView {
     return el('div', { className: 'package-avatar', text: initial });
   }
 
-  private async install(project: ProjectInfo, packageId: string, version: string): Promise<void> {
-    this.host.notify(`Instalando ${packageId} ${version} en ${project.name}…`, 'info');
-    try {
-      await window.dotforge.nuget.install(project.path, packageId, version);
-    } catch (error) {
-      this.host.notify(`No se ha podido instalar ${packageId}: ${error instanceof Error ? error.message : String(error)}`, 'error');
+  // -------------------------------------------------------------------------------------------
+  // Instalación en varios proyectos
+  // -------------------------------------------------------------------------------------------
+
+  /**
+   * Arranca la instalación del paquete en todos los proyectos marcados.
+   *
+   * En serie, no en paralelo: `dotnet add package` restaura, y varias restauraciones a la vez se
+   * pelean por la caché de NuGet. El encadenado lo hace `noteTaskExit`, que es quien se entera de
+   * que una tarea ha terminado.
+   */
+  private startInstall(packageId: string, version: string): void {
+    if (this.plan !== null) {
+      this.host.notify('Ya hay una instalación de paquetes en marcha.', 'warn');
+      return;
     }
+
+    const projects = this.selectedProjects();
+    if (projects.length === 0) {
+      this.host.notify('Marca al menos un proyecto antes de instalar.', 'warn');
+      return;
+    }
+
+    this.plan = createPlan(
+      packageId,
+      version,
+      projects.map((project) => ({ path: project.path, name: project.name })),
+    );
+
+    this.host.notify(describeProgress(this.plan).text, 'info');
+    void this.advanceInstall();
+  }
+
+  /** Lanza el siguiente proyecto pendiente, o cierra el plan si ya no queda ninguno. */
+  private async advanceInstall(): Promise<void> {
+    const plan = this.plan;
+    if (plan === null) return;
+
+    const step = nextPending(plan);
+    if (step === null) {
+      this.finishInstall(plan);
+      return;
+    }
+
+    try {
+      const started = await window.dotforge.nuget.install(step.project.path, plan.packageId, plan.version);
+      // Puede haber terminado la instalación entera mientras se esperaba (un "cerrar solución").
+      if (this.plan === null) return;
+      this.plan = markRunning(this.plan, step.project.path, started.taskId);
+      this.render();
+    } catch (error) {
+      // La tarea ni siquiera se ha podido lanzar: se marca el paso y se sigue con el siguiente. Un
+      // proyecto que no admite el paquete no dice nada de los demás.
+      this.host.notify(
+        `No se ha podido lanzar la instalación en ${step.project.name}: ${error instanceof Error ? error.message : String(error)}`,
+        'error',
+      );
+      if (this.plan === null) return;
+      this.plan = markFailed(this.plan, step.project.path);
+      void this.advanceInstall();
+    }
+  }
+
+  /**
+   * Una tarea de `dotnet` ha terminado.
+   *
+   * Lo llama el reparto de eventos del renderer con **todas** las tareas del IDE; el plan se queda
+   * sólo con la suya, emparejando por `taskId`.
+   */
+  noteTaskExit(taskId: string, code: number | null): void {
+    const plan = this.plan;
+    if (plan === null) return;
+
+    const updated = noteExit(plan, taskId, code);
+    if (updated === plan) return;
+
+    this.plan = updated;
+
+    if (isComplete(updated)) this.finishInstall(updated);
+    else {
+      this.host.notify(describeProgress(updated).text, 'info');
+      this.render();
+      void this.advanceInstall();
+    }
+  }
+
+  private finishInstall(plan: PackageInstallPlan): void {
+    const summary = summarizeInstall(plan);
+    this.plan = null;
+    this.host.notify(summary.message, summary.level);
+    this.host.reloadSolution();
+    this.render();
   }
 
   private async uninstall(project: ProjectInfo, packageId: string): Promise<void> {

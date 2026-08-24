@@ -67,6 +67,32 @@ export { captureFocus, clampPosition, focusKeyOf, FOCUS_KEY_ATTRIBUTE, FOCUS_KEY
 export type { FocusableField, FocusSnapshot } from './focus-guard.js';
 
 /**
+ * Instalación de un paquete NuGet en varios proyectos.
+ *
+ * El progreso de una operación larga con varios pasos es justo donde se cuelan los errores de
+ * estado —un paso que se queda en "ejecutando" para siempre, un contador que no cuadra—, así que
+ * el modelo es puro y se prueba sin interfaz.
+ */
+export {
+  createPlan,
+  describeProgress,
+  isComplete,
+  markFailed,
+  markRunning,
+  nextPending,
+  noteExit,
+  PackageInstallError,
+  runningStep,
+  summarizeInstall,
+} from '../shared/nuget-install.js';
+export type {
+  PackageInstallPlan,
+  PackageInstallStep,
+  PackageInstallSummary,
+  PackageInstallTarget,
+} from '../shared/nuget-install.js';
+
+/**
  * Cuándo se puede escribir en el editor.
  *
  * Es una regla con consecuencias muy visibles —un `readOnly` colado deja el editor mudo hasta
