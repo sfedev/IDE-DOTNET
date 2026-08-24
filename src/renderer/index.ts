@@ -136,6 +136,7 @@ class DotForgeApp {
       // Guardar un .cs puede haber añadido (o quitado) un `using` prohibido.
       if (/\.cs$/i.test(tab.path)) this.lintArchitecture();
     },
+    onEditorError: (message) => this.notify(message, 'error'),
   });
 
   private readonly explorer = new ExplorerView({

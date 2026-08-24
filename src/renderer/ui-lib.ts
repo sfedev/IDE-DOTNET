@@ -57,6 +57,15 @@ export type { CodeBlock, DiffKind, DiffLine, DiffSummary } from '../shared/ai-di
 export { aiEntryState, aiActionBlockedReason, AI_DISABLED_MESSAGE } from './ai-availability.js';
 export type { AiEntryState } from './ai-availability.js';
 
+/**
+ * Cuándo se puede escribir en el editor.
+ *
+ * Es una regla con consecuencias muy visibles —un `readOnly` colado deja el editor mudo hasta
+ * reiniciar— y por eso vive fuera de Monaco, en funciones puras que se prueban sin ventana.
+ */
+export { DIFF_MESSAGE, EMPTY_CONTEXT, isReadOnly, NO_FILE_MESSAGE, PendingOperations, readOnlyMessage } from './editor-state.js';
+export type { EditorContext } from './editor-state.js';
+
 /** Modelo del control de código fuente: lo consumen el panel lateral y el editor de diferencias. */
 export {
   buildDiffRequest,

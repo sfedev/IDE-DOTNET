@@ -10,6 +10,7 @@ import type * as MonacoApi from 'monaco-editor';
 import type { AppSettings, EditorDocument, GitFileDiff } from '../../shared/contracts.js';
 import { diffKey } from '../../shared/git.js';
 import { baseName, byId, clear, el } from '../dom.js';
+import { isReadOnly, PendingOperations, readOnlyMessage, type EditorContext } from '../editor-state.js';
 import { didChange, didClose, didOpen, didSave } from '../lsp-bridge.js';
 import { iconForFile } from '../file-icons.js';
 import { icon } from '../icons.js';
@@ -50,6 +51,14 @@ export interface EditorHost {
   onActiveChanged(tab: OpenTab | null): void;
   onCursorChanged(line: number, column: number): void;
   onSaved(tab: OpenTab): void;
+  /**
+   * Algo ha fallado en un camino asíncrono del editor.
+   *
+   * Existe porque `void this.saveActive()` no tenía a quién contárselo: un `writeFile` que falla
+   * —en Windows basta con que MSBuild tenga el archivo abierto compilando— acababa en un rechazo
+   * sin gestionar, la pestaña seguía sucia y nadie se enteraba hasta cerrar el IDE.
+   */
+  onEditorError(message: string): void;
 }
 
 export class EditorView {
@@ -64,6 +73,14 @@ export class EditorView {
   private autoSaveTimer: number | undefined;
   private settings: AppSettings | null = null;
   private readonly disposables: MonacoApi.IDisposable[] = [];
+
+  /**
+   * Operaciones asíncronas en vuelo (guardado, formateo).
+   *
+   * No bloquean la escritura: están contadas para que su `finally` sea uno de los puntos donde se
+   * recalcula el estado del editor, y para poder afirmar que ninguna se queda colgada.
+   */
+  private readonly pending = new PendingOperations();
 
   /** Ids de decoración por archivo, necesarios para reemplazarlas sin duplicar. */
   private readonly breakpointDecorations = new Map<string, string[]>();
@@ -143,6 +160,38 @@ export class EditorView {
     });
 
     this.updateVisibility();
+    this.refreshEditability();
+  }
+
+  /**
+   * Contexto que decide si se puede escribir. Ver `editor-state.ts`.
+   */
+  private editorContext(): EditorContext {
+    return {
+      hasOpenFile: this.activePath !== null,
+      showingDiff: this.activeDiff !== null,
+      pending: this.pending.names(),
+    };
+  }
+
+  /**
+   * Reconcilia el estado de sólo lectura con el contexto real.
+   *
+   * Es el punto que evita el fallo que se arregla aquí: en vez de suponer que el editor sigue
+   * escribible, se recalcula. Se llama al montar, al abrir, al activar, al cerrar, al entrar y
+   * salir de una comparación, y en el `finally` de toda operación asíncrona — es decir, también
+   * cuando esa operación ha fallado, que es justo cuando antes se quedaba todo a medias.
+   */
+  private refreshEditability(): void {
+    if (!this.editor) return;
+
+    const context = this.editorContext();
+    const message = readOnlyMessage(context);
+
+    this.editor.updateOptions({
+      readOnly: isReadOnly(context),
+      ...(message === null ? {} : { readOnlyMessage: { value: message } }),
+    });
   }
 
   getEditor(): MonacoApi.editor.IStandaloneCodeEditor | null {
@@ -210,7 +259,7 @@ export class EditorView {
             this.host.onDirtyChanged();
           }
           didChange(target.path, model.getValue());
-          this.scheduleAutoSave();
+          this.scheduleAutoSave(target);
         }),
       );
 
@@ -246,6 +295,7 @@ export class EditorView {
     if (tab.viewState) this.editor.restoreViewState(tab.viewState);
 
     this.updateVisibility();
+    this.refreshEditability();
     this.host.onActiveChanged(tab);
     this.editor.focus();
   }
@@ -270,6 +320,7 @@ export class EditorView {
       else {
         this.editor?.setModel(null);
         this.updateVisibility();
+        this.refreshEditability();
         this.host.onActiveChanged(null);
       }
     }
@@ -295,27 +346,57 @@ export class EditorView {
     }
   }
 
+  /**
+   * Guarda una pestaña.
+   *
+   * Todo el cuerpo va dentro de un `try`, y la reconciliación del estado del editor dentro de su
+   * `finally`. Los dos `await` de aquí fallan en la vida real: el formateo depende del servidor de
+   * lenguaje, que puede estar reiniciándose, y `writeFile` falla en Windows en cuanto MSBuild tiene
+   * el archivo abierto compilando. Antes, cualquiera de los dos dejaba el guardado a medias sin
+   * decir nada —la pestaña seguía sucia— y, si el camino hubiera tocado el estado del editor, lo
+   * habría dejado tocado para el resto de la sesión.
+   */
   private async save(tab: OpenTab): Promise<void> {
-    if (this.settings?.formatOnSave) {
-      await this.editor?.getAction('editor.action.formatDocument')?.run();
+    const done = this.pending.begin('saving');
+
+    try {
+      if (this.settings?.formatOnSave) {
+        await this.editor?.getAction('editor.action.formatDocument')?.run();
+      }
+
+      const content = tab.model.getValue();
+      const { mtimeMs } = await window.dotforge.fs.writeFile(tab.path, content);
+
+      tab.mtimeMs = mtimeMs;
+      tab.savedVersionId = tab.model.getAlternativeVersionId();
+      tab.dirty = false;
+
+      didSave(tab.path, content);
+      this.host.onDirtyChanged();
+      this.host.onSaved(tab);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.host.onEditorError(`No se ha podido guardar "${tab.name}": ${reason}`);
+    } finally {
+      done();
+      this.refreshEditability();
     }
-
-    const content = tab.model.getValue();
-    const { mtimeMs } = await window.dotforge.fs.writeFile(tab.path, content);
-
-    tab.mtimeMs = mtimeMs;
-    tab.savedVersionId = tab.model.getAlternativeVersionId();
-    tab.dirty = false;
-
-    didSave(tab.path, content);
-    this.host.onDirtyChanged();
-    this.host.onSaved(tab);
   }
 
-  private scheduleAutoSave(): void {
+  /**
+   * Programa el autoguardado de **la pestaña que ha cambiado**, no de la activa.
+   *
+   * Parece lo mismo y no lo es: el temporizador salta un segundo después, y para entonces el
+   * usuario puede haber cambiado de pestaña. Guardar la activa en ese caso es guardar una pestaña
+   * limpia y dejar la editada sucia para siempre, porque el temporizador sólo se reprograma cuando
+   * cambia el contenido, y en esa pestaña ya no va a cambiar nada.
+   */
+  private scheduleAutoSave(tab: OpenTab): void {
     if (this.settings?.autoSave !== 'afterDelay') return;
     if (this.autoSaveTimer !== undefined) window.clearTimeout(this.autoSaveTimer);
-    this.autoSaveTimer = window.setTimeout(() => void this.saveActive(), this.settings.autoSaveDelayMs);
+    this.autoSaveTimer = window.setTimeout(() => {
+      if (tab.dirty) void this.save(tab);
+    }, this.settings.autoSaveDelayMs);
   }
 
   /** Aplica los marcadores de diagnóstico que llegan del servidor de lenguaje. */
@@ -565,6 +646,7 @@ export class EditorView {
 
     this.activeDiff = key;
     this.updateVisibility();
+    this.refreshEditability();
     this.host.onActiveChanged(null);
   }
 
@@ -583,7 +665,10 @@ export class EditorView {
       // Al cerrar la comparación se vuelve a lo que hubiera abierto, no a la bienvenida.
       const next = this.listTabs().at(-1);
       if (next) this.activate(next.path);
-      else this.updateVisibility();
+      else {
+        this.updateVisibility();
+        this.refreshEditability();
+      }
     }
 
     this.renderTabs();

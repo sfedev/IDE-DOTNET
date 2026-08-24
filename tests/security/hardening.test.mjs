@@ -517,6 +517,45 @@ describe('extracción de archivos comprimidos', () => {
   });
 });
 
+/**
+ * El editor no puede quedarse mudo.
+ *
+ * `readOnly` en Monaco no se apaga solo, así que la única defensa que sobrevive a los cambios de
+ * mañana es estructural: que exista un único sitio que lo decide, que ese sitio se llame en el
+ * `finally` de las operaciones asíncronas, y que nadie lo escriba a mano por su cuenta.
+ */
+describe('estado de escritura del editor', () => {
+  const editor = readSource('src/renderer/views/editor.ts');
+
+  it('el estado de sólo lectura se recalcula, no se supone', () => {
+    assert.match(editor, /private refreshEditability\(\): void/);
+    // Al montar, al activar una pestaña, al cerrar, y en las dos caras de la comparación.
+    const calls = editor.match(/this\.refreshEditability\(\)/g) ?? [];
+    assert.ok(calls.length >= 6, `sólo ${calls.length} puntos de recálculo`);
+  });
+
+  it('guardar suelta lo que reserva y recalcula, pase lo que pase', () => {
+    const save = editor.slice(editor.indexOf('private async save('), editor.indexOf('private scheduleAutoSave('));
+    assert.match(save, /const done = this\.pending\.begin\('saving'\)/);
+    assert.match(save, /\} finally \{\s*\n\s*done\(\);\s*\n\s*this\.refreshEditability\(\);/);
+    assert.match(save, /\} catch \(error\) \{/);
+  });
+
+  it('sólo `refreshEditability` toca `readOnly` del editor de código', () => {
+    // El editor de diferencias sí lo declara en su creación, y ése es de sólo lectura por diseño
+    // (ADR-021). Lo que no puede haber es un `readOnly` suelto en el editor de archivos.
+    const codeEditorPart = editor.slice(0, editor.indexOf('private ensureDiffEditor('));
+    const occurrences = codeEditorPart.match(/readOnly:/g) ?? [];
+    assert.equal(occurrences.length, 1, 'hay más de un sitio decidiendo si se puede escribir');
+    assert.match(codeEditorPart, /readOnly: isReadOnly\(context\)/);
+  });
+
+  it('el autoguardado guarda la pestaña que cambió, no la que esté activa al saltar', () => {
+    assert.match(editor, /private scheduleAutoSave\(tab: OpenTab\): void/);
+    assert.match(editor, /this\.scheduleAutoSave\(target\)/);
+  });
+});
+
 describe('terminal integrada', () => {
   it('trocea respetando comillas dobles y simples', () => {
     assert.deepEqual(tokenize('dotnet build'), ['dotnet', 'build']);
