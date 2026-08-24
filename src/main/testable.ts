@@ -244,3 +244,41 @@ export {
   uninstall as uninstallExtension,
 } from './services/extension-installer.js';
 export type { InstallOutcome } from './services/extension-installer.js';
+
+/**
+ * Fase 20 — búsqueda de texto en los archivos del workspace.
+ *
+ * El modelo es puro y el servicio no importa `electron`: la raíz se le pasa, así que las pruebas
+ * pueden buscar en un árbol de verdad creado en un directorio temporal en vez de fingir `fs`.
+ */
+export {
+  buildSearchRegExp,
+  coerceSearchOptions,
+  compileGlobs,
+  DEFAULT_SEARCH_OPTIONS,
+  describeResults,
+  escapeRegExp,
+  globToRegExp,
+  hasBinaryExtension,
+  looksBinary,
+  matchesGlobs,
+  matchesInLine,
+  MAX_SEARCHABLE_BYTES,
+  parseGlobList,
+  previewOf,
+  searchContent,
+  SearchPatternError,
+  SEARCH_SKIPPED_DIRECTORIES,
+  shouldSkipDirectory,
+  splitLines,
+} from '../shared/file-search.js';
+export type {
+  GlobFilter,
+  SearchFileResult,
+  SearchMatch,
+  SearchOptions,
+  SearchProgress,
+  SearchSummary,
+} from '../shared/file-search.js';
+
+export * as searchService from './services/search-service.js';
