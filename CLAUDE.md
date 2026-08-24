@@ -14,6 +14,11 @@ Su módulo estrella es el **Scaffolding Wizard**: un generador de arquitecturas 
 que produce soluciones .NET **compilables y ejecutables** siguiendo Clean Architecture,
 Arquitectura Hexagonal (Ports & Adapters) o Domain-Driven Design + CQRS.
 
+Desde la v2.3.0 la **terminal navega por el disco**: `cd` funciona de verdad —a otra solución, a
+otra unidad, a la carpeta de al lado— y el prompt dice dónde estás en cada momento. Y la **barra de
+menú superior enseña el IDE entero**: diez menús con todos los comandos de la paleta detrás,
+soluciones recientes incluidas.
+
 Desde la v2.2.0 el panel de NuGet **instala un paquete en varios proyectos a la vez** (casillas por
 proyecto, en serie y con resumen de lo que ha entrado y lo que no), la **barra de actividad se ordena
 arrastrando** los iconos, y tres fallos de uso que no aparecían en ningún registro están arreglados:
@@ -100,6 +105,8 @@ IDE-DOTNET/
 │   │   ├── dev-tunnel.ts       # * Túneles: argumentos y reconocimiento de la URL pública (puro)
 │   │   ├── perf-counters.ts    # * dotnet-counters: dos generaciones de contadores (puro)
 │   │   ├── nuget-audit.ts      # * dotnet list package --vulnerable: JSON y tabla (puro)
+│   │   ├── terminal-cwd.ts     # * Navegación de la terminal: qué es un `cd` y cómo se pinta (puro)
+│   │   ├── menu-template.ts    # * Contenido de la barra de menú, con aceleradores de roles (puro)
 │   │   ├── nuget-install.ts    # * Instalar un paquete en varios proyectos: plan y progreso (puro)
 │   │   ├── activity-bar.ts     # * Orden de la barra de actividad: ids, normalización y movida (puro)
 │   │   ├── updates.ts          # * Actualizaciones: SemVer, feed de releases y artefactos (puro)
@@ -119,6 +126,7 @@ IDE-DOTNET/
 │   │   ├── toolchain.ts        # Bundle sin Electron: adquisición de LSP/depurador (fetch + tests)
 │   │   ├── testable.ts         # Bundle sin Electron: rutas, .sln/.csproj, MSBuild (tests)
 │   │   ├── ipc/register.ts     # ÚNICA superficie expuesta al renderer
+│   │   ├── services/terminal-session.ts  # Directorio de trabajo de la terminal (resuelve y valida)
 │   │   ├── services/           # Solución, NuGet, tareas dotnet, terminal, rutas, ZIP, settings,
 │   │   │                       # git-service.ts (estado y operaciones de control de fuentes),
 │   │   │                       # efcore-service.ts (dotnet ef + migraciones del disco),
@@ -260,6 +268,11 @@ npx electron . --smoke-test
   el proceso principal.
 - `node scripts/read-pixels.mjs <png> <x,y>…` — decodifica una captura y dice el color exacto de
   esos píxeles. Es la segunda opinión cuando `--probe=` y lo que se ve no parecen coincidir.
+- `--menu-dump` — imprime la barra de menú **ya construida por Electron**, sección a sección y con
+  sus aceleradores, y sale. Es la única forma de comprobar lo que la prueba de `menu-template` no
+  puede: que ningún `role` sea inválido y que Electron sepa parsear cada acelerador. Encontró dos
+  choques de tecla que la prueba pura no veía. Para buscar duplicados:
+  `npx electron . --menu-dump 2>&1 | grep -oE "\[[^]]+\]" | sort | uniq -d`.
 - `--open=<ruta>` o un argumento posicional — abre una carpeta o un archivo al arrancar.
 
 > **Nota de plataforma:** `dist:mac` produce artefactos firmados/notarizados sólo en un host
@@ -410,6 +423,36 @@ npx electron . --smoke-test
   Un gestor que instala y calla se percibe como roto.
 - Los iconos se dibujan localmente (ADR-049), como en NuGet: la CSP no admite imágenes remotas y
   descargarlas le contaría al registro qué está mirando el usuario.
+
+### Terminal integrada (`src/main/services/terminal-session.ts`, `src/shared/terminal-cwd.ts`)
+
+- **La frontera es qué se ejecuta, no desde dónde** (ADR-055). El usuario navega con `cd` a donde
+  quiera, incluidas otras unidades, y al `cwd` de la terminal **no** se le aplica
+  `assertInsideWorkspace`. Lo que no se toca es la lista blanca de programas ni `shell: false`
+  (ADR-004): eso es lo que de verdad acota la superficie, y hay pruebas estructurales que lo vigilan.
+- **Primero se clasifica, después se lanza.** `cd` y `pwd` son órdenes del intérprete, no programas:
+  si se intenta lanzarlos, el error habla de la lista blanca y no de lo que pasa.
+- El parseo (`classifyLine`, `resolveTarget`) y la presentación (`shortenPath`) son puros; el
+  servicio sólo resuelve con `node:path` y comprueba con `stat`. Mismo reparto que el control de
+  fuentes.
+- **El error dice la ruta ya resuelta.** "No existe `src`" no ayuda; "no existe `C:\repos\Acme\src`"
+  se comprueba de un vistazo.
+- `cd` a secas **vuelve a la raíz de la solución**, no al hogar (POSIX) ni imprime (cmd). Dentro de
+  un IDE es lo que uno quiere; sin solución abierta, al hogar.
+
+### Barra de menú (`src/shared/menu-template.ts`, `src/main/menu.ts`)
+
+- **El contenido es un dato puro** (ADR-056) y `menu.ts` sólo lo traduce a Electron. Así se puede
+  probar lo que se rompe en silencio: un comando que el renderer no registra —se pulsa y no pasa
+  nada— o un acelerador repetido.
+- **Todo comando del menú tiene que existir en la paleta del renderer.** `runCommandById` busca ahí
+  y sale sin decir nada si no lo encuentra. Hay una prueba que lo exige.
+- **Los `role` de Electron traen acelerador aunque no lo declares.** Ver la sección de trampas: es
+  la mitad invisible de los choques de tecla.
+- Donde chocan la convención de Electron y la de Visual Studio, **gana Visual Studio**: es el IDE
+  del que viene quien usa esto.
+- El menú se **reinstala** al abrir una solución: en Electron es estático una vez puesto y la lista
+  de recientes es lo único que cambia.
 
 ### Barra de actividad y paneles laterales (`src/shared/activity-bar.ts`, `src/renderer/focus-guard.ts`)
 
@@ -808,6 +851,27 @@ npm run fetch:toolchain -- --platform win32 --arch x64
   los procesos de GPU, renderer y utilidades siguen vivos con la tubería de salida abierta y
   `node --test` no puede salir. La suite se colgaba indefinidamente tras un timeout de la prueba de
   humo. Se baja el árbol con `taskkill /T` y se sueltan las tuberías.
+- **`cd` no es un programa.** Es una orden del intérprete, así que en una terminal sin PTY hay que
+  atenderla antes de intentar lanzar nada. Mientras no se hizo, `cd src` buscaba un ejecutable
+  llamado `cd` y el error hablaba de la lista de programas permitidos, que no venía a cuento.
+- **Un `role` de Electron ocupa un acelerador aunque no lo declares.** `togglefullscreen` se queda
+  `F11` y `close` se queda `Ctrl+W`, así que chocan con "paso a paso por instrucciones" y con
+  "cerrar pestaña" sin que aparezca nada en la plantilla. La tabla `ROLE_ACCELERATORS` existe para
+  que la comprobación de choques mire también esa mitad; sin ella daba verde con tres choques
+  dentro. Se descubren con `--menu-dump`.
+- **`openWorkspaceFromCli` duplica parte de `openWorkspaceDirectory`.** No avisa al renderer ni
+  arranca el LSP —no hay renderer todavía—, y por eso se salta cualquier estado nuevo que se ate al
+  workspace. Pasó con el directorio de la terminal: arrancar con `--open=` dejaba el prompt en la
+  carpeta personal y el explorador enseñando la solución. Al añadir estado ligado al workspace hay
+  que tocar los dos caminos.
+- **Un centinela "vacío pero abierto" no puede pasar por `trim()`.** El filtro del explorador se
+  abre poniendo un espacio, y el render lo pintaba sólo si `filter.trim() !== ''`: el botón
+  "Filtrar por nombre" llevaba desde la Fase 7 sin hacer nada visible. Abrir mira el valor crudo;
+  filtrar, el recortado.
+- **`taskStarted` y `taskFinished` repintan el panel entero.** Con la terminal a la vista eso
+  reconstruye el `<input>` en el que se está escribiendo, así que cualquier tarea de fondo que
+  termine mientras se teclea se lleva la línea por delante. Va envuelto en `repaintPreservingFocus`
+  (ADR-052), como los paneles de búsqueda.
 - **Un clon limpio no es tu árbol de trabajo.** La suite pasaba en local y falló en CI en la primera
   ejecución del pipeline sobre un checkout nuevo, por dos motivos a la vez: las plantillas llegaron
   con CRLF (Git para Windows y los runners traen `core.autocrlf` activado) y el binario de Electron

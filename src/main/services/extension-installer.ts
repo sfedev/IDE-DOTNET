@@ -201,7 +201,7 @@ export async function installFromUrl(url: string): Promise<InstallOutcome> {
 
   const response = await fetch(url, {
     signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
-    headers: { Accept: 'application/octet-stream', 'User-Agent': 'DotForge-IDE/2.2' },
+    headers: { Accept: 'application/octet-stream', 'User-Agent': 'DotForge-IDE/2.3' },
   });
 
   if (!response.ok) {

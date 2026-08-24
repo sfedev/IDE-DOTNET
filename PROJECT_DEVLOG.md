@@ -373,6 +373,31 @@ por tanto **compila** pero no **ejecuta** los proyectos generados. Se añade el 
 
 ---
 
+### Fase 19 — Terminal navegable y barra de menú completa
+- [x] F19.1 Modelo puro de navegación de la terminal (`src/shared/terminal-cwd.ts`): `cd`, `chdir`,
+      `Set-Location`, `sl`, el `cd /d` de cmd, `D:` a secas, `pwd`/`Get-Location` (ADR-055)
+- [x] F19.2 `terminal-session.ts`: resolución contra el disco, comprobación del destino y memoria del
+      anterior para `cd -`
+- [x] F19.3 `terminal:run` clasifica antes de lanzar; canal `terminal:cwd`; el contexto se sincroniza
+      al abrir, al cerrar y al arrancar por línea de comandos
+- [x] F19.4 Ruta en el prompt, relativa al workspace o con `~`, recortada por el medio si no cabe, y
+      con la ruta completa en el `title`
+- [x] F19.5 El foco de la terminal sobrevive a los repintados del panel (`repaintPreservingFocus`)
+- [x] F19.6 Plantilla del menú como dato puro (`src/shared/menu-template.ts`), con `menu.ts` limitado
+      a traducirla a Electron (ADR-056)
+- [x] F19.7 Menús Archivo (abrir solución, recientes, cerrar solución), Editar (buscar, formatear,
+      ir a la definición, renombrar, asistente en línea), Ver (todas las vistas y los dos temas),
+      Datos (EF Core, migraciones, cliente HTTP), IA, Git, Compilar, Depurar y Ayuda
+- [x] F19.8 Submenú de soluciones recientes, con las no disponibles deshabilitadas y el menú
+      reinstalándose al abrir una solución
+- [x] F19.9 `ROLE_ACCELERATORS` y comprobación de choques contando los aceleradores heredados de los
+      `role` de Electron
+- [x] F19.10 Modo de diagnóstico `--menu-dump`: vuelca el menú ya construido por Electron
+- [x] F19.11 Pruebas: 75 nuevas (34 del modelo de la terminal, 20 de la sesión con carpetas de
+      verdad, 21 del menú) y 2 estructurales de endurecimiento
+
+---
+
 ## Decisiones técnicas (ADR corto)
 
 ### ADR-001 — Base del IDE: Electron + Monaco (no fork de VS Code, no Theia)
@@ -657,6 +682,45 @@ Al arreglarlo aparece la pregunta de verdad: **¿hasta dónde puede navegar el u
   raíz de la solución. Dentro de un IDE es lo que uno quiere el 99 % de las veces, y es lo que hace
   que la orden sirva para algo en vez de ser una curiosidad de plataforma. Sin solución abierta, al
   hogar.
+
+---
+
+### ADR-056 — El contenido del menú es un dato puro, no código dentro de `menu.ts`
+**Fecha:** 2026-08-24
+**Contexto:** La barra de menú nativa vivía entera dentro de `src/main/menu.ts`, que importa
+`electron`. Eso significa que no se podía cargar en una prueba, y por tanto que las tres formas en
+que un menú se rompe **en silencio** no las veía nadie: una entrada que manda un comando que el
+renderer no registra (se pulsa y no pasa absolutamente nada, porque `runCommandById` busca en la
+paleta y sale sin decir nada), dos entradas peleándose por el mismo acelerador (Electron registra
+las dos y gana una, sin que esté escrito cuál), y funcionalidades que existen en la paleta y no
+llegan al menú — había unos 60 comandos y el menú enseñaba unos 45.
+**Opciones:**
+- (a) dejarlo y revisarlo a ojo abriendo los menús;
+- (b) probar `menu.ts` con un doble de `electron`;
+- (c) sacar el contenido a un módulo puro y dejar en `menu.ts` sólo la traducción.
+**Decisión:** (c), más un modo de diagnóstico `--menu-dump` para lo que el dato no puede saber.
+**Consecuencias:**
+
+- `src/shared/menu-template.ts` describe la barra como datos (`command`, `role`, `link`,
+  `separator`, `recents`) y `menu.ts` la traduce. La prueba mira el dato.
+- (b) se descartó: un doble de `electron` comprobaría que el doble se llama bien, no que Electron
+  acepte lo que se le manda. Es justo lo que no interesa saber.
+- **Lo que el dato no puede saber tiene su propio modo de diagnóstico.** Un `role` inválido o un
+  acelerador que Electron no sepa parsear sólo fallan en ejecución, así que `--menu-dump` imprime la
+  barra **ya construida** y sale. No es un adorno: encontró dos choques de acelerador reales que la
+  prueba pura no podía ver.
+- **Los `role` traen acelerador aunque no lo declaren**, y ésa era la mitad invisible del problema:
+  `togglefullscreen` se quedaba `F11` —que en un IDE es "paso a paso por instrucciones"— y `close`
+  se quedaba `Ctrl+W`, que es cerrar pestaña. Se añade `ROLE_ACCELERATORS` con lo que Electron pone
+  por su cuenta, la comprobación de choques lo tiene en cuenta, y hay una prueba que exige que
+  ningún `role` nuevo entre sin apuntar el suyo. Con eso, el tercer choque (el mismo `Ctrl+W` en el
+  menú Archivo de macOS) lo encontró ya la prueba.
+- Donde hay conflicto entre la convención de Electron y la de Visual Studio, **gana Visual Studio**:
+  es el IDE del que viene quien usa esto. `F11` es paso a paso; pantalla completa se va a
+  `Alt+Shift+Enter`, que además es el atajo que usa el propio Visual Studio.
+- El menú se **reinstala** al abrir una solución. Un menú de Electron es estático una vez puesto, y
+  "Soluciones recientes" es lo único que cambia; reconstruir unas decenas de entradas es barato y es
+  la única forma de que no mienta.
 
 ---
 
@@ -2993,5 +3057,78 @@ asistente):
   `enfocado=terminal-input, valor=git st, cursor=4`.
 - `npx electron . --smoke-test` → `SMOKE_OK`; `unit` + `security` en verde con **1248 pruebas**
   (1192 antes).
+
+---
+
+### Iteración 28 — 2026-08-24 — Fase 19 (2/2): la barra de menú enseña el IDE entero
+
+**Objetivo:** una barra de menú superior tradicional que sirva para llegar a todo, para quien
+prefiere menús a la paleta de comandos.
+
+**Hecho, archivo a archivo:**
+
+- `src/shared/menu-template.ts` (**nuevo**): la barra entera como dato puro — diez secciones más el
+  menú de aplicación de macOS —, `ROLE_ACCELERATORS` (lo que Electron le pone a cada `role` por su
+  cuenta), `acceleratorOf`, `normalizeAccelerator` y `acceleratorClashes`.
+- `src/main/menu.ts`: se queda sólo con la traducción a Electron, el submenú de recientes y los
+  enlaces externos. Recibe sus dos dependencias inyectadas en vez de importarlas.
+- `src/main/main.ts`: le inyecta los ganchos al menú y añade `--menu-dump`.
+- `src/main/ipc/register.ts`: `listRecentWorkspaces`, `openRecentFromMenu`, el diálogo
+  `workspace:open-solution-dialog` y la reinstalación del menú al abrir solución.
+- `src/shared/contracts.ts`: catorce ids nuevos en `MenuCommand` y el canal del diálogo.
+- `src/main/preload.ts`: `workspace.openSolutionDialog()`.
+- `src/renderer/index.ts`: siete comandos nuevos de paleta y los métodos `openSolutionDialog`,
+  `closeWorkspace` y `openSolutionDocs`.
+- `src/renderer/views/explorer.ts`: `focusFilter()` extraído y el arreglo del filtro (ver abajo).
+- `src/main/testable.ts`, `tests/unit/menu-template.test.mjs` (**nuevo**).
+
+**Decisión registrada:** ADR-056 — el contenido del menú es un dato puro.
+
+**Errores encontrados y solucionados:**
+
+1. *Síntoma:* tres aceleradores duplicados que ninguna prueba veía.
+   *Causa raíz:* **los `role` de Electron traen acelerador aunque no lo declaren.**
+   `togglefullscreen` se quedaba `F11` —que en un IDE es "paso a paso por instrucciones"— y `close`
+   se quedaba `Ctrl+W`, que es "cerrar pestaña". La comprobación de choques miraba sólo los
+   aceleradores escritos, o sea la mitad de las teclas, y daba verde.
+   *Arreglo:* `ROLE_ACCELERATORS`, la comprobación mirando también los heredados, y el criterio de
+   desempate escrito: donde chocan Electron y Visual Studio, gana Visual Studio. Los dos primeros
+   choques los encontró `--menu-dump` sobre el menú ya construido; el tercero —el mismo `Ctrl+W` en
+   el Archivo de macOS— ya lo encontró la prueba reforzada, que es exactamente para lo que se
+   reforzó.
+2. *Síntoma:* la prueba afirmaba que el renderer no conoce **ningún** comando del menú.
+   *Causa raíz:* la trampa que `CLAUDE.md` documenta desde la Iteración 22, dos veces seguidas en la
+   misma línea: escribir `\b` por shell deja un **carácter de retroceso literal** (0x08) en el
+   archivo. El patrón deja de casar, no se ve al leerlo, y el fallo parece del código.
+   *Arreglo:* `new RegExp(String.raw…)` escrito con la herramienta de edición, más un comentario en
+   la propia línea. Van ocho veces.
+3. *Síntoma:* "Buscar archivos por nombre" abría el explorador y no pasaba nada más.
+   *Causa raíz:* **bug preexistente desde la Fase 7.** `focusFilter` abre la caja poniendo un
+   espacio como centinela de "abierta y vacía", y el render la pintaba sólo si
+   `this.filter.trim() !== ''`. Un espacio recortado es vacío, así que el botón "Filtrar por
+   nombre" de la barra de la vista llevaba desde entonces sin hacer nada visible.
+   *Arreglo:* abrir la caja mira el valor sin recortar; filtrar de verdad sigue mirando el
+   recortado, porque un espacio no puede descartar archivos.
+
+**Lo que no se ha hecho, y por qué:** el enunciado pedía "buscar en archivos" en el menú Editar.
+DotForge **no busca dentro del contenido** de los archivos —no hay ni servicio ni índice— y añadir
+esa búsqueda es una funcionalidad, no una entrada de menú. La entrada existe, se llama **"Buscar
+archivos por nombre…"** y filtra el árbol del explorador, que es lo que de verdad hace. Prometer una
+búsqueda de contenido y filtrar por nombre sería peor que no ofrecerla.
+
+**Verificado sobre la aplicación real:**
+
+- `--menu-dump` construye las **10 secciones** sin que Electron rechace ningún `role` ni ningún
+  acelerador, y `MENU_OK`. Pasado por `sort | uniq -d` sobre los aceleradores impresos: **ninguno
+  repetido**.
+- El submenú de recientes se llena de verdad: `Soluciones recientes (8)`.
+- Los comandos nuevos, ejercitados desde la paleta como los usaría una persona: `Tema claro` dos
+  veces seguidas deja el tema en `dotforge-light` —no es un conmutador disfrazado— y `Tema oscuro`
+  lo devuelve a `dotforge-dark`; `Cliente HTTP` deja activa la pestaña `HTTP`; `Documentación de la
+  solución abierta` abre `README.md` en el editor; `Cerrar la solución` deja
+  `workspace.current() === null` y devuelve la terminal a `~`.
+- El filtro del explorador, tras el arreglo: la barra aparece, recibe el foco y filtra.
+- `npx electron . --smoke-test` → `SMOKE_OK`; `unit` + `security` en verde con **1269 pruebas**
+  (1248 tras el módulo de la terminal, 1192 antes de la fase).
 
 ---

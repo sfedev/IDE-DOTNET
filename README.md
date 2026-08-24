@@ -326,7 +326,14 @@ composición, donde se registran las implementaciones en el contenedor de depend
 Ante la duda, el linter calla: un proyecto con un nombre que no encaja en ninguna capa, o una
 solución cuya arquitectura no se reconoce, no producen ni un aviso.
 
-### Terminal: Docker, Azure y npm
+### Terminal: navegación, Docker, Azure y npm
+
+**Se navega con `cd`.** A una subcarpeta, a otra solución, a otra unidad: la terminal lleva la
+cuenta de dónde estás y el prompt lo dice. Se entienden las tres formas de escribirlo que conviven
+en Windows —`cd`, `chdir`, `Set-Location`/`sl`, el `cd /d D:\algo` de cmd y `D:` a secas— más `~`
+para la carpeta personal y `cd -` para volver a la anterior. `cd` a secas te devuelve a la raíz de
+la solución, que es lo que uno quiere dentro de un IDE. Si la carpeta no existe, el mensaje trae la
+ruta completa ya resuelta, no lo que escribiste.
 
 El autocompletado de la terminal integrada ya no se limita a `git` y `dotnet`:
 
@@ -463,6 +470,10 @@ una licencia que sí permite consumirlos desde otro producto.
 - **61 iconos vectoriales propios** en una sola rejilla, incluidas las marcas del ecosistema (C#,
   Razor, solución, proyecto) y de las carpetas con significado: `Controllers`, `Models`,
   `Services`, `Pages`, `Components`, `Domain`, `Ports`, `wwwroot`…
+- **Barra de menú superior completa**: Archivo (abrir solución, abrir carpeta, soluciones
+  recientes, guardar, cerrar), Editar, Ver (todas las vistas y los dos temas por nombre), Datos
+  (EF Core, migraciones, cliente HTTP), Git, Compilar, Depurar, IA y Ayuda. Todo lo que hay en la
+  paleta de comandos está también en un menú, para quien prefiere navegar con el ratón.
 - Barra de actividad con una herramienta por dominio y barra de estado con lo imprescindible: SDK
   activo, estado del servidor de lenguaje, rama de Git y errores.
 - **La barra de actividad se ordena a tu gusto**: arrastra los iconos y el orden se guarda. "Ajustes"
