@@ -14,6 +14,11 @@ Su módulo estrella es el **Scaffolding Wizard**: un generador de arquitecturas 
 que produce soluciones .NET **compilables y ejecutables** siguiendo Clean Architecture,
 Arquitectura Hexagonal (Ports & Adapters) o Domain-Driven Design + CQRS.
 
+Desde la v2.4.0 el IDE **busca dentro de los archivos**: `Ctrl+Shift+F` abre un panel con las tres
+banderas de siempre (mayúsculas, palabra completa, expresión regular), patrones glob de inclusión y
+exclusión, resultados agrupados por archivo y salto a la **línea y columna exactas**, con la
+coincidencia seleccionada. Hasta ahora sólo sabía filtrar el árbol del explorador por nombre.
+
 Desde la v2.3.0 la **terminal navega por el disco**: `cd` funciona de verdad —a otra solución, a
 otra unidad, a la carpeta de al lado— y el prompt dice dónde estás en cada momento. Y la **barra de
 menú superior enseña el IDE entero**: diez menús con todos los comandos de la paleta detrás,
@@ -105,6 +110,7 @@ IDE-DOTNET/
 │   │   ├── dev-tunnel.ts       # * Túneles: argumentos y reconocimiento de la URL pública (puro)
 │   │   ├── perf-counters.ts    # * dotnet-counters: dos generaciones de contadores (puro)
 │   │   ├── nuget-audit.ts      # * dotnet list package --vulnerable: JSON y tabla (puro)
+│   │   ├── file-search.ts      # * Buscar en los archivos: qué casa, qué entra y cómo se recorta (puro)
 │   │   ├── terminal-cwd.ts     # * Navegación de la terminal: qué es un `cd` y cómo se pinta (puro)
 │   │   ├── menu-template.ts    # * Contenido de la barra de menú, con aceleradores de roles (puro)
 │   │   ├── nuget-install.ts    # * Instalar un paquete en varios proyectos: plan y progreso (puro)
@@ -131,6 +137,7 @@ IDE-DOTNET/
 │   │   │                       # git-service.ts (estado y operaciones de control de fuentes),
 │   │   │                       # efcore-service.ts (dotnet ef + migraciones del disco),
 │   │   │                       # http-client-service.ts (envío real de las peticiones .http),
+│   │   │                       # search-service.ts (recorrido del workspace y lectura de archivos),
 │   │   │                       # docker-service.ts (estado del motor), node-scripts.ts (package.json),
 │   │   │                       # test-service.ts (descubrimiento, dotnet test y lectura del TRX),
 │   │   │                       # tunnel-service.ts (devtunnel/ngrok), metrics-service.ts (contadores),
@@ -164,7 +171,8 @@ IDE-DOTNET/
 │       │                       # efcore (panel de base de datos), http (cliente del panel inferior),
 │       │                       # containers (contenedores y Docker Compose),
 │       │                       # tests (explorador de pruebas), metrics (monitor de rendimiento),
-│       │                       # extensions (panel de Open VSX), update-card (tarjeta flotante)
+│       │                       # extensions (panel de Open VSX), update-card (tarjeta flotante),
+│       │                       # search (buscar en los archivos)
 │       └── styles/             # theme.css (tokens), layout.css, components.css
 ├── resources/              # Iconos multirresolución, branding
 ├── scripts/                # Build, generación de iconos, fetch de toolchain, verificación
@@ -252,7 +260,9 @@ npx electron . --smoke-test
   un usuario (`wizard`, `settings`, `nuget`, `debug`, `ai`, `terminal`, `palette`, `light`,
   `nesting`, `startup`, `startup-dialog`, `terminal-suggest`, `git`, `git-diff`, `startup-play`,
   `startup-run-mode`, `ai-toggle`, `efcore`, `http`, `logs`, `startup-logs`, `containers`,
-  `tests`, `tests-run`, `metrics`, `audit`, `extensions`, `update`). `update` pinta la tarjeta de
+  `tests`, `tests-run`, `metrics`, `audit`, `extensions`, `update`, `search`). `search` además
+  **escribe** en la caja: el panel de búsqueda no enseña nada hasta que hay una consulta, así que
+  abrirlo y ya no revisa nada. `update` pinta la tarjeta de
   actualización con un estado de ejemplo: publicar una versión de verdad para poder mirarla no es
   una opción, y no mirarla nunca tampoco.
 - `--ui-wait=<ms>` — cuánto se espera antes de **pulsar** la acción de `--ui=`. Los 3,2 s por
@@ -423,6 +433,29 @@ npx electron . --smoke-test
   Un gestor que instala y calla se percibe como roto.
 - Los iconos se dibujan localmente (ADR-049), como en NuGet: la CSP no admite imágenes remotas y
   descargarlas le contaría al registro qué está mirando el usuario.
+
+### Buscar en los archivos (`src/shared/file-search.ts`, `src/main/services/search-service.ts`)
+
+- **La raíz no llega del renderer** (ADR-057). El canal `search:in-files` la toma de
+  `getWorkspaceRoot()`, así que no tiene ninguna ruta que validar: no hay forma de pedirle que
+  busque en `C:\Windows`. Lo que sí llega —consulta, banderas, globs y topes— pasa entero por
+  `coerceSearchOptions`.
+- **Nada síncrono en el recorrido.** Misma regla que el ADR-051: en Electron el hilo que lee el
+  disco es el que repinta la ventana y atiende el IPC. Hay una prueba de seguridad que se pone en
+  rojo si vuelve a aparecer `readFileSync` o `readdirSync` en el servicio.
+- **Los resultados salen antes de terminar.** Se emiten por lotes (`event:search-progress`) y el
+  resumen final llega como valor de la llamada. Los dos llevan el mismo `searchId`, que es lo que
+  permite descartar los avances de una búsqueda ya abandonada; una consulta nueva cancela la
+  anterior, que abandona en cuanto lo nota.
+- **`bin` y `obj` no se miran nunca.** `obj` de una solución .NET contiene copias generadas de los
+  `.cs` del proyecto: sin saltarlos, cada coincidencia aparecería dos o tres veces y ninguna de las
+  copias sería la que hay que editar.
+- **"Palabra completa" no se escribe con `\b`.** Ver la sección de trampas: con `\b`, buscar un
+  símbolo como palabra completa no encuentra nada nunca.
+- La vista repinta el panel entero en cada respuesta, así que la caja va marcada con
+  `data-focus-key` y todo el pintado pasa por `repaintPreservingFocus` (ADR-052).
+- **Una expresión regular a medias no es un error**: viaja como `error` dentro del resumen, igual
+  que un fallo de red en el cliente HTTP, y la vista lo enseña en pequeño sin vaciar nada.
 
 ### Terminal integrada (`src/main/services/terminal-session.ts`, `src/shared/terminal-cwd.ts`)
 
@@ -891,3 +924,32 @@ npm run fetch:toolchain -- --platform win32 --arch x64
   'Microsoft.EntityFrameworkCore'`: el `project.assets.json` daba el paquete por restaurado y el DLL
   no estaba en la caché. Un build rápido de más es una señal, no una suerte; la clave de la caché
   lleva versión (`-v2-`) para poder descartarla entera.
+- **Un glob dentro de un comentario de bloque cierra el comentario.** Escribir `src/**/*.razor` como
+  ejemplo en la cabecera de un `.ts` mete un `*/` en mitad del texto: el compilador ve el comentario
+  terminado ahí y el resto del párrafo pasa a ser código. El error que sale (`TS1109: Expression
+  expected` en la línea siguiente) no menciona el comentario, así que se busca en el sitio
+  equivocado. Se escribe el ejemplo partido (`src/**` con `*.razor`) o con la barra escapada.
+- **"Palabra completa" no se implementa con `\b`.** Es lo que se escribe por costumbre y funciona
+  con todo lo que empieza y acaba en letra, pero `\b` es la frontera entre carácter de palabra y
+  todo lo demás: `\b\+\b` no casa **jamás**. Buscar `+` como palabra completa devolvería siempre
+  cero resultados en un archivo lleno de sumas, y como el caso normal funciona, nadie lo mira. Con
+  miradas negativas a los lados (`(?<!\w)…(?!\w)`) se comporta como uno espera. Y la clase de
+  "carácter de palabra" no puede ser `\w`, que es ASCII: con ella, "Configuración" contiene la
+  palabra completa "Configuraci".
+- **Una expresión regular global tiene memoria.** `lastIndex` sobrevive entre llamadas, así que
+  reutilizar la misma instancia línea a línea sin ponerla a cero se salta coincidencias **de forma
+  intermitente**, según lo larga que fuera la línea anterior. Y una coincidencia de **longitud
+  cero** (`a*`, `^`, `\b`) deja `lastIndex` donde estaba: sin empujarlo a mano, el bucle no termina
+  nunca y la ventana se queda colgada.
+- **La coma de una lista de globs también separa las alternativas.** `*.cs, src/**` se parte por
+  comas, pero `*.{cs,razor}` no: partirlo deja `*.{cs` y `razor}`, dos patrones que no encuentran
+  nada y no dicen por qué. Hay que llevar la cuenta de las llaves abiertas al trocear.
+- **La expresión de `--probe=` tiene que ser una expresión, no sentencias.** Va envuelta en
+  `Promise.resolve(...)`, así que un `const x = …;` delante da `PROBE_FAIL` sin más detalle y parece
+  un error del código que se está midiendo. Lo que sí se puede es devolver una `Promise` y hacer
+  dentro todo lo que haga falta, incluidos `setTimeout` encadenados para pulsar y medir después.
+- **Tras un repintado, la referencia que guardaste ya no está en el documento.** Medir el foco de un
+  panel guardando el `<input>` en una variable y volviendo a mirarlo después de una búsqueda mide un
+  nodo **desconectado**: conserva el valor viejo y su cursor, mientras el vivo está en otra parte.
+  El síntoma es una medición que dice que el arreglo del foco no funciona cuando sí funciona. Se
+  vuelve a consultar el selector en cada paso, y se comprueba contra `document.activeElement`.

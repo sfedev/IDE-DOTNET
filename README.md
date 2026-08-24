@@ -47,6 +47,7 @@ VSX** para buscar, instalar y desinstalar `.vsix` desde el registro abierto.
 ## Índice
 
 - [Características](#características)
+- [Buscar en los archivos](#buscar-en-los-archivos)
 - [Control de código fuente](#control-de-código-fuente)
 - [Asistente de IA](#asistente-de-ia)
 - [Base de datos y Entity Framework Core](#base-de-datos-y-entity-framework-core)
@@ -107,6 +108,29 @@ VSX** para buscar, instalar y desinstalar `.vsix` desde el registro abierto.
   y al terminar cualquier operación en segundo plano, incluso si esa operación ha fallado.
 
 ![Editor con un componente Blazor generado](docs/screenshot-editor.png)
+
+### Buscar en los archivos
+
+`Ctrl+Shift+F` abre el panel de búsqueda: busca **dentro** del contenido de los archivos de la
+solución, no por nombre de archivo.
+
+- Texto plano, **distinción de mayúsculas** (`Aa`), **palabra completa** (`ab`) y **expresión
+  regular** (`.*`), con las tres banderas conmutables sobre la propia caja.
+- **Archivos a incluir y a excluir** con patrones glob: `*.cs`, `src/**`, `*.{cs,razor}`,
+  `tests/`. Separados por coma, y con `!` delante para excluir sin salir del mismo campo
+  (`*.cs, !*.designer.cs`).
+- Resultados **agrupados por archivo**, con el número de coincidencias por archivo y el total, en
+  grupos que se pliegan.
+- Al pulsar un resultado, el archivo se abre en su **línea y columna exactas** y la coincidencia
+  queda **seleccionada**: se puede sustituir escribiendo encima.
+- Los resultados van apareciendo mientras la búsqueda avanza, y una consulta nueva abandona a la
+  anterior. Nunca se entra en `bin`, `obj`, `node_modules`, `.git` ni `TestResults`: en una
+  solución compilada, `obj` contiene copias generadas de los `.cs` y ninguna es la que hay que
+  editar.
+- Si estás escribiendo una expresión regular a medias, lo dice en pequeño y deja lo que había: `(`
+  es un estado normal de quien la está escribiendo, no un error.
+
+Con una selección viva en el editor, `Ctrl+Shift+F` busca eso directamente.
 
 ### Soluciones .NET
 
@@ -470,6 +494,8 @@ una licencia que sí permite consumirlos desde otro producto.
 - **61 iconos vectoriales propios** en una sola rejilla, incluidas las marcas del ecosistema (C#,
   Razor, solución, proyecto) y de las carpetas con significado: `Controllers`, `Models`,
   `Services`, `Pages`, `Components`, `Domain`, `Ports`, `wwwroot`…
+- **Búsqueda de contenido** en toda la solución, con banderas, globs de inclusión y exclusión, y
+  salto a la línea y la columna exactas.
 - **Barra de menú superior completa**: Archivo (abrir solución, abrir carpeta, soluciones
   recientes, guardar, cerrar), Editar, Ver (todas las vistas y los dos temas por nombre), Datos
   (EF Core, migraciones, cliente HTTP), Git, Compilar, Depurar, IA y Ayuda. Todo lo que hay en la
@@ -689,6 +715,8 @@ En macOS, `Ctrl` es `Cmd`.
 | Ir a la definición | `F12` |
 | Renombrar símbolo | `F2` |
 | Buscar en el archivo | `Ctrl+F` |
+| **Buscar en los archivos** | `Ctrl+Shift+F` |
+| Buscar archivos por nombre en el explorador | `Ctrl+P` |
 | Formatear documento | `Alt+Shift+F` |
 
 ---

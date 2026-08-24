@@ -398,6 +398,41 @@ por tanto **compila** pero no **ejecuta** los proyectos generados. Se añade el 
 
 ---
 
+### Fase 20 — Buscar dentro de los archivos
+- [x] F20.1 Modelo puro de la búsqueda (`src/shared/file-search.ts`): texto plano, mayúsculas,
+      palabra completa y expresión regular, con el mensaje del motor conservado
+- [x] F20.2 Globs de inclusión y exclusión (`*`, `**`, `?`, `{a,b}`, `tests/`), con `!` como
+      negación dentro de la propia caja de inclusión
+- [x] F20.3 Recorte de la línea que se enseña, con la columna dentro del recorte y la de verdad
+      viajando aparte para el editor
+- [x] F20.4 Saneado de lo que llega del renderer (`coerceSearchOptions`): tipos, longitudes y topes
+- [x] F20.5 `search-service.ts`: recorrido asíncrono del workspace, ocho lecturas a la vez sobre un
+      mismo generador, sin nada síncrono (ADR-051)
+- [x] F20.6 Directorios de construcción y dependencias saltados por nombre; binarios descartados por
+      extensión y, los que se cuelan, por el byte cero; tope de tamaño por archivo
+- [x] F20.7 Resultados emitidos por lotes mientras el recorrido sigue, y cancelación: una búsqueda
+      nueva abandona a la anterior, que lo nota y se para
+- [x] F20.8 Canales `search:in-files` y `search:cancel` más el evento `event:search-progress`, con
+      la raíz tomada del guardián de rutas y no del renderer (ADR-057)
+- [x] F20.9 Undécima herramienta de la barra de actividad y panel `search.ts`: caja, banderas
+      `Aa`/`ab`/`.*` y campos plegables de archivos a incluir y a excluir
+- [x] F20.10 Rebote de 300 ms con el foco y el cursor conservados en el repintado (ADR-052), y
+      descarte de las respuestas que llegan tarde por número de orden
+- [x] F20.11 Resultados agrupados por archivo, plegables, con recuento por archivo y total, y la
+      coincidencia resaltada dentro de la línea
+- [x] F20.12 Pulsar un resultado abre el archivo en su línea y columna exactas **con la coincidencia
+      seleccionada** (`EditorView.open` acepta `length`)
+- [x] F20.13 Comando `search.findInFiles` con `Ctrl+Shift+F`, entrada "Buscar en los archivos…" en
+      Editar y en Ver; el filtro por nombre del explorador conserva su comando y pasa a `Ctrl+P`
+- [x] F20.14 Modo de diagnóstico `--ui=search`, que además escribe en la caja
+- [x] F20.15 Pruebas: 74 nuevas (49 del modelo, 18 del servicio con carpetas de verdad, 5 de
+      seguridad de la superficie nueva, 2 del menú y 2 de la barra de actividad)
+- [x] F20.16 Verificado sobre la aplicación real: 294 resultados en 23 archivos en 20 ms sobre una
+      solución Clean, salto a `Ln 4, Col 36` con `Product` seleccionado, foco y cursor conservados
+      al escribir, y filtros glob bajando de 294 a 133
+
+---
+
 ## Decisiones técnicas (ADR corto)
 
 ### ADR-001 — Base del IDE: Electron + Monaco (no fork de VS Code, no Theia)
@@ -721,6 +756,42 @@ llegan al menú — había unos 60 comandos y el menú enseñaba unos 45.
 - El menú se **reinstala** al abrir una solución. Un menú de Electron es estático una vez puesto, y
   "Soluciones recientes" es lo único que cambia; reconstruir unas decenas de entradas es barato y es
   la única forma de que no mienta.
+
+---
+
+### ADR-057 — La búsqueda recorre el workspace, y quién dice cuál es el workspace no es el renderer
+**Fecha:** 2026-08-24
+**Contexto:** Buscar dentro de los archivos es la primera funcionalidad que **lee el disco en bucle
+a petición del renderer**. Todo lo anterior que tocaba archivos abría uno concreto, con su ruta
+validada por `assertInsideWorkspace`. Aquí no hay una ruta: hay un árbol entero, y la pregunta
+evidente es quién decide de dónde cuelga.
+**Opciones:**
+- (a) que el renderer mande la raíz y validarla con `assertInsideWorkspace`;
+- (b) que el proceso principal la tome de `getWorkspaceRoot()` y el canal no acepte ninguna ruta;
+- (c) permitir buscar en una carpeta arbitraria elegida con un diálogo.
+**Decisión:** (b).
+**Consecuencias:**
+
+- El canal `search:in-files` **no tiene ninguna ruta que validar**, que es una garantía más fuerte
+  que validarla bien: no hay forma de pedirle que recorra `C:\Windows` ni de escaparse con `..`,
+  porque no hay parámetro por donde intentarlo. Lo demás que llega del renderer —consulta, banderas,
+  globs y topes— pasa entero por `coerceSearchOptions`, y los topes están acotados: un renderer
+  comprometido no puede pedir un millón de resultados para agotar la memoria.
+- (a) se descartó porque no aporta nada: el renderer no conoce ninguna raíz que el proceso principal
+  no conozca ya, así que aceptarla sólo añade una superficie que hay que validar en cada revisión.
+- (c) se descartó por ahora. Buscar en una carpeta fuera de la solución abierta es una petición
+  razonable, pero el camino honesto para eso es **abrir esa carpeta**, que es lo que ya hace el IDE
+  y lo que además deja el explorador, el LSP y la terminal diciendo lo mismo.
+- Sin solución abierta el canal contesta un resumen vacío con su motivo, no un error: no tener nada
+  abierto es un estado normal. Y cerrar la solución cancela la búsqueda en marcha, que si no seguiría
+  leyendo archivos de un workspace que ya no lo es.
+- La terminal fue en dirección contraria (ADR-055: el `cwd` **no** se ata al workspace) y no es una
+  contradicción: allí quien navega es una persona escribiendo `cd`, y lo que acota la superficie es
+  la lista blanca de programas. Aquí quien recorre es código, en bucle, sin que nadie mire.
+- El recorrido no usa nada síncrono, por la misma razón que el ADR-051: en Electron, el hilo que lee
+  el disco es el que repinta la ventana y atiende el IPC del renderer. Hay una prueba estructural que
+  se pone en rojo si vuelve a aparecer un `readFileSync` ahí dentro, porque es de lo más fácil de
+  colar en una revisión: compila, funciona y sólo se nota con una solución grande delante.
 
 ---
 
@@ -3130,5 +3201,95 @@ búsqueda de contenido y filtrar por nombre sería peor que no ofrecerla.
 - El filtro del explorador, tras el arreglo: la barra aparece, recibe el foco y filtra.
 - `npx electron . --smoke-test` → `SMOKE_OK`; `unit` + `security` en verde con **1269 pruebas**
   (1248 tras el módulo de la terminal, 1192 antes de la fase).
+
+---
+
+### Iteración 29 — 2026-08-24 — Fase 20: buscar dentro de los archivos
+
+**Objetivo:** cerrar el agujero que la Iteración 28 dejó documentado. El menú tenía "Buscar archivos
+por nombre…" porque DotForge **no sabía buscar dentro del contenido**: ni servicio, ni panel, ni
+canal. Filtrar el árbol por nombre es otra cosa, y llamarla "buscar en archivos" habría sido peor
+que no ofrecerla.
+
+**Hecho, archivo a archivo:**
+
+- `src/shared/file-search.ts` (**nuevo**): el modelo. `buildSearchRegExp` (texto plano, mayúsculas,
+  palabra completa, expresión regular), `matchesInLine`, `previewOf`, `searchContent`,
+  `globToRegExp` / `compileGlobs` / `matchesGlobs`, `looksBinary`, `hasBinaryExtension`,
+  `coerceSearchOptions` y `describeResults`. Sin disco y sin DOM.
+- `src/main/services/search-service.ts` (**nuevo**): el recorrido. Generador asíncrono con ocho
+  lectores tirando del mismo iterador, lotes emitidos mientras se busca, y un contador de generación
+  que hace de identificador de búsqueda **y** de testigo de cancelación.
+- `src/shared/contracts.ts`, `src/main/preload.ts`, `src/main/ipc/register.ts`: `search:in-files`,
+  `search:cancel` y `event:search-progress`. La raíz sale de `getWorkspaceRoot()`; cerrar la
+  solución cancela lo que hubiera en marcha.
+- `src/renderer/views/search.ts` (**nuevo**): el panel. Rebote de 300 ms, foco conservado, banderas,
+  filtros plegables, grupos por archivo y la coincidencia resaltada dentro de la línea.
+- `src/renderer/views/editor.ts`: `open()` acepta `length` y **selecciona** lo encontrado.
+- `src/shared/activity-bar.ts`: `search` como herramienta reordenable.
+- `src/shared/menu-template.ts` y `src/renderer/index.ts`: `search.findInFiles` con `Ctrl+Shift+F`;
+  el filtro por nombre del explorador se queda con `Ctrl+P`.
+- `src/main/main.ts`: `--ui=search`.
+- `src/renderer/styles/components.css`, `src/main/testable.ts`, `tests/unit/file-search.test.mjs`
+  (**nuevo**), `tests/unit/search-service.test.mjs` (**nuevo**), `tests/security/hardening.test.mjs`,
+  `tests/unit/menu-template.test.mjs`, `tests/unit/activity-bar.test.mjs`.
+
+**Decisión registrada:** ADR-057 — la raíz de la búsqueda la pone el proceso principal.
+
+**Errores encontrados y solucionados:**
+
+1. *Síntoma:* `TS1109: Expression expected` en la línea 10 de un archivo recién escrito, y otros
+   veinte errores detrás que no tenían ningún sentido.
+   *Causa raíz:* la cabecera del archivo ponía `src/**/*.razor` como ejemplo de glob. Eso mete un
+   `*/` en mitad de un comentario de bloque: **el comentario termina ahí** y el resto del párrafo
+   pasa a ser código. Ningún error menciona el comentario.
+   *Arreglo:* el ejemplo escrito partido. Anotado en `CLAUDE.md`.
+2. *Síntoma:* buscar `*.{cs,razor}` en la caja de inclusión no encontraba nada.
+   *Causa raíz:* la coma hace dos cosas —separa patrones de la lista y separa alternativas dentro de
+   `{}`—, y trocear por comas a secas dejaba `*.{cs` y `razor}`, dos patrones inservibles que no
+   casan con nada y no explican por qué.
+   *Arreglo:* el troceo lleva la cuenta de las llaves abiertas. Lo cazó una prueba escrita antes de
+   mirar el código, que es exactamente para lo que estaba.
+3. *Síntoma:* la medición del foco decía que el cursor acababa en 8 y no en 4, o sea que el arreglo
+   de la Fase 18 no funcionaba en este panel.
+   *Causa raíz:* **la medición**. El probe guardaba el `<input>` en una variable, y el repintado ya
+   lo había sustituido: se estaba midiendo un nodo desconectado, con su valor viejo y su cursor
+   viejo, mientras el vivo estaba en otra parte.
+   *Arreglo:* volver a consultar el selector en cada paso y comprobar contra `document.activeElement`.
+   Repetida, la medición da 4 con el nodo ya sustituido, que es justo lo que se quería demostrar.
+4. *Síntoma:* `--probe=` contestaba `PROBE_FAIL` sin más detalle con una expresión que se leía bien.
+   *Causa raíz:* empezaba por `const`. La expresión va envuelta en `Promise.resolve(...)`, así que
+   admite una expresión, no sentencias. La trampa documentada decía "en una sola línea"; le faltaba
+   la mitad.
+   *Arreglo:* devolver una `Promise` y hacer dentro lo que haga falta. Anotado en `CLAUDE.md`.
+5. *Síntoma:* dos viñetas de `CLAUDE.md` quedaron con las comillas vacías donde debía poner `\b`.
+   *Causa raíz:* la trampa de siempre, la décima vez: **escribir contrabarras a través del shell**.
+   El heredoc se comió un nivel y `\b` acabó siendo un retroceso literal (0x08) dentro del
+   documento, invisible al leerlo.
+   *Arreglo:* reparado y reescrito con la herramienta de edición. La ironía de que le pasara a la
+   viñeta que explica por qué `\b` no sirve para "palabra completa" queda anotada aquí.
+
+**Lo que no se ha hecho, y por qué:** no hay **reemplazo** en todos los archivos. Buscar es leer y
+reemplazar es escribir en decenas de archivos de golpe, con vista previa por archivo, deshacer y
+qué hacer con los que están abiertos y sucios. Es una funcionalidad entera, no el botón de al lado,
+y a medias sería peligrosa. Tampoco se busca fuera de la solución abierta (ADR-057): el camino para
+eso es abrir esa carpeta.
+
+**Verificado sobre la aplicación real**, con una solución Clean generada:
+
+- **294 resultados en 23 archivos en 20 ms** buscando `Product`; con "palabra completa", 112 en 15
+  archivos. Con `*.cs, !*Tests*` en la caja de inclusión, 133 y ningún archivo de pruebas.
+- **El salto es exacto:** pulsar `src/Acme.Shop.Application/DependencyInjection.cs:4:29` abre la
+  pestaña, deja `Ln 4, Col 36` en la barra de estado y la selección valiendo exactamente `Product`.
+- **El foco sobrevive:** escribiendo con el cursor en mitad de la palabra, tras el repintado queda
+  `enfocado=search-query`, valor intacto y cursor en 4, con el nodo del `<input>` ya sustituido.
+- **Una expresión regular a medias:** `Product(` en modo regex dice "La expresión regular no es
+  válida — Invalid regular expression: /Product(/gi: Unterminated group", cero resultados y la caja
+  sigue enfocada.
+- **Desde la paleta**, como lo usaría una persona: "Buscar en los archivos · Editar · Ctrl+Shift+F"
+  abre la vista `Buscar`, enfoca la caja y marca la herramienta `search` como activa.
+- `npx electron . --menu-dump` → 10 secciones, `MENU_OK`, **ningún acelerador repetido**.
+- `npx electron . --smoke-test` → `SMOKE_OK`; `npm test` entero en verde, con **1343 pruebas**
+  (1269 antes) más las de empaquetado y las tres arquitecturas compilando y pasando sus pruebas.
 
 ---
