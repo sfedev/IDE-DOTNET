@@ -429,6 +429,20 @@ npx electron . --smoke-test
 - Una versión que falla queda en cuarentena **por RID**, salvo que la auditoría demuestre que la
   culpa era de la copia: entonces se borra la copia y se le levanta el veto (ADR-044).
 
+### Peticiones del toolchain y token de GitHub (`src/shared/github-api.ts`)
+
+- **Todas las cabeceras se piden al mismo sitio.** Ningún adquisidor las escribe a mano:
+  `requestHeaders(url, …)` decide qué lleva cada petición. Hay una prueba estructural que cuenta los
+  `fetch(` de cada adquisidor y exige que todos deleguen; es fácil colar una credencial en la
+  descarga del artefacto, que va a otro host.
+- **El token sólo viaja a `api.github.com`** (ADR-050), por HTTPS y comparando el `hostname` entero.
+  Ni al CDN de artefactos, ni al feed de Azure de Roslyn, ni a Open VSX. Se lee de `GITHUB_TOKEN` o
+  `GH_TOKEN` **en un único archivo de todo `src/`**, y una prueba lo vigila.
+- **Una redirección no arrastra la credencial**, y eso está probado con dos servidores locales en
+  puertos distintos, no supuesto: la descarga de un artefacto de GitHub siempre salta de host.
+- Un 403 de esa API casi nunca es un permiso: es el límite de 60 peticiones por hora **y por IP**.
+  `rateLimitHint` lo dice con esas palabras en vez de dejar el número suelto.
+
 ### Tokens semánticos (`src/shared/semantic-tokens.ts`)
 
 - **Las listas de capacidades no pueden ir vacías.** Para LSP, `tokenTypes: []` significa "no
@@ -718,3 +732,22 @@ npm run fetch:toolchain -- --platform win32 --arch x64
 - **Un modelo de texto que ya trae su marca no se pinta dentro de una `<ul>`.** Las notas de una
   release convierten `- ` en `· ` a propósito —los encabezados no llevan marca y las viñetas sí—, y
   meterlas en una lista de verdad pinta dos viñetas en unas líneas y ninguna en otras.
+- **Un clon limpio no es tu árbol de trabajo.** La suite pasaba en local y falló en CI en la primera
+  ejecución del pipeline sobre un checkout nuevo, por dos motivos a la vez: las plantillas llegaron
+  con CRLF (Git para Windows y los runners traen `core.autocrlf` activado) y el binario de Electron
+  no estaba. Lo que pruebes en una carpeta que lleva meses instalada no prueba lo que verá el
+  siguiente. Hay `.gitattributes` con `eol=lf` desde la v2.1.0, pero la regla de fondo sigue: las
+  comparaciones sobre archivos del repositorio se normalizan al leer.
+- **`electron` ya no se instala solo.** Desde la 43 el paquete **no declara script de instalación**:
+  el binario lo baja su propio bin (`node node_modules/electron/install.js`, idempotente). Y npm 11
+  además bloquea los scripts de instalación pendientes de aprobación —lo avisa con
+  `packages have install scripts not yet covered by allowScripts`—, así que ni siquiera los paquetes
+  que sí los declaran los ejecutan. En CI hay que instalarlo en un paso explícito.
+- **La API de GitHub sin autenticar da 403 en CI, no 429.** Son 60 peticiones por hora **y por IP**,
+  y la IP de un runner compartido está agotada casi siempre. El mensaje no menciona el límite, así
+  que parece un problema de permisos o de red. Con `GITHUB_TOKEN` en el entorno son 5 000/hora.
+- **Una caché de paquetes puede estar restaurada y a medias.** En macOS, la Web API generada compiló
+  en 7 s —imposible en frío— y murió al arrancar con `Could not load file or assembly
+  'Microsoft.EntityFrameworkCore'`: el `project.assets.json` daba el paquete por restaurado y el DLL
+  no estaba en la caché. Un build rápido de más es una señal, no una suerte; la clave de la caché
+  lleva versión (`-v2-`) para poder descartarla entera.

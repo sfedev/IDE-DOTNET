@@ -57,6 +57,20 @@ export type { QuarantineEntry, QuarantineRecord, ServerFault, ServerFaultCategor
  */
 export { configurationResponse, serverRequestResponse } from '../shared/lsp-protocol.js';
 
+/**
+ * Cabeceras del toolchain y dónde puede viajar el token de GitHub. Es puro y es la pieza que hay
+ * que poder probar sin red: decide si una credencial sale del proceso y hacia qué host.
+ */
+export {
+  githubToken,
+  GITHUB_ACCEPT,
+  GITHUB_API_HOST,
+  isGitHubApi,
+  rateLimitHint,
+  requestHeaders,
+  USER_AGENT,
+} from '../shared/github-api.js';
+
 export {
   buildManifest,
   describeProblems,

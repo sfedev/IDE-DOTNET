@@ -26,6 +26,20 @@ import {
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const templatesRoot = join(root, 'src', 'scaffold', 'templates');
 
+/**
+ * Lee una plantilla con los saltos de línea normalizados a LF.
+ *
+ * Las aserciones de este archivo son expresiones regulares que llevan un salto de línea dentro
+ * —el diagrama Mermaid se busca como la valla de código seguida de `flowchart`— y comparaciones
+ * literales. En un clon de Windows con `core.autocrlf`, el archivo llega con CRLF y esos patrones
+ * dejan de casar: pasó en la primera ejecución del pipeline sobre el tag v2.1.0, y sólo en Windows.
+ * El `.gitattributes` fuerza LF en el árbol de trabajo, y esto hace además que la prueba no dependa
+ * de la configuración de git de quien la ejecute.
+ */
+function readTemplate(file) {
+  return readFileSync(file, 'utf8').replace(new RegExp(String.raw`\r\n`, 'g'), '\n');
+}
+
 function walk(dir) {
   const found = [];
   for (const entry of readdirSync(dir)) {
@@ -159,14 +173,14 @@ describe('README didáctico de cada arquitectura', () => {
     const file = join(templatesRoot, blueprint.templateDir, 'README.md.tmpl');
 
     it(`${id}: la plantilla existe y cubre las seis secciones`, () => {
-      const source = readFileSync(file, 'utf8');
+      const source = readTemplate(file);
       for (const seccion of SECCIONES) {
         assert.match(source, seccion, `${id}: falta la sección ${seccion}`);
       }
     });
 
     it(`${id}: incluye diagramas Mermaid de dependencias y de flujo`, () => {
-      const source = readFileSync(file, 'utf8');
+      const source = readTemplate(file);
       assert.match(source, /```mermaid\n(flowchart|graph)/, `${id}: sin diagrama de dependencias`);
       assert.match(source, /```mermaid\nsequenceDiagram/, `${id}: sin diagrama de flujo`);
       // Mermaid usa {{texto}} para los nodos hexagonales, y el motor lo interpretaría como token.
@@ -174,7 +188,7 @@ describe('README didáctico de cada arquitectura', () => {
     });
 
     it(`${id}: documenta las reglas de dependencia de cada capa`, () => {
-      const source = readFileSync(file, 'utf8');
+      const source = readTemplate(file);
       assert.match(source, /DEBE estar aquí/, `${id}: no dice qué código va en cada capa`);
       assert.match(source, /TIENE PROHIBIDO estar aquí/, `${id}: no dice qué código NO va en cada capa`);
 
@@ -186,7 +200,7 @@ describe('README didáctico de cada arquitectura', () => {
     });
 
     it(`${id}: la guía paso a paso llega hasta la presentación y cierra con checklist`, () => {
-      const source = readFileSync(file, 'utf8');
+      const source = readTemplate(file);
       for (const paso of ['Paso 1 ·', 'Paso 2 ·', 'Paso 3 ·', 'Paso 4 ·', 'Paso 5 ·']) {
         assert.ok(source.includes(paso), `${id}: falta el ${paso}`);
       }
@@ -194,7 +208,7 @@ describe('README didáctico de cada arquitectura', () => {
     });
 
     it(`${id}: los comandos de la CLI de .NET están documentados`, () => {
-      const source = readFileSync(file, 'utf8');
+      const source = readTemplate(file);
       for (const comando of ['dotnet restore', 'dotnet build', 'dotnet test', 'dotnet run --project', 'dotnet watch']) {
         assert.ok(source.includes(comando), `${id}: falta el comando ${comando}`);
       }
@@ -217,7 +231,7 @@ describe('cobertura de tokens y flags de las plantillas', () => {
     const problems = [];
 
     for (const file of allTemplates) {
-      const source = readFileSync(file, 'utf8');
+      const source = readTemplate(file);
       let found;
       try {
         found = inspectTemplate(source);
@@ -305,7 +319,7 @@ describe('plantilla de salida de Serilog', () => {
   });
 
   for (const file of appsettings) {
-    const contents = readFileSync(file, 'utf8');
+    const contents = readTemplate(file);
     if (!contents.includes('outputTemplate')) continue;
 
     it(`${file.slice(templatesRoot.length + 1)}: la hora es un marcador, no texto`, () => {

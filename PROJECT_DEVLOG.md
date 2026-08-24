@@ -434,6 +434,34 @@ gramáticas TextMate o temas de VS Code, la lista de "sirve" crece y no hay que 
 del renderer declara `img-src 'self' data:` y no se va a relajar por unos iconos, y descargarlos le
 contaría al registro qué extensiones está mirando el usuario. El color sale de un hash del
 identificador, así que la misma extensión se ve siempre igual y la lista sigue siendo escaneable.
+### ADR-050 — El token de GitHub sólo viaja a `api.github.com`
+**Fecha:** 2026-08-24
+**Contexto:** La adquisición de NetCoreDbg y de OmniSharp consulta la API de GitHub para saber cuál
+es la última release. Sin autenticar, esa API permite 60 peticiones por hora **y por IP**; la IP de
+un runner compartido las tiene agotadas casi siempre, y el resultado es un 403 que rompió la suite
+en la primera ejecución del pipeline sobre un clon limpio.
+**Opciones:**
+- (a) dejarlo sin autenticar y convivir con un CI que falla de forma intermitente;
+- (b) fijar la versión del depurador y del servidor de respaldo para no preguntar a la API;
+- (c) autenticar la consulta cuando haya un token en el entorno.
+**Decisión:** (c), con el alcance acotado en un módulo puro (`src/shared/github-api.ts`).
+**Consecuencias:** autenticar sube el límite a 5 000 peticiones/hora, pero mete una credencial en el
+proceso, así que el alcance es la parte importante de la decisión y no un detalle de implementación:
+
+- El token se adjunta **sólo** si el host es exactamente `api.github.com` y el protocolo es HTTPS.
+  La comparación es del `hostname` completo: `api.github.com.malo.dev` **contiene** el host bueno y
+  no lo es, y un subdominio tampoco hereda la credencial.
+- No lo llevan la descarga del artefacto (`objects.githubusercontent.com`), ni el feed de Azure donde
+  se publica Roslyn, ni el registro de extensiones. Son las peticiones que más pesan y ninguna
+  necesita credencial.
+- Se lee de `GITHUB_TOKEN` o `GH_TOKEN` y **en un único archivo de todo `src/`**, con una prueba
+  estructural que lo vigila: si el token se pudiera leer desde cualquier módulo, la garantía
+  dependería de que nadie se despiste, que no es una garantía.
+- Fuera de CI no suele haber ninguna de las dos variables, y ése es el camino normal: sin token, el
+  comportamiento es idéntico al anterior.
+- La opción (b) se descartó porque el problema no es la elección de versión —eso ya se resolvió para
+  Roslyn en la ADR-040— sino la consulta en sí: incluso fijando la versión hay que resolver la URL
+  del artefacto, y eso pasa por la API.
 ---
 
 ## Bitácora de iteraciones
@@ -2314,3 +2342,74 @@ se ejecutan, y se dice), ADR-049 (los iconos se dibujan).
 
 **Versión:** dos funcionalidades nuevas, compatibles hacia atrás y sin cambios de comportamiento en
 lo existente: 2.0.0 → **2.1.0** (ADR-009).
+---
+
+### Iteración 22 — 2026-08-24 — Hotfix del pipeline: la suite se pone en verde en un clon limpio
+
+**Objetivo:** que `npm test` pase en Windows y en macOS dentro de GitHub Actions. La publicación del
+tag `v2.1.0` fue la primera ejecución del workflow sobre un **clon limpio**, y destapó cuatro
+problemas de entorno que llevaban tiempo latentes. Ninguno venía de la Fase 17: sus 90 pruebas
+pasaron en los dos runners, incluida la instalación real de un `.vsix` en disco.
+
+Consecuencia práctica del fallo: `build-windows` y `build-macos` declaran `needs: test`, así que no
+se generó ningún artefacto de la 2.1.0.
+
+**Hecho:**
+
+1. **CRLF (`unit`, sólo Windows).** Las plantillas se comparan con expresiones regulares que llevan
+   un salto de línea dentro (la valla de código de Mermaid seguida de `flowchart`). En un clon de
+   Windows, `core.autocrlf` —el valor por defecto de Git para Windows y el de los runners— entrega
+   el `.tmpl` con CRLF y el patrón deja de casar. Se añade `.gitattributes` con `* text=auto eol=lf`
+   y se normaliza al leer en `tests/unit/blueprints.test.mjs`, con `readTemplate()`. Las dos cosas:
+   el atributo elimina la causa y la normalización hace que la prueba no dependa de la configuración
+   de git de quien la ejecute.
+2. **Binario de Electron (`package`, los dos runners).** `electron@43.4.1` **ya no declara script de
+   instalación** —se comprobó en el paquete instalado: `scripts` es `undefined` y el descargador se
+   expone como bin `install-electron`— y además npm 11 bloquea los scripts pendientes de aprobación
+   (`2 packages have install scripts not yet covered by allowScripts`). El resultado es que
+   `node_modules/electron/dist` no existe y la prueba de humo no tiene nada que arrancar. Se añade un
+   paso explícito `node node_modules/electron/install.js` en los tres jobs, que es idempotente.
+3. **Límite de la API de GitHub (`scaffold`).** `no se ha podido consultar las releases de NetCoreDbg
+   (403)`. Las consultas iban sin autenticar, y ese límite es de 60 peticiones por hora **y por IP**:
+   la de un runner compartido está agotada casi siempre. Se añade `src/shared/github-api.ts`, que
+   decide qué cabeceras lleva cada URL y adjunta el token **sólo** a `api.github.com` (ADR-050), y se
+   inyecta `GITHUB_TOKEN` en el paso `npm test`. De paso, un 403 ya no es un número suelto: dice que
+   es el límite por IP y cómo salir de él.
+4. **Caché de NuGet (`scaffold`, sólo macOS).** La Web API generada arrancaba y moría con
+   `Could not load file or assembly 'Microsoft.EntityFrameworkCore, Version=10.0.11.0'`. El build
+   tardó 7 s, que no da para una restauración fría: venía de una caché de una ejecución anterior con
+   el paquete a medias —el `project.assets.json` lo daba por restaurado y el DLL no estaba—. Se sube
+   la clave a `nuget-${{ runner.os }}-v2-…` y se quita `restore-keys`, porque recuperar una caché
+   anterior es justamente lo que hay que evitar aquí.
+
+**Decisión registrada:** ADR-050 — el token de GitHub sólo viaja a `api.github.com`.
+
+**Errores encontrados y solucionados:**
+
+1. *Síntoma:* al escribir el helper `readTemplate` por shell, el archivo quedó con saltos de línea
+   **reales** dentro de la expresión regular en vez de con `\r\n`.
+   *Causa raíz:* la trampa que `CLAUDE.md` ya documenta: un heredoc se come un nivel de escapes.
+   *Arreglo:* reescrito con la herramienta de edición y con `new RegExp(String.raw…)`, que es la
+   forma que la propia guía recomienda para no volver a pisarla. Ha vuelto a pasar; el recordatorio
+   sigue siendo necesario.
+
+**Verificado con comandos reales:**
+
+- **El caso de Windows, reproducido y arreglado en local:** con los tres `README.md.tmpl` convertidos
+  a CRLF a propósito, `node --test tests/unit/blueprints.test.mjs` pasa 49/49. Antes del cambio, el
+  mismo patrón devolvía `false` sobre el texto con CRLF y `true` sobre el mismo texto normalizado.
+- **El paso de Electron, ejercitado de verdad:** se apartó `node_modules/electron/dist`, se ejecutó
+  `node node_modules/electron/install.js` (salida 0) y el binario volvió a estar en su sitio.
+- **El alcance del token, probado:** 21 pruebas nuevas en `tests/unit/github-api.test.mjs`, entre
+  ellas la lista de URLs reales del toolchain (API, CDN de artefactos, feed de Azure, Open VSX) con
+  lo que debe pasar en cada una, y **una redirección real entre dos servidores locales en puertos
+  distintos** que comprueba que el segundo salto no recibe `Authorization`. Más 4 pruebas
+  estructurales en el grupo de seguridad: ningún adquisidor escribe cabeceras a mano y el token se
+  lee en un único archivo de todo `src/`.
+- `npm test` en verde de punta a punta: **1221 pruebas** (1053 unit, 55 security, 57 package,
+  56 scaffold), con 25 nuevas en este hotfix.
+- El YAML del workflow se valida y quedan los tres jobs con sus pasos en orden.
+
+**Lo que este hotfix no arregla:** el workflow sube artefactos pero **no publica la release**. El tag
+`v2.1.0` no creará la publicación con sus notas; eso sigue siendo manual mientras no se añada un paso
+de publicación.

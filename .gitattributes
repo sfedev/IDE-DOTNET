@@ -1,0 +1,29 @@
+# Finales de línea del repositorio.
+#
+# El repositorio está en LF y hay código que depende de ello: pruebas que buscan patrones a final
+# de línea, plantillas cuyo contenido se compara literalmente y scripts que parsean su propia
+# salida. En un Windows con `core.autocrlf=true` —el valor por defecto de Git para Windows y el de
+# los runners de GitHub— un clon limpio convierte todo a CRLF y esas comparaciones dejan de casar:
+# los diagramas Mermaid de las plantillas fallaron así en la primera ejecución del pipeline sobre
+# el tag v2.1.0, y sólo en Windows.
+#
+# `eol=lf` fuerza LF también en el árbol de trabajo, así que lo que ve una prueba es lo mismo en
+# cualquier sistema. No sustituye a normalizar al leer —una herramienta ajena puede reescribir un
+# archivo en CRLF— pero elimina la causa habitual.
+* text=auto eol=lf
+
+# Binarios: nunca se tocan. `text=auto` ya los detecta, pero declararlo evita depender de la
+# heurística justo en los archivos donde una conversión los corrompería.
+*.png binary
+*.jpg binary
+*.ico binary
+*.icns binary
+*.dll binary
+*.exe binary
+*.zip binary
+*.nupkg binary
+*.vsix binary
+*.db binary
+
+# Los `.tmpl` son código C#, Razor y JSON que se copia al disco del usuario: LF explícito.
+*.tmpl text eol=lf

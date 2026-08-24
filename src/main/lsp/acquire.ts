@@ -29,6 +29,7 @@ import {
   serializeQuarantine,
   type QuarantineRecord,
 } from '../../shared/lsp-health.js';
+import { githubToken, rateLimitHint, requestHeaders } from '../../shared/github-api.js';
 import { describeSelection, selectRoslynVersion, type RoslynSelection } from '../../shared/lsp-versions.js';
 import { describeProblems } from '../../shared/toolchain-manifest.js';
 import { installArchive, removeInstall, verifyInstall } from '../services/toolchain-install.js';
@@ -86,9 +87,11 @@ export function currentRid(): string {
  * consideraba buena.
  */
 async function download(url: string, onProgress: AcquireProgress, label: string): Promise<Buffer> {
+  // El artefacto no vive en la API: el `.nupkg` sale del feed de Azure y el ZIP de OmniSharp de
+  // `objects.githubusercontent.com`. `requestHeaders` no adjunta credencial a ninguno de los dos.
   const response = await fetch(url, {
     signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
-    headers: { 'User-Agent': 'DotForge-IDE/1.0', Accept: 'application/octet-stream' },
+    headers: requestHeaders(url, { accept: 'application/octet-stream' }),
   });
 
   if (!response.ok) {
@@ -171,9 +174,10 @@ function roslynPackageId(rid: string): string {
 
 /** Todas las versiones que publica el feed para este RID. */
 export async function roslynFeedVersions(rid: string): Promise<string[]> {
-  const response = await fetch(`${ROSLYN_FEED}/flat2/${roslynPackageId(rid)}/index.json`, {
+  const url = `${ROSLYN_FEED}/flat2/${roslynPackageId(rid)}/index.json`;
+  const response = await fetch(url, {
     signal: AbortSignal.timeout(60_000),
-    headers: { 'User-Agent': 'DotForge-IDE/1.0' },
+    headers: requestHeaders(url, { accept: 'application/json' }),
   });
 
   if (!response.ok) {
@@ -329,11 +333,15 @@ export async function acquireOmniSharpServer(
 
   const response = await fetch(OMNISHARP_RELEASES, {
     signal: AbortSignal.timeout(60_000),
-    headers: { 'User-Agent': 'DotForge-IDE/1.0', Accept: 'application/vnd.github+json' },
+    headers: requestHeaders(OMNISHARP_RELEASES),
   });
 
   if (!response.ok) {
-    throw new Error(`no se ha podido consultar las releases de OmniSharp (${response.status})`);
+    // Igual que con NetCoreDbg: un 403 sin token es el límite por IP, no un permiso.
+    const hint = rateLimitHint(response.status, githubToken() !== null);
+    throw new Error(
+      `no se ha podido consultar las releases de OmniSharp (${response.status})${hint === null ? '' : `: ${hint}`}`,
+    );
   }
 
   const release = (await response.json()) as {

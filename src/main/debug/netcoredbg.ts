@@ -10,6 +10,7 @@ import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { githubToken, rateLimitHint, requestHeaders } from '../../shared/github-api.js';
 import { describeProblems } from '../../shared/toolchain-manifest.js';
 import { installArchive, verifyInstall } from '../services/toolchain-install.js';
 
@@ -45,9 +46,11 @@ export function assetNameForPlatform(): string | null {
 async function download(url: string, onProgress: (detail: string, ratio: number | null) => void): Promise<Buffer> {
   onProgress('descargando NetCoreDbg', null);
 
+  // La descarga vive en `objects.githubusercontent.com`, no en la API: `requestHeaders` no le
+  // adjunta ninguna credencial, y es justo lo que se quiere.
   const response = await fetch(url, {
     signal: AbortSignal.timeout(10 * 60 * 1000),
-    headers: { 'User-Agent': 'DotForge-IDE/1.0' },
+    headers: requestHeaders(url, { accept: 'application/octet-stream' }),
   });
 
   if (!response.ok) {
@@ -93,11 +96,16 @@ export async function acquireDebugger(
 
   const response = await fetch(RELEASES, {
     signal: AbortSignal.timeout(60_000),
-    headers: { 'User-Agent': 'DotForge-IDE/1.0', Accept: 'application/vnd.github+json' },
+    headers: requestHeaders(RELEASES),
   });
 
   if (!response.ok) {
-    throw new Error(`no se ha podido consultar las releases de NetCoreDbg (${response.status})`);
+    // Un 403 aquí casi nunca es un permiso: es el límite por IP de la API sin autenticar, que en
+    // un runner de CI compartido está agotado a todas horas. Se dice, en vez de dejar un número.
+    const hint = rateLimitHint(response.status, githubToken() !== null);
+    throw new Error(
+      `no se ha podido consultar las releases de NetCoreDbg (${response.status})${hint === null ? '' : `: ${hint}`}`,
+    );
   }
 
   const release = (await response.json()) as {

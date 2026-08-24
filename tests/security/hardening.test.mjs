@@ -9,7 +9,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
+import { join, dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -292,6 +292,63 @@ describe('ejecución de procesos', () => {
       if (/\beval\s*\(/.test(content) || /new Function\s*\(/.test(content)) offenders.push(file);
     }
     assert.deepEqual(offenders, []);
+  });
+});
+
+/**
+ * Token de la API de GitHub.
+ *
+ * Autenticar la consulta de releases evita el 403 por límite de IP que rompe cualquier CI, pero
+ * mete una credencial en el proceso. Lo que se vigila aquí es estructural: que nadie vuelva a
+ * escribir cabeceras a mano en un adquisidor —donde es fácil colar el token en la descarga del
+ * artefacto, que va a otro host— y que el token no se lea desde ningún otro punto del código.
+ *
+ * El comportamiento (a qué host se adjunta y qué pasa en una redirección) se prueba aparte, en
+ * `tests/unit/github-api.test.mjs`.
+ */
+describe('alcance del token de GitHub', () => {
+  const acquirers = {
+    'src/main/lsp/acquire.ts': readSource('src/main/lsp/acquire.ts'),
+    'src/main/debug/netcoredbg.ts': readSource('src/main/debug/netcoredbg.ts'),
+  };
+
+  it('los adquisidores no escriben cabeceras a mano: las pide todas al mismo sitio', () => {
+    for (const [path, source] of Object.entries(acquirers)) {
+      const fetches = source.match(/await fetch\(/g) ?? [];
+      const delegated = source.match(/headers: requestHeaders\(/g) ?? [];
+
+      assert.ok(fetches.length > 0, `${path}: no se ha detectado ninguna petición`);
+      assert.equal(
+        delegated.length,
+        fetches.length,
+        `${path}: ${fetches.length} peticiones y sólo ${delegated.length} usan requestHeaders`,
+      );
+    }
+  });
+
+  it('ningún adquisidor construye una cabecera de autorización por su cuenta', () => {
+    for (const [path, source] of Object.entries(acquirers)) {
+      assert.doesNotMatch(source, /Authorization\s*:/, `${path}: cabecera de autorización a mano`);
+      assert.doesNotMatch(source, /Bearer /, `${path}: credencial escrita a mano`);
+    }
+  });
+
+  /**
+   * Un único punto de lectura. Si el token se pudiera leer desde cualquier módulo, la garantía de
+   * "sólo viaja a api.github.com" dependería de que nadie se despiste, que no es una garantía.
+   */
+  it('el token sólo se lee en el módulo que decide adónde puede viajar', () => {
+    const readers = walkSources(join(root, 'src'))
+      .filter((file) => /GITHUB_TOKEN|GH_TOKEN/.test(readFileSync(file, 'utf8')))
+      .map((file) => relative(join(root, 'src'), file).split(sep).join('/'));
+
+    assert.deepEqual(readers, ['shared/github-api.ts'], `lo leen también: ${readers.join(', ')}`);
+  });
+
+  it('la credencial se compara contra el host completo, no por prefijo', () => {
+    const source = readSource('src/shared/github-api.ts');
+    assert.match(source, /hostname\.toLowerCase\(\) === GITHUB_API_HOST/);
+    assert.match(source, /parsed\.protocol === 'https:'/);
   });
 });
 

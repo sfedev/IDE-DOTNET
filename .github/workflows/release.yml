@@ -35,17 +35,37 @@ jobs:
             10.0.x
 
       # El primer `dotnet build` de cada plantilla restaura paquetes; cachearlos ahorra minutos.
+      #
+      # La clave lleva `v2` desde el hotfix de la v2.1.0: una caché anterior dejó a macOS con un
+      # `Microsoft.EntityFrameworkCore` que el build daba por restaurado y el runtime no encontraba,
+      # y la Web API generada moría al arrancar. Subir la versión de la clave descarta esa caché
+      # entera en vez de arrastrar el problema. Sin `restore-keys`, a propósito: recuperar una
+      # caché anterior es justamente lo que hay que evitar.
       - name: Cachear paquetes NuGet
         uses: actions/cache@v4
         with:
           path: ~/.nuget/packages
-          key: nuget-${{ runner.os }}-${{ hashFiles('src/scaffold/context.ts') }}
-          restore-keys: nuget-${{ runner.os }}-
+          key: nuget-${{ runner.os }}-v2-${{ hashFiles('src/scaffold/context.ts') }}
 
       - run: npm ci
+
+      # electron 43 ya no trae script de instalación —el binario se baja con su propio bin— y npm 11
+      # además bloquea los scripts de instalación pendientes de aprobación. Sin este paso,
+      # `node_modules/electron/dist` no existe y la prueba de humo de la aplicación no puede
+      # arrancar nada. Es idempotente: sale con 0 si el binario ya está.
+      - name: Install Electron binary
+        run: node node_modules/electron/install.js
+
       - run: npm run build
       - run: npx tsc --noEmit
+
+      # El token evita el 403 por límite de peticiones de la API de GitHub, que sin autenticar es de
+      # 60 por hora **y por IP**: la de un runner compartido está agotada casi siempre, y la
+      # adquisición de NetCoreDbg y de OmniSharp se queda sin poder resolver su release. Sólo viaja
+      # a `api.github.com`; lo vigila `tests/unit/github-api.test.mjs`.
       - run: npm test
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-windows:
     name: Artefactos de Windows
@@ -61,6 +81,10 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      - name: Install Electron binary
+        run: node node_modules/electron/install.js
+
       - run: npm run icons
       - run: npm run dist:win
       - run: node scripts/verify-dist.mjs --require win
@@ -87,6 +111,10 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      - name: Install Electron binary
+        run: node node_modules/electron/install.js
+
       - run: npm run icons
       - run: npm run dist:mac
       - run: node scripts/verify-dist.mjs --require mac
