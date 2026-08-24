@@ -12,6 +12,8 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import type { LspState } from '../../shared/contracts.js';
+import { createServerLogScanner, type ServerFault, type ServerLogScanner } from '../../shared/lsp-health.js';
+import { serverRequestResponse } from '../../shared/lsp-protocol.js';
 import { CLIENT_TOKEN_MODIFIERS, CLIENT_TOKEN_TYPES } from '../../shared/semantic-tokens.js';
 import { APP_VERSION } from '../../shared/version.js';
 import type { AcquiredServer } from './acquire.js';
@@ -30,6 +32,8 @@ export interface LspClientEvents {
   notification: [{ method: string; params: unknown }];
   state: [LspState];
   log: [string];
+  /** El servidor se ha roto por dentro aunque siga contestando. Ver `src/shared/lsp-health.ts`. */
+  fault: [{ fault: ServerFault; server: AcquiredServer }];
 }
 
 /** Capacidades que DotForge anuncia. Sólo se declara lo que el renderer sabe consumir. */
@@ -114,12 +118,43 @@ export class LspClient extends EventEmitter {
   /** Qué servidor está en marcha. Roslyn necesita que se le abra la solución; OmniSharp no. */
   private serverKind: AcquiredServer['kind'] | null = null;
 
+  /** El servidor tal y como se adquirió: hace falta su versión y su directorio para poder conmutar. */
+  private server: AcquiredServer | null = null;
+
+  /**
+   * Escáner del stderr del servidor.
+   *
+   * No es un detalle de registro: es la **única** señal de que el servidor se ha roto. Cuando el
+   * gráfico MEF de Roslyn no compone, el proceso no muere, contesta al handshake y anuncia
+   * "Language server initialized" por stdout; lo que falla después es cada petición, en silencio.
+   */
+  private scanner: ServerLogScanner = createServerLogScanner();
+
+  /**
+   * Hemos pedido nosotros que se pare.
+   *
+   * Sin esto no se puede distinguir un cierre ordenado de una espantada: los dos terminan con
+   * código 0. Y la espantada existe —Roslyn se apaga solo cuando su cola de mensajes se rompe—,
+   * así que un cierre que nadie ha pedido es un fallo del servidor y tiene que disparar el respaldo.
+   */
+  private intentionalStop = false;
+
   getState(): LspState {
     return this.state;
   }
 
   getServerCapabilities(): Record<string, unknown> | null {
     return this.serverCapabilities;
+  }
+
+  /** El servidor en marcha, o `null`. */
+  getServer(): AcquiredServer | null {
+    return this.server;
+  }
+
+  /** El fallo detectado en el arranque actual, si lo hubo. */
+  getFault(): ServerFault | null {
+    return this.scanner.fault();
   }
 
   private setState(patch: Partial<LspState>): void {
@@ -149,9 +184,18 @@ export class LspClient extends EventEmitter {
 
     this.child = child;
     this.serverKind = server.kind;
+    this.server = server;
+    this.scanner = createServerLogScanner();
+    this.intentionalStop = false;
 
     child.stdout?.on('data', (chunk: Buffer) => this.onData(chunk));
-    child.stderr?.on('data', (chunk: Buffer) => this.emit('log', chunk.toString('utf8')));
+    child.stderr?.on('data', (chunk: Buffer) => {
+      const text = chunk.toString('utf8');
+      this.emit('log', text);
+
+      const fault = this.scanner.push(text);
+      if (fault !== null) this.emit('fault', { fault, server });
+    });
 
     child.on('error', (error) => {
       this.setState({ status: 'error', message: `no se ha podido lanzar el servidor: ${error.message}` });
@@ -160,6 +204,31 @@ export class LspClient extends EventEmitter {
     child.on('close', (code) => {
       this.rejectAllPending(new Error(`el servidor de lenguaje ha terminado con código ${code}`));
       this.child = null;
+
+      // Lo que quedara en el búfer sin salto de línea final: un volcado de excepción que mata al
+      // proceso suele terminar justo así, sin el último `\n`.
+      const logged = this.scanner.flush();
+      const wasUp = this.state.status === 'ready' || this.state.status === 'starting';
+
+      /**
+       * Un cierre que no hemos pedido es un fallo aunque el código sea 0.
+       *
+       * Es el caso de Roslyn rompiendo su cola de mensajes: se despide con un `logMessage` por
+       * stdout y sale con 0, sin tocar stderr. Sin esta rama el IDE se queda con un servidor
+       * muerto, la barra en "error" y ningún respaldo.
+       */
+      const fault =
+        logged ??
+        (!this.intentionalStop && wasUp
+          ? {
+              category: 'crash' as const,
+              signature: 'exit',
+              detail: `el servidor se ha cerrado solo con código ${code}`,
+            }
+          : null);
+
+      if (fault !== null) this.emit('fault', { fault, server });
+
       if (this.state.status !== 'idle') {
         this.setState({ status: 'error', message: `el servidor ha terminado con código ${code}` });
       }
@@ -197,6 +266,7 @@ export class LspClient extends EventEmitter {
 
     const child = this.child;
     this.child = null;
+    this.intentionalStop = true;
 
     try {
       // Cortesía primero: shutdown + exit dan al servidor ocasión de cerrar sus archivos.
@@ -216,6 +286,7 @@ export class LspClient extends EventEmitter {
     this.rejectAllPending(new Error('el servidor de lenguaje se ha detenido'));
     this.serverCapabilities = null;
     this.serverKind = null;
+    this.server = null;
     this.setState({ status: 'idle', server: null, version: null, message: null, progress: null });
   }
 
@@ -337,9 +408,15 @@ export class LspClient extends EventEmitter {
     }
 
     if (typeof message['method'] === 'string') {
-      // Peticiones del servidor al cliente: se responden con null para no dejarlo bloqueado.
+      /**
+       * Peticiones del **servidor** al cliente. Hay que contestarlas o se queda bloqueado, pero
+       * contestar `null` a todas no es "no contestar nada malo": a `workspace/configuration`,
+       * Roslyn responde apagándose con código 0 y sin un solo error por stderr. Lo que se devuelve
+       * lo decide `src/shared/lsp-protocol.ts`, que es puro y está probado.
+       */
       if (typeof id === 'number' && this.child) {
-        this.writeTo(this.child, { jsonrpc: '2.0', id, result: null });
+        const result = serverRequestResponse(message['method'], message['params']);
+        this.writeTo(this.child, { jsonrpc: '2.0', id, result });
       }
       this.emit('notification', { method: message['method'], params: message['params'] });
     }

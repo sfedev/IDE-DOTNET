@@ -308,9 +308,35 @@ describe('descargas del toolchain', () => {
   });
 
   it('se registra el hash del artefacto descargado', () => {
-    for (const source of sources) {
-      assert.match(source, /sha256\(/);
-    }
+    // El depurador lo sigue calculando él mismo; el servidor de lenguaje delega en el instalador
+    // verificable, que además del hash del archivo descargado anota uno por cada archivo extraído.
+    assert.match(readSource('src/main/debug/netcoredbg.ts'), /sha256\(/);
+    assert.match(readSource('src/main/lsp/acquire.ts'), /installArchive\(/);
+
+    const install = readSource('src/main/services/toolchain-install.ts');
+    assert.match(install, /sourceSha256: sha256\(archive\)/, 'el hash del artefacto descargado');
+    assert.match(install, /sha256: sha256\(contents\)/, 'y uno por archivo extraído');
+  });
+
+  /**
+   * Una descarga cortada no puede pasar por buena.
+   *
+   * Un ZIP truncado puede conservar directorio central válido para parte de sus entradas, así que
+   * el error no aparece al extraer sino mucho después, dentro del proceso que carga el ensamblado
+   * mutilado. Se comprueba contra `content-length` antes de tocar el disco.
+   */
+  it('la descarga del servidor de lenguaje comprueba la longitud anunciada', () => {
+    const source = readSource('src/main/lsp/acquire.ts');
+    assert.match(source, /content-length/);
+    assert.match(source, /received !== total/);
+  });
+
+  /**
+   * Y una instalación no se da por buena porque exista una marca: se comprueba archivo a archivo
+   * contra el manifiesto. Sin esto, un solo archivo truncado en disco es invisible para siempre.
+   */
+  it('la instalación del servidor de lenguaje se verifica antes de lanzarlo', () => {
+    assert.match(readSource('src/main/lsp/acquire.ts'), /verifyInstall\(directory\)/);
   });
 });
 

@@ -36,6 +36,7 @@ import { EF_OPERATIONS } from '../../shared/efcore.js';
 import { TUNNEL_TOOLS, isValidPort, missingToolMessage } from '../../shared/dev-tunnel.js';
 import type { TunnelTool } from '../../shared/dev-tunnel.js';
 import type { MetricsState } from '../../shared/perf-counters.js';
+import { describeFault, type ServerFault } from '../../shared/lsp-health.js';
 import { legendFromCapabilities } from '../../shared/semantic-tokens.js';
 import { filterForClass, filterForTests } from '../../shared/test-explorer.js';
 import { buildDiffRequest } from '../../shared/git.js';
@@ -47,7 +48,15 @@ import { DEFAULT_STARTUP_CONFIG } from '../../shared/startup.js';
 import { listBlueprints } from '../../scaffold/blueprints/index.js';
 import { generateSolution } from '../../scaffold/generator.js';
 import { debugController, resolveDebugTarget } from '../debug/debug-controller.js';
-import { acquireLanguageServer } from '../lsp/acquire.js';
+import {
+  acquireLanguageServer,
+  auditInstall,
+  discardInstall,
+  pardonRoslynVersion,
+  quarantineRoslynVersion,
+  type AcquiredServer,
+  type AcquireProgress,
+} from '../lsp/acquire.js';
 import { lspClient } from '../lsp/lsp-client.js';
 import * as aiService from '../services/ai/ai-service.js';
 import * as aiSecrets from '../services/ai/secret-store.js';
@@ -173,6 +182,108 @@ function toolchainDirectory(): string {
   return join(app.getPath('userData'), 'toolchain');
 }
 
+/**
+ * Hay una conmutación a OmniSharp en marcha.
+ *
+ * Sin esta bandera el fallo se atiende dos veces: la traza de MEF ocupa veinte líneas y el proceso
+ * sigue vivo escupiéndolas mientras ya se está bajando el respaldo.
+ */
+let switchingLanguageServer = false;
+
+/** Estamos dentro del arranque: el fallo lo atiende `startLanguageServer`, no el evento. */
+let startingLanguageServer = false;
+
+function acquireReporter(): AcquireProgress {
+  return (phase, ratio, detail) => {
+    broadcast(IPC_EVENTS.lspStateChanged, {
+      status: phase === 'done' ? 'starting' : 'acquiring',
+      server: null,
+      version: null,
+      message: detail,
+      progress: ratio,
+    } satisfies LspState);
+  };
+}
+
+/** Abre la solución en el servidor recién arrancado. Roslyn no carga nada por su cuenta. */
+function openCurrentWorkspace(): void {
+  if (!currentSolution) return;
+  lspClient.openWorkspace(
+    currentSolution.path,
+    currentSolution.projects.map((project) => project.path),
+  );
+}
+
+/**
+ * Conmuta a OmniSharp con Roslyn ya instalado y arrancado.
+ *
+ * Antes de rendirse con esa versión hay que responder una pregunta que cuesta caro equivocar:
+ * ¿está **corrupta esta copia** o está **mal la compilación**? Las dos se ven igual desde fuera
+ * —el mismo `PartDiscoveryException`— y se arreglan al revés. Una copia corrupta se borra y se
+ * vuelve a bajar; una compilación mala se veta, y vetar una versión buena por un archivo que se
+ * truncó al escribirlo dejaría a este equipo sin Roslyn para siempre.
+ *
+ * Por eso se audita la instalación entera, hash a hash, antes de decidir.
+ */
+async function switchToOmniSharp(fault: ServerFault, broken: AcquiredServer): Promise<LspState> {
+  if (switchingLanguageServer) return lspClient.getState();
+  switchingLanguageServer = true;
+
+  const reason = describeFault(fault, broken.displayName);
+
+  try {
+    broadcast(IPC_EVENTS.lspStateChanged, {
+      status: 'acquiring',
+      server: null,
+      version: null,
+      message: `${reason}; comprobando su instalación`,
+      progress: null,
+    } satisfies LspState);
+
+    const audit = await auditInstall(broken.directory);
+    console.error(`[lsp] ${reason}: ${fault.detail}`);
+    console.error(`[lsp] auditoría de ${broken.directory}: ${audit.detail}`);
+
+    if (audit.corrupt) {
+      // La copia estaba dañada: se tira para que el próximo arranque la baje limpia, y se le
+      // levanta el veto a la versión, que no tenía culpa de nada.
+      await discardInstall(broken.directory);
+      await pardonRoslynVersion(toolchainDirectory(), broken.version);
+    } else {
+      await quarantineRoslynVersion(toolchainDirectory(), broken.version, `${reason}: ${fault.detail}`);
+    }
+
+    await lspClient.stop();
+
+    const fallback = await acquireLanguageServer(toolchainDirectory(), acquireReporter(), { prefer: 'omnisharp' });
+    const state = await lspClient.start(fallback, currentSolution?.directory ?? broken.directory);
+    openCurrentWorkspace();
+
+    const explanation = audit.corrupt
+      ? `${reason} porque su copia estaba dañada (${audit.detail}); se ha reinstalado para el próximo arranque`
+      : `${reason}; esa versión queda descartada en este equipo`;
+
+    const next: LspState = { ...state, message: `${explanation}. IntelliSense servido por ${fallback.displayName}.` };
+    broadcast(IPC_EVENTS.lspStateChanged, next);
+    return next;
+  } catch (error) {
+    const state: LspState = {
+      status: 'degraded',
+      server: null,
+      version: null,
+      message:
+        `${reason} y tampoco ha sido posible arrancar OmniSharp ` +
+        `(${error instanceof Error ? error.message : String(error)}). ` +
+        'El editor sigue funcionando con resaltado y snippets.',
+      progress: null,
+    };
+    broadcast(IPC_EVENTS.lspStateChanged, state);
+    return state;
+  } finally {
+    switchingLanguageServer = false;
+  }
+}
+
 async function startLanguageServer(): Promise<LspState> {
   const settings = settingsService.current();
   if (!settings.lspEnabled) {
@@ -190,25 +301,27 @@ async function startLanguageServer(): Promise<LspState> {
     progress: 0,
   } satisfies LspState);
 
+  startingLanguageServer = true;
   try {
-    const server = await acquireLanguageServer(toolchainDirectory(), (phase, ratio, detail) => {
-      broadcast(IPC_EVENTS.lspStateChanged, {
-        status: phase === 'done' ? 'starting' : 'acquiring',
-        server: null,
-        version: null,
-        message: detail,
-        progress: ratio,
-      } satisfies LspState);
-    });
+    const server = await acquireLanguageServer(toolchainDirectory(), acquireReporter());
+    if (server.note !== null) console.error(`[lsp] ${server.displayName} ${server.note}`);
 
     const state = await lspClient.start(server, currentSolution.directory);
 
+    /**
+     * El fallo de MEF llega por stderr **antes** de que el servidor conteste al handshake, así que
+     * cuando `start()` vuelve ya está detectado. Se comprueba aquí en vez de reaccionar al evento
+     * porque conmutar a mitad de un `initialize` en vuelo deja peticiones colgadas.
+     */
+    const fault = lspClient.getFault();
+    if (fault !== null && server.kind === 'roslyn') {
+      startingLanguageServer = false;
+      return await switchToOmniSharp(fault, server);
+    }
+
     // Roslyn no carga nada por su cuenta: hay que abrirle la solución explícitamente o devolverá
     // `null` a todas las peticiones con el servidor en estado "listo".
-    lspClient.openWorkspace(
-      currentSolution.path,
-      currentSolution.projects.map((project) => project.path),
-    );
+    openCurrentWorkspace();
 
     return state;
   } catch (error) {
@@ -223,6 +336,8 @@ async function startLanguageServer(): Promise<LspState> {
     };
     broadcast(IPC_EVENTS.lspStateChanged, state);
     return state;
+  } finally {
+    startingLanguageServer = false;
   }
 }
 
@@ -237,6 +352,18 @@ export function registerIpcHandlers(): void {
 
   lspClient.on('state', (state: LspState) => broadcast(IPC_EVENTS.lspStateChanged, state));
   lspClient.on('notification', (payload) => broadcast(IPC_EVENTS.lspNotification, payload));
+
+  /**
+   * El servidor se ha roto por dentro estando ya en marcha.
+   *
+   * Durante el arranque lo atiende `startLanguageServer`, que es quien tiene el `initialize` en la
+   * mano; este camino cubre lo que aflora despues, cuando Roslyn empieza a cargar la solucion y se
+   * le cae una extension. En los dos casos el usuario acaba con OmniSharp sin tocar nada.
+   */
+  lspClient.on('fault', ({ fault, server }: { fault: ServerFault; server: AcquiredServer }) => {
+    if (startingLanguageServer || server.kind !== 'roslyn') return;
+    void switchToOmniSharp(fault, server);
+  });
 
   /**
    * Lo que el servidor escriba por stderr va a la consola del proceso principal.

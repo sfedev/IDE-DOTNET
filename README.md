@@ -32,6 +32,10 @@ Docker Compose** para levantar los servicios de apoyo sin salir del IDE, y la v1
 círculo del día a día: **explorador de pruebas** con lentes de código sobre cada `[Fact]`,
 **resaltado de C# estilo Visual Studio** alimentado por el compilador, **monitor de rendimiento**,
 **túneles públicos** para probar webhooks y **auditoría de vulnerabilidades** de los paquetes.
+La v2.0.0 hace que todo eso descanse sobre algo que por fin funciona: el **IntelliSense de C#**.
+La versión del servidor de Roslyn se fija y se verifica en vez de coger la última compilación
+publicada, cada instalación se comprueba archivo a archivo antes de lanzarla, y si el servidor
+falla el IDE **conmuta solo a OmniSharp** sin que tengas que enterarte.
 
 ![DotForge IDE con una solución DDD abierta](docs/screenshot-workspace.png)
 
@@ -786,12 +790,11 @@ Se listan explícitamente porque un README que sólo cuenta lo que funciona no s
   el orquestador MTP todavía no encajan bien (ver ADR-003 en `PROJECT_DEVLOG.md`).
 - **`net9.0` compila pero necesita el runtime 9 para ejecutarse.** Si sólo tienes el runtime 10,
   genera con `--framework net10.0`.
-- **El resaltado semántico depende de que Roslyn conteste.** El IDE declara las capacidades, le abre
-  la solución, descodifica su clasificación y colorea; pero algunas versiones preliminares del
-  paquete `microsoft.codeanalysis.languageserver` del feed `dotnet-tools` fallan al componer su
-  gráfico MEF y mueren justo después del handshake. Cuando pasa, el editor se queda con el resaltado
-  de la gramática —sigue siendo perfectamente utilizable— y el motivo aparece en la consola en vez de
-  perderse. Fijar una versión conocida buena está anotado para la próxima fase.
+- **El servidor de lenguaje se descarga la primera vez.** Son unos 65 MB y tardan lo que tarde la
+  red; mientras, el editor funciona con resaltado y snippets y la barra de estado va contando. La
+  versión de Roslyn está **fijada y verificada** (v2.0.0), la instalación se comprueba archivo a
+  archivo en cada arranque y, si el servidor fallara igualmente, el IDE **conmuta solo a OmniSharp**
+  y explica por qué. Actualizar esa versión es un cambio deliberado, no una descarga automática.
 - **Los túneles usan una herramienta externa.** `devtunnel` y `ngrok` no se incluyen ni se descargan:
   si no hay ninguna instalada, el botón lo dice y da la orden de instalación.
 - **El monitor de rendimiento necesita `dotnet-counters`**, que tampoco se incluye. Misma regla: se

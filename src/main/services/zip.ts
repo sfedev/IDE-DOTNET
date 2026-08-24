@@ -158,13 +158,20 @@ export function readEntry(buffer: Buffer, entry: ZipEntry): Buffer {
  *
  * @param strip  número de segmentos iniciales de ruta a descartar (como `tar --strip-components`).
  * @param filter opcional; devuelve false para saltarse una entrada.
+ * @param onFile opcional; recibe cada archivo escrito **con su contenido ya descomprimido**. Es lo
+ *               que permite anotar tamaño y hash de cada uno en el manifiesto de la instalación sin
+ *               volver a leer del disco los 250 MB que se acaban de escribir.
  */
 export async function extractTo(
   buffer: Buffer,
   destination: string,
-  options: { strip?: number; filter?: (entry: ZipEntry) => boolean } = {},
+  options: {
+    strip?: number;
+    filter?: (entry: ZipEntry) => boolean;
+    onFile?: (relativePath: string, contents: Buffer) => void;
+  } = {},
 ): Promise<number> {
-  const { strip = 0, filter } = options;
+  const { strip = 0, filter, onFile } = options;
   const entries = listEntries(buffer);
   let written = 0;
 
@@ -181,8 +188,20 @@ export async function extractTo(
     }
 
     const target = join(destination, relativePath);
+    const contents = readEntry(buffer, entry);
+
+    // El ZIP declara el tamaño descomprimido en el directorio central. Si lo que sale del inflate
+    // no mide eso, el archivo está corrupto y escribirlo sólo sirve para que el fallo aparezca
+    // mucho más tarde y en otro sitio.
+    if (entry.compressedSize > 0 && contents.length !== entry.uncompressedSize) {
+      throw new ZipError(
+        `"${entry.name}" se ha descomprimido a ${contents.length} bytes y el archivo declara ${entry.uncompressedSize}`,
+      );
+    }
+
     await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, readEntry(buffer, entry));
+    await writeFile(target, contents);
+    onFile?.(segments.join('/'), contents);
     written++;
   }
 

@@ -14,6 +14,10 @@ Su módulo estrella es el **Scaffolding Wizard**: un generador de arquitecturas 
 que produce soluciones .NET **compilables y ejecutables** siguiendo Clean Architecture,
 Arquitectura Hexagonal (Ports & Adapters) o Domain-Driven Design + CQRS.
 
+Desde la v2.0.0 el **IntelliSense de C# funciona**: la versión del servidor de Roslyn está fijada y
+verificada en vez de tomarse la última compilación del feed, cada instalación se comprueba archivo a
+archivo antes de lanzarla, y si el servidor falla el IDE **conmuta solo a OmniSharp**.
+
 Desde la v1.9.0 incluye un **explorador visual de pruebas** (árbol proyecto → clase → prueba con
 lentes de código sobre cada `[Fact]` y `[Theory]`, resultados leídos del TRX y fallos en el panel de
 problemas), **resaltado semántico de C# estilo Visual Studio** alimentado por la clasificación de
@@ -76,6 +80,10 @@ IDE-DOTNET/
 │   │   ├── docker.ts           # * Modelo de Docker: contenedores, puertos y servicios de apoyo (puro)
 │   │   ├── compose.ts          # * YAML mínimo de docker-compose.yml + cruce con el motor (puro)
 │   │   ├── semantic-tokens.ts  # * Tokens semánticos de LSP: descodificación y ámbitos (puro)
+│   │   ├── lsp-versions.ts     # * Política de versiones de Roslyn: fijada, orden y descartes (puro)
+│   │   ├── lsp-health.ts       # * Servidor roto: firmas de excepción, escáner y cuarentena (puro)
+│   │   ├── lsp-protocol.ts     # * Qué contesta el cliente a las peticiones del servidor (puro)
+│   │   ├── toolchain-manifest.ts # * Manifiesto de instalación: tamaño y hash por archivo (puro)
 │   │   ├── test-explorer.ts    # * Pruebas: descubrimiento por texto, filtros y resultados (puro)
 │   │   ├── dev-tunnel.ts       # * Túneles: argumentos y reconocimiento de la URL pública (puro)
 │   │   ├── perf-counters.ts    # * dotnet-counters: dos generaciones de contadores (puro)
@@ -339,6 +347,31 @@ npx electron . --smoke-test
 - Los fallos van al panel de problemas con su propia lista: una compilación correcta no arregla una
   prueba que falla, así que no puede borrar su problema.
 
+### Servidor de lenguaje (`src/main/lsp/`, `src/shared/lsp-*.ts`)
+
+- **La versión de Roslyn se fija, no se elige sola** (ADR-040). El feed publica 763 compilaciones y
+  ninguna es estable en SemVer: "la más alta" es la de anoche de la rama principal. Manda
+  `ROSLYN_PINNED_VERSION`, verificada a mano —descargada, extraída y arrancada—. Subirla es un
+  cambio de código deliberado, y hay que comprobar su `runtimeconfig.json`: la banda 4.14 declara
+  `net9.0` con `rollForward: Major` y arranca con el runtime 9 o el 10; las bandas 5.x exigen el 10.
+- **Una instalación se verifica archivo a archivo** (ADR-041), contra el manifiesto que se escribe al
+  extraerla. Barata (`stat`) en cada arranque; profunda (hash) sólo después de un fallo, que es lo
+  único que distingue "esta copia está corrupta" de "esta compilación está mal". Un marcador que
+  guarda el hash del `.nupkg` no verifica nada: verifica un archivo que ya no está en el disco.
+- **El manifiesto se escribe el último.** Una extracción interrumpida tiene que dejar un directorio
+  sin manifiesto, porque eso se reinstala; un marcador escrito antes de tiempo es una mentira
+  permanente.
+- **Un servidor roto se detecta por stderr y por nombre de tipo de excepción** (ADR-042), nunca por
+  el mensaje: viene traducido al idioma del sistema. Y sólo cuenta dentro de un bloque `fail:` o
+  `crit:`. El escáner lleva búfer de líneas: los trozos del stream no respetan los saltos.
+- **Un cierre que nadie ha pedido es un fallo aunque el código de salida sea 0.** El cliente marca
+  sus propias paradas para poder distinguirlas.
+- **Contestar algo no es contestar bien.** A `workspace/configuration` hay que devolverle un array
+  con una entrada por sección pedida (ADR-043); con `null`, Roslyn rompe su cola de mensajes y se
+  apaga limpiamente. Lo decide `src/shared/lsp-protocol.ts`, que es puro.
+- Una versión que falla queda en cuarentena **por RID**, salvo que la auditoría demuestre que la
+  culpa era de la copia: entonces se borra la copia y se le levanta el veto (ADR-044).
+
 ### Tokens semánticos (`src/shared/semantic-tokens.ts`)
 
 - **Las listas de capacidades no pueden ir vacías.** Para LSP, `tokenTypes: []` significa "no
@@ -601,3 +634,17 @@ npm run fetch:toolchain -- --platform win32 --arch x64
 - **`dotnet watch` no tiene `--verbosity`.** Tiene `--verbose`, y va antes del subcomando; todo lo
   que va detrás se lo pasa a la aplicación hija, así que la bandera equivocada llega como argumento
   de la aplicación en vez de fallar.
+- **La expresión de `--probe=` tiene que ir en una sola línea.** Con saltos de línea el modo de
+  diagnóstico contesta `PROBE_FAIL` sin más detalle, y parece un error de la expresión —un
+  `try/catch` alrededor tampoco atrapa nada, porque no llega a ejecutarse—. Se escribe todo seguido
+  con `;`, aunque quede largo.
+- **Un servidor de lenguaje puede apagarse limpiamente por una respuesta tuya.**
+  `workspace/configuration` contestada con `null` hace que Roslyn rompa su cola de mensajes y salga
+  **con código 0 y sin nada en stderr**, segundos después de decir que está listo. La regla general:
+  contestar algo no es contestar bien, y las peticiones del **servidor al cliente** existen aunque
+  el 99 % del tráfico vaya al revés (ADR-043).
+- **Un paquete correcto puede quedar mal instalado.** Del servidor de Roslyn, un archivo de 462
+  quedó truncado en disco a 5 MiB exactos con el `.nupkg` íntegro y su SHA-256 coincidiendo. Un
+  marcador que guarda el hash de lo descargado verifica un archivo que ya no está en el disco: hay
+  que verificar lo extraído, archivo a archivo (ADR-041). Una cifra redonda —5.242.880— en el tamaño
+  de un binario no la produce un compilador; la produce un archivo cortado.

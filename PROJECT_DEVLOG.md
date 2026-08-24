@@ -286,6 +286,22 @@ por tanto **compila** pero no **ejecuta** los proyectos generados. Se añade el 
 - [x] F15.23 La salida de error del servidor de lenguaje llega a la consola en vez de perderse
 - [x] F15.24 Pruebas: 165 nuevas (tokens semánticos, pruebas, túneles, contadores y auditoría)
 
+### Fase 16 — Servidor de lenguaje: versión fijada, instalación verificada y respaldo automático
+- [x] F16.1 Política de versiones de Roslyn (`src/shared/lsp-versions.ts`): versión fijada y
+      verificada, descarte de compilaciones de prueba y orden por banda (ADR-040)
+- [x] F16.2 Manifiesto de instalación con tamaño y hash por archivo (`src/shared/toolchain-manifest.ts`)
+- [x] F16.3 Verificación superficial en cada arranque y profunda tras un fallo (ADR-041)
+- [x] F16.4 El extractor se niega a escribir un archivo que no mide lo que declara el ZIP
+- [x] F16.5 La descarga comprueba `content-length`: un `.nupkg` cortado ya no se extrae
+- [x] F16.6 Detección del servidor roto por stderr y por nombre de tipo de excepción (ADR-042)
+- [x] F16.7 Un cierre que nadie ha pedido es un fallo aunque el código de salida sea 0 (ADR-042)
+- [x] F16.8 `workspace/configuration` se contesta con un array, no con `null` (ADR-043)
+- [x] F16.9 Cuarentena de versiones por RID, con indulto si la culpa era de la copia (ADR-044)
+- [x] F16.10 Conmutación automática y transparente a OmniSharp, con el motivo en la barra de estado
+- [x] F16.11 Pruebas: 40 nuevas (política de versiones, detección, cuarentena, instalación y protocolo)
+- [x] F16.12 Verificado sobre la aplicación real: hover, completado, símbolos y 1440 números de
+      tokens semánticos con Roslyn 4.14.0-3.26423.7, y OmniSharp v1.39.15 sirviendo lo mismo
+
 ---
 
 ## Decisiones técnicas (ADR corto)
@@ -1822,6 +1838,114 @@ funcionaba. La regla que queda escrita es más general que el arreglo: **un serv
 "listo" no está diciendo que sepa nada**, y un proveedor que devuelve siempre vacío es indistinguible
 de uno que funciona si nadie mira el error. Por eso ahora se registra.
 
+### ADR-040 — La versión del servidor de Roslyn se fija; no se elige sola
+**Fecha:** 2026-08-24
+**Contexto:** El feed `vs-impl` publica **763 versiones** de `Microsoft.CodeAnalysis.LanguageServer`
+para `win-x64`, y **ninguna es estable en el sentido de SemVer**: todas llevan sufijo de
+prelanzamiento, porque son las compilaciones internas con las que se sirven Visual Studio y la
+extensión de C# de VS Code. Conviven bandas ya publicadas (`4.14.0-3.*`), la rama principal sin
+publicar (`5.4.0-2.*`) y hasta compilaciones declaradas de prueba (`5.3.0-2-test.*`). Coger "la más
+alta" —que es lo que hacía `pickLatestVersion`— significa coger cada día la compilación de anoche
+de la rama principal de Roslyn, sin que nadie la haya ejecutado nunca contra este IDE.
+**Decisión:** manda `ROSLYN_PINNED_VERSION`, hoy `4.14.0-3.26423.7`. "Verificada" significa que se ha
+descargado, extraído y arrancado a mano, y que ha compuesto su gráfico MEF y contestado por stdio.
+Si el feed dejara de publicarla, se coge la más alta que no declare marcadores de inestabilidad
+(`test`, `preview`, `alpha`, `beta`, `rc`…), y sólo si no queda ninguna se acepta una de ésas antes
+que dejar al usuario sin servidor. La selección devuelve también **por qué** eligió lo que eligió.
+**Consecuencias:** el desempate no lo ganó el número más alto sino el `runtimeconfig.json`:
+`4.14.0-3.26423.7` declara `net9.0` con `rollForward: Major`, así que arranca con el runtime 9 **o**
+con el 10; las bandas 5.x declaran `net10.0` y dejarían sin servidor a quien tenga instalado justo
+el .NET 9 que este IDE pide como mínimo. La versión fijada existe para los seis RID soportados,
+comprobado contra el feed. El precio es que actualizarla es un cambio de código deliberado, con su
+verificación a mano —que es exactamente lo que se quería—.
+
+### ADR-041 — Una instalación se verifica archivo a archivo, no con un marcador
+**Fecha:** 2026-08-24
+**Contexto:** Este ADR nace de encontrar la causa real del fallo que la v1.9 dio por diagnosticado.
+El IntelliSense de C# **nunca** funcionó en la máquina de desarrollo: Roslyn moría componiendo su
+gráfico MEF con un `PartDiscoveryException` sobre `Microsoft.CodeAnalysis.CSharp.Features.dll`, y se
+concluyó que el paquete del feed estaba roto. No lo estaba. El `.nupkg` es correcto, su SHA-256
+coincide con el del feed y nuestro propio extractor lo descomprime bien cuando se le vuelve a pedir.
+Lo que estaba mal era **un archivo de los 462 extraídos**, truncado en disco a 5.242.880 bytes
+exactos —5 MiB clavados— cuando el ZIP declara 6.396.176. Extraído de nuevo, el mismo paquete y la
+misma versión arrancan sin un solo `fail:`.
+**Causa de que durase nueve versiones:** lo único que se guardaba tras extraer era un `.dotforge-ok`
+con la versión y el SHA-256 **del `.nupkg` descargado**. Eso verifica el archivo que ya no está en
+el disco y no dice una palabra de los 462 que sí están. Como el marcador decía "ok", nadie volvió a
+mirar aquel directorio jamás.
+**Decisión:** al extraer se escribe un manifiesto con **tamaño y hash de cada archivo**, y siempre
+**el último**, para que una extracción interrumpida deje un directorio sin manifiesto —y un
+directorio sin manifiesto se reinstala entero—. Hay dos comprobaciones con costes muy distintos: la
+superficial (un `stat` por archivo, milisegundos) se hace en **cada arranque**; la profunda (releer y
+hashear los ~250 MB) sólo cuando el servidor ya ha fallado. Además, el extractor se niega a escribir
+un archivo cuyo inflate no mida lo que declara el directorio central, y la descarga comprueba
+`content-length`.
+**Consecuencias:** la comprobación barata es la que habría cazado esto el primer día. Las cachés de
+la v1.9 y anteriores no tienen manifiesto, así que cuentan como no verificadas y se reinstalan solas
+la primera vez que se abre la v2.0: el usuario no tiene que borrar nada a mano. Los archivos **de
+más** no son un problema —el servidor escribe sus registros y cachés dentro de su directorio—.
+
+### ADR-042 — Un servidor roto se detecta por stderr y por nombre de tipo, nunca por el mensaje
+**Fecha:** 2026-08-24
+**Contexto:** Hacía falta decidir cuándo dar por muerto a Roslyn. El caso real es traicionero: el
+servidor **no se cae** cuando MEF no compone. Escribe el error por stderr, sigue vivo, contesta al
+handshake y anuncia "Language server initialized" por stdout. Lo que queda es un servidor que
+responde `null` a todo con la barra de estado diciendo "listo".
+**Decisión:** tres reglas. **(1)** Se mira stderr, no el código de salida —el proceso termina con 0—.
+**(2)** Se buscan **nombres de tipo de excepción** (`PartDiscoveryException`, `TypeLoadException`,
+`BadImageFormatException`…), nunca mensajes: el mensaje de este mismo fallo sale en español en un
+Windows en español —"No se pudo cargar el ensamblado […] para su análisis"—, y el paquete trae trece
+culturas. **(3)** El nombre sólo cuenta dentro de un bloque de nivel `fail:` o `crit:`, porque el
+servidor registra por stderr cosas informativas que mencionan rutas que no existen. A eso se suma
+que **un cierre que nadie ha pedido es un fallo aunque el código sea 0**, para el caso de la ADR-043.
+**Consecuencias:** el escáner lleva búfer de líneas porque los trozos de un stream no respetan los
+saltos: `PartDiscoveryEx` + `ception:` es una lectura perfectamente normal, y sin búfer el fallo se
+detecta de forma intermitente, que es la peor forma de no detectarlo. Se prueba troceándolo carácter
+a carácter. `OutOfMemoryException` queda deliberadamente fuera: habla de la máquina, no del paquete,
+y vetar una versión por un pico de memoria dejaría ese equipo sin Roslyn para siempre.
+
+### ADR-043 — A `workspace/configuration` se le contesta con un array, no con `null`
+**Fecha:** 2026-08-24
+**Contexto:** Con la instalación ya sana y la versión fijada, Roslyn seguía sin servir: cargaba, decía
+"listo" y a los pocos segundos se apagaba con código 0, sin una línea en stderr. Reproducido con un
+cliente LSP mínimo fuera del IDE, el diálogo es claro: al abrir la solución el servidor pide
+`workspace/configuration` con treinta y tantas secciones de opciones
+(`csharp|completion.dotnet_show_name_completion_suggestions` y compañía), su handler hace
+`Contract.ThrowIfNull` sobre la respuesta, levanta `InvalidOperationException: Unexpected null`,
+escribe "Error processing queue, shutting down" y se despide.
+**Causa:** en LSP el tráfico va en los dos sentidos, y esto se olvida porque el 99 % de los mensajes
+salen del editor. DotForge contestaba `null` a **toda** petición del servidor, con el razonamiento
+correcto —no dejarlo bloqueado— y una respuesta que para ésta es inválida.
+**Decisión:** lo que se contesta lo decide `src/shared/lsp-protocol.ts`, que es puro. A
+`workspace/configuration` se le devuelve un array con **una entrada por elemento pedido**, con valor
+`null` en cada una: significa "no tengo configurado eso, usa tu valor por defecto", que es
+exactamente la verdad. El resto de peticiones siguen con `null`, que para ellas es su respuesta
+correcta (`client/registerCapability`, `window/workDoneProgress/create`,
+`workspace/_roslyn_projectNeedsRestore`).
+**Consecuencias:** con esto la solución carga sus cinco proyectos, llega
+`workspace/projectInitializationComplete` y `textDocument/semanticTokens/full` empieza a devolver
+datos. Lo que importa del array es el **tamaño**: el servidor empareja secciones y respuestas por
+posición. Y la lección general, que es la tercera de la misma familia en este proyecto: **contestar
+algo no es contestar bien**, y un servidor que se apaga limpiamente puede estar diciendo que se le ha
+contestado mal.
+
+### ADR-044 — Cuarentena por versión y RID, con indulto si la culpa era de la copia
+**Fecha:** 2026-08-24
+**Contexto:** Cuando Roslyn falla en marcha hay que hacer dos cosas: dar servicio ya —OmniSharp— y
+no repetir mañana el mismo intento. Pero "no repetir" exige saber **de quién era la culpa**, y las
+dos causas se ven igual desde fuera (el mismo `PartDiscoveryException`) y se arreglan al revés: una
+copia corrupta se borra y se vuelve a bajar; una compilación mala se veta. Vetar una versión buena
+por un archivo que se truncó al escribirlo dejaría ese equipo sin Roslyn para siempre —que es justo
+lo que la v1.9 estuvo a punto de dejar escrito en el código—.
+**Decisión:** ante un fallo se audita la instalación entera, hash a hash (ADR-041). Si sale corrupta,
+se **borra** la copia y se le **levanta el veto** a la versión. Si sale íntegra, la culpa es de la
+compilación y la versión entra en cuarentena, anotada por RID: que esté rota para `win-x64` no dice
+nada de `osx-arm64`, y el archivo viaja si el usuario sincroniza su perfil. En los dos casos se
+conmuta a OmniSharp en el momento y el motivo aparece en la barra de estado.
+**Consecuencias:** la cuarentena tiene tope de 50 entradas, porque es una lista de fallos y no un
+historial. El selector de la ADR-040 la lee como lista de vetados, así que un equipo con una
+compilación rota baja solo a la siguiente candidata en el arranque siguiente, sin intervención.
+
 ---
 
 ### Iteración 19 — 2026-08-24 — Fase 15: pruebas, color, túneles, métricas y seguridad
@@ -1913,3 +2037,99 @@ servidor conteste. Fijar una versión conocida buena del servidor queda anotado 
 
 **Versión:** funcionalidad nueva con once canales IPC nuevos y una corrección de comportamiento
 visible en el resaltado: 1.8.1 → **1.9.0** (ADR-009).
+
+---
+
+### Iteración 20 — 2026-08-24 — Fase 16: el IntelliSense de C# funciona
+
+**Objetivo:** cerrar la "limitación conocida" que arrastraba la v1.9 —el servidor de Roslyn arranca
+y no sirve para nada— fijando una versión estable verificada y garantizando el respaldo automático
+a OmniSharp cuando el servidor falle.
+
+**Lo primero fue descubrir que el diagnóstico anterior era falso.** La v1.9 cerró con esta frase:
+*"Es un fallo del paquete `microsoft.codeanalysis.languageserver.win-x64 5.4.0-2.26179.14` del feed
+`dotnet-tools`"*. No lo era, y comprobarlo costó cuatro medidas:
+
+1. Se reprodujo el `PartDiscoveryException` lanzando el ejecutable a mano. Se confirma.
+2. Se leyó el tamaño del ensamblado señalado: **5.242.880 bytes**. Cinco mebibytes clavados es una
+   cifra que no sale de un compilador; sale de un archivo cortado.
+3. Se descargó el `.nupkg` del feed y se leyó su directorio central: esa entrada declara
+   **6.396.176 bytes**. Y el SHA-256 del paquete recién bajado coincide **exactamente** con el que
+   el marcador `.dotforge-ok` guardó el día que se instaló. El paquete siempre estuvo bien.
+4. Se volvió a extraer y se lanzó el servidor: compone su gráfico MEF y contesta **sin un solo
+   `fail:`**. Misma versión, mismo paquete, otra copia en disco.
+
+De los 462 archivos extraídos, exactamente **uno** había quedado truncado, y el marcador de
+instalación —que sólo guardaba el hash del `.nupkg`, un archivo que ya no está en el disco— decía
+"ok" desde entonces. Ése es el fallo que dejó el IntelliSense de C# muerto desde la Fase 2.
+
+**Y con eso arreglado, el servidor seguía sin servir.** Cargaba, decía "listo" y a los pocos
+segundos se apagaba **con código 0 y sin una línea en stderr**. Reproducido con un cliente LSP
+mínimo de 120 líneas escrito para esto, apareció la segunda causa: Roslyn pide
+`workspace/configuration` al abrir la solución, DotForge contestaba `null` a toda petición del
+servidor, y su handler responde a ese `null` rompiendo su cola de mensajes y despidiéndose
+(ADR-043).
+
+**Cinco decisiones, cinco ADR:**
+
+- **ADR-040** — la versión se fija (`4.14.0-3.26423.7`) en vez de coger la más alta de las 763 del
+  feed, que es la compilación de anoche de la rama principal de Roslyn.
+- **ADR-041** — la instalación se verifica archivo a archivo contra un manifiesto con tamaño y hash,
+  barata en cada arranque y profunda tras un fallo.
+- **ADR-042** — un servidor roto se detecta por stderr y por nombre de tipo de excepción, nunca por
+  el mensaje, que viene traducido.
+- **ADR-043** — a `workspace/configuration` se le contesta con un array del tamaño pedido.
+- **ADR-044** — una versión que falla queda en cuarentena por RID, salvo que la auditoría demuestre
+  que la culpa era de la copia y no de la compilación.
+
+**Errores encontrados y solucionados:**
+
+1. *Síntoma:* el IntelliSense de C# nunca devolvió nada en este equipo.
+   *Causa raíz:* un DLL truncado en disco que ninguna comprobación volvía a mirar (ADR-041).
+   *Arreglo:* manifiesto por archivo, verificación en cada arranque y reinstalación automática. Las
+   cachés de versiones anteriores no tienen manifiesto, así que se reinstalan solas.
+2. *Síntoma:* con la copia sana, el servidor se apagaba con código 0 a los pocos segundos de decir
+   que estaba listo.
+   *Causa raíz:* `workspace/configuration` contestada con `null` (ADR-043).
+   *Arreglo:* un array con una entrada por sección pedida.
+3. *Síntoma:* ese cierre no disparaba ningún respaldo.
+   *Causa raíz:* la detección miraba stderr, y ese fallo no escribe en stderr; y el código de salida
+   era 0, indistinguible de una parada ordenada.
+   *Arreglo:* el cliente marca las paradas que pide él, y un cierre que nadie ha pedido cuenta como
+   fallo (ADR-042).
+4. *Síntoma:* al elegir versión, el feed devuelve 763 candidatas y ninguna es estable en SemVer.
+   *Arreglo:* versión fijada y verificada a mano, con descarte de las declaradas de prueba como
+   camino de reserva (ADR-040). El desempate lo ganó el `runtimeconfig.json`: la banda 4.14 declara
+   `net9.0` con `rollForward: Major` y arranca con el runtime 9 o el 10; las bandas 5.x exigen 10.
+5. *Trampa nueva del entorno:* el argumento de `--probe=` **no puede llevar saltos de línea**. Con
+   ellos el modo de diagnóstico responde `PROBE_FAIL` sin decir qué pasó, y el fallo se confunde con
+   un error de la expresión. Se escriben en una sola línea.
+
+**Verificado sobre la aplicación real** (solución `Acme.Lab` generada con el propio scaffolding,
+abierta en el IDE, midiendo con `--probe=`, no mirando capturas):
+
+- Adquisición: `[lsp] Roslyn LanguageServer 4.14.0-3.26423.7 (versión fijada por DotForge)`.
+- Estado `ready`, leyenda con **82 tipos de token**, `textDocument/semanticTokens/full` devolviendo
+  **1440 números**, `documentSymbol` respondiendo y completado con resultados.
+- Hover real, en español y con su análisis de nulabilidad: ``(variable local) ?? builder`` y
+  `"builder" no es NULL aquí`. Es la primera vez en la vida del proyecto que hay IntelliSense de C#.
+- Respaldo: `acquireLanguageServer(..., { prefer: 'omnisharp' })` resuelve, instala y verifica
+  **OmniSharp v1.39.15**, y contra la misma solución carga los cinco proyectos y devuelve también
+  **1440 números** de tokens semánticos. La decisión de conmutar está cubierta por pruebas con el
+  stderr real capturado; lo que no se ha podido montar es un Roslyn que falle **con la instalación
+  íntegra**, así que ese tramo concreto está verificado por pruebas y no sobre la aplicación.
+- `npm test` en verde de punta a punta: **1100 pruebas** (944 unit, 43 security, 57 package, 56
+  scaffold), de las cuales 42 son nuevas de esta fase. La que estaba en rojo era del grupo de
+  seguridad y tenía razón: comprobaba por grep que `acquire.ts` calculase el hash de lo descargado,
+  y ese cálculo se ha mudado al instalador. Se ha reescrito para comprobar la propiedad donde ahora
+  vive —y de paso la verificación de `content-length` y la de la instalación—, no para ablandarla.
+
+- `npx electron . --smoke-test` → `SMOKE_OK`, con la línea de adquisición encima.
+- `prune:dist` liberó los 279,2 MB de artefactos de la 1.9.0 y `verify:dist` confirma el instalador
+  NSIS (117,4 MB) y el ZIP portable (161,7 MB) de la 2.0.0, sin firmar como es esperado sin
+  certificado.
+
+**Versión:** el marcador de instalación cambia de formato, `pickLatestVersion` deja de gobernar la
+elección y el contrato de lo que el cliente contesta al servidor cambia. Son cambios de
+comportamiento en la adquisición del toolchain, y la funcionalidad estrella del IDE pasa de no
+funcionar a funcionar: 1.9.0 → **2.0.0** (ADR-009).
