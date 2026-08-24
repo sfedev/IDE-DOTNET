@@ -623,6 +623,43 @@ rompió en silencio dos veces al añadir una herramienta (Fase 15 y Fase 17), la
 
 ---
 
+### ADR-055 — La frontera de la terminal es qué se ejecuta, no desde dónde
+**Fecha:** 2026-08-24
+**Contexto:** La terminal integrada lanzaba cada línea con el directorio de la solución como `cwd` y
+no llevaba la cuenta de dónde estaba el usuario. `cd` ni siquiera llegaba a intentarse: se buscaba un
+programa llamado `cd`, que no existe porque es una orden del intérprete, y el error hablaba de la
+lista de programas permitidos. El resultado era una terminal en la que no se podía navegar, y en un
+IDE de .NET eso duele en cuanto hay que mirar otra solución, otra unidad o la carpeta de al lado.
+
+Al arreglarlo aparece la pregunta de verdad: **¿hasta dónde puede navegar el usuario?**
+**Opciones:**
+- (a) permitir `cd` sólo dentro del workspace abierto;
+- (b) permitir `cd` a cualquier sitio, manteniendo intacta la lista blanca de programas;
+- (c) permitir `cd` a cualquier sitio y además ampliar la lista blanca, "ya que estamos".
+**Decisión:** (b).
+**Consecuencias:**
+
+- El `cwd` de la terminal **no** pasa por `assertInsideWorkspace`. Ese guardián existe para las
+  rutas que llegan del renderer a los canales de archivos —donde el origen puede ser cualquier cosa
+  que el IDE haya leído— y no para una carpeta que el usuario acaba de escribir a mano.
+- (a) se descartó porque no impide nada: `dotnet build ..\otra\App.sln` ya cruzaba esa línea sin
+  cambiar de directorio, y el mismo `git` que se puede lanzar dentro del workspace acepta `-C`. Una
+  frontera que sólo detiene la forma cómoda de hacer algo no es una frontera, es una molestia.
+- (c) se descartó sin discusión: la lista blanca es lo que de verdad acota la superficie (ADR-004), y
+  relajarla porque se ha tocado otra cosa es exactamente cómo se pierden las garantías.
+- Lo que se refuerza a cambio: dos pruebas estructurales nuevas exigen que el ejecutor siga con
+  `shell: false`, con el argv como array y con la comprobación contra la lista blanca. Si alguien
+  relaja el `cwd` un poco más en el futuro, no se llevará lo demás por delante en la misma revisión.
+- El destino se comprueba antes de aceptarlo (existe y es un directorio) y el error dice la **ruta ya
+  resuelta**: "no existe `src`" no ayuda a nadie; "no existe `C:\repos\Acme\src`" se comprueba de un
+  vistazo.
+- `cd` a secas **no** hace lo que hace cmd (imprimir) ni lo que hace POSIX (ir al hogar): vuelve a la
+  raíz de la solución. Dentro de un IDE es lo que uno quiere el 99 % de las veces, y es lo que hace
+  que la orden sirva para algo en vez de ser una curiosidad de plataforma. Sin solución abierta, al
+  hogar.
+
+---
+
 ## Bitácora de iteraciones
 
 ### Iteración 1 — 2026-08-23 — Bootstrap
@@ -2883,5 +2920,78 @@ y pulsada por identificador).
 **Lo que queda anotado para la próxima sesión:** el fallo del editor no tiene hoy un culpable en el
 código. Si vuelve a aparecer, lo primero es mirar `readOnlyMessage` — ahora Monaco dice por qué no
 deja escribir— y `editorContext()`, en vez de volver a buscar quién enciende `readOnly`.
+
+---
+
+### Iteración 27 — 2026-08-24 — Fase 19 (1/2): la terminal navega por el disco
+
+**Objetivo:** poder cambiar de directorio en la terminal integrada —ir a otra solución, a otra
+unidad, a la carpeta de al lado— con el prompt diciendo dónde estás, como en cualquier terminal.
+
+**Hecho, archivo a archivo:**
+
+- `src/shared/terminal-cwd.ts` (**nuevo**): modelo puro. `classifyLine` decide qué pretende una
+  línea ya troceada —`cd`, `chdir`, `Set-Location`, `sl`, el `cd /d` de cmd, `D:` a secas,
+  `pwd`/`Get-Location`/`gl`— y `resolveTarget` traduce los atajos (`~`, `~/algo`, `-`, unidad
+  suelta, `cd` a secas). `shortenPath` decide cómo se enseña la ruta y `elide` la recorta por el
+  medio cuando no cabe.
+- `src/main/services/terminal-session.ts` (**nuevo**): la mitad que necesita disco. Resuelve con
+  `node:path`, comprueba con `stat` que el destino existe y es un directorio, y recuerda el anterior
+  para `cd -`. No importa `electron`.
+- `src/main/ipc/register.ts`: `terminal:run` clasifica **antes** de lanzar nada y devuelve
+  `TerminalRunResult`; nuevo canal `terminal:cwd`; `syncTerminalContext()` en los tres momentos que
+  lo necesitan (registrar, abrir workspace, cerrar workspace) **y en `openWorkspaceFromCli`**, que
+  es donde estaba el bug latente.
+- `src/shared/contracts.ts`: `TerminalCwd`, `TerminalRunResult`, canal `terminal:cwd`, y la firma de
+  `terminal.run` deja de devolver una tarea a secas.
+- `src/main/preload.ts`: `terminal.cwd()` y el nuevo tipo de retorno de `terminal.run`.
+- `src/renderer/views/panel.ts`: la ruta delante del `❯` con la completa en el `title`;
+  `setTerminalCwd` y `appendTerminalLine`; `paintPrompt` repinta **sólo el span** de la ruta; y
+  `render()` pasa a envolverse en `repaintPreservingFocus`.
+- `src/renderer/index.ts`: `runTerminalCommand` deja de exigir carpeta abierta, pinta lo que la línea
+  devuelva y sólo engancha canal si hubo tarea; el `cwd` se pide en su propio `try`.
+- `src/renderer/styles/components.css`: `.terminal-cwd`, en `--text-muted` y con `max-width`.
+- `tests/unit/terminal-cwd.test.mjs` y `tests/unit/terminal-session.test.mjs` (**nuevos**),
+  `tests/security/hardening.test.mjs` (2 aserciones estructurales).
+
+**Decisión registrada:** ADR-055 — la frontera de la terminal es qué se ejecuta, no desde dónde.
+
+**Errores encontrados y solucionados:**
+
+1. *Síntoma:* arrancar con `--open=` dejaba la terminal en la carpeta personal mientras el
+   explorador enseñaba la solución. Dos verdades a la vez.
+   *Causa raíz:* `openWorkspaceFromCli` **duplica** parte de `openWorkspaceDirectory` —no avisa al
+   renderer ni arranca el LSP, porque no hay renderer todavía— y por eso se saltó también la
+   sincronización nueva. Es duplicación preexistente que este cambio ha puesto a la vista.
+   *Arreglo:* `syncTerminalContext()` también ahí. Queda anotado que ese camino hay que tocarlo cada
+   vez que se añada estado ligado al workspace.
+2. *Síntoma:* al lanzar un comando se perdía el foco de la terminal y el texto a medias.
+   *Causa raíz:* `taskStarted` y `taskFinished` llaman a `render()`, que reconstruye el panel entero
+   —y con él el `<input>`—. Es exactamente el fallo de los paneles de búsqueda (ADR-052), en un sitio
+   donde nadie lo había buscado porque el disparador no es teclear sino que **termine una tarea**:
+   cualquier compilación de fondo que acabara mientras se escribía se llevaba la línea por delante.
+   *Arreglo:* `data-focus-key` en el input y `repaintPreservingFocus` alrededor de `render()`. Viaja
+   en este commit aunque sea de otra familia: sin él, el arreglo del `cd` se notaría a medias.
+3. *Síntoma:* la primera versión de la prueba de `cd -` fallaba.
+   *Causa raíz:* la prueba, no el código: hacía `cd src` y luego `cd tests` esperando que `tests`
+   colgara de la raíz. Colgaba de la raíz, no de `src`.
+   *Arreglo:* `cd ../tests`. Anotado porque es la clase de error que, si se "arregla" en el código en
+   vez de en la prueba, rompe la resolución relativa para todos.
+
+**Verificado sobre la aplicación real** (con `--probe=`, sobre una solución Clean generada con el
+asistente):
+
+- La secuencia completa, con el prompt contestando en cada paso:
+  `prompt-inicial=Acme.Shop`, `cd src → Acme.Shop\src`, `pwd → C:\…\Acme.Shop\src`,
+  `cd .. → Acme.Shop`, `cd - → Acme.Shop\src`, `cd → Acme.Shop`, `cd ~ → ~`.
+- **Un destino inválido dice la ruta resuelta:** `cd no-existe → no existe la carpeta
+  C:\…\scratchpad\demo\Acme.Shop\no-existe`, y la sesión se queda donde estaba.
+- **Los comandos se ejecutan de verdad en el nuevo directorio:** escribiendo en la caja como un
+  usuario, `cd src/Acme.Shop.Domain` deja el prompt en `Acme.Shop\src\Acme.Shop.Domain` (con la ruta
+  completa en el `title`) y `dotnet --version` contesta `10.0.400` desde ahí.
+- **El foco sobrevive:** con `git st` a medias y el cursor en la posición 4, lanzar otra línea deja
+  `enfocado=terminal-input, valor=git st, cursor=4`.
+- `npx electron . --smoke-test` → `SMOKE_OK`; `unit` + `security` en verde con **1248 pruebas**
+  (1192 antes).
 
 ---
