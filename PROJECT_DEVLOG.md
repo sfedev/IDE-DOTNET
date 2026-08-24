@@ -526,6 +526,14 @@ IPC del renderer.
 - Lo que **no** cambia: el manifiesto anota exactamente los mismos tamaños y hashes, que es de lo
   que depende que una copia corrupta se detecte (ADR-041). Hay una prueba que lo compara contra el
   cálculo síncrono.
+- **Dónde importa de verdad, medido:** un `.vsix` corriente son muchos archivos pequeños y entre
+  ellos ya había un `await writeFile` que cedía el bucle, así que el camino síncrono tampoco se nota
+  ahí (1-2 ms de peor respuesta del proceso principal, igual que el asíncrono). El bloque largo lo
+  producen los **archivos grandes**: sobre el `Microsoft.CodeAnalysis.CSharp.dll` real de Roslyn
+  (18,3 MB), un solo `inflateRawSync` son 50 ms de hilo principal parado, y el `sha256` del paquete
+  entero otros 51 ms por cada 96 MB — en una máquina con SHA-NI. La decisión no cambia por eso: un
+  bloque de 50 ms repetido por cada archivo grande de un paquete de 250 MB es exactamente el tirón
+  que se describía, y no hay motivo para pagarlo.
 
 ---
 
@@ -2850,6 +2858,21 @@ y pulsada por identificador).
   (`dom=extensions explorer git … settings`, `settings=extensions explorer git …`), sobrevive a un
   reinicio, y `--ui=nuget` sigue abriendo NuGet con la barra reordenada — que es exactamente lo que
   los índices posicionales no habrían soportado.
+- **La instalación, medida en el proceso principal y no en la teoría:** durante la instalación real
+  de dos extensiones de Open VSX se le pide al proceso principal una respuesta cada 30 ms y se
+  cronometra la peor. `Telokis.theme-dracula-at-dusk` (874 ms de instalación, 15 muestras) y
+  `devshub-ai.devshub-file-icons` (3,8 s, 120 muestras): **peor respuesta 2 ms** en los dos casos.
+  El proceso principal no deja de atender en ningún momento.
+- **Lo que no se ha conseguido reproducir, y conviene decirlo:** con el camino síncrono restaurado a
+  propósito, esas dos mismas instalaciones dan también 1-2 ms de peor respuesta. Un `.vsix` corriente
+  son muchos archivos pequeños, y entre archivo y archivo ya había un `await writeFile` que cedía el
+  bucle. El bloqueo largo aparece con **archivos grandes**, que es el caso del toolchain: medido
+  sobre el `Microsoft.CodeAnalysis.CSharp.dll` real de Roslyn (18,3 MB), `inflateRawSync` de ese solo
+  archivo son **50 ms** de hilo principal parado, y el `sha256` del paquete entero otros **51 ms**
+  por cada 96 MB — en esta máquina, que tiene SHA-NI; en una sin él, varias veces más. Son tirones
+  de tres o cuatro fotogramas cada uno, repetidos por cada archivo grande del paquete. El arreglo es
+  correcto y está probado, pero **el síntoma severo no se ha reproducido en este hardware**, y quien
+  lo retome debería medirlo en la máquina donde se ve.
 - `npx electron . --smoke-test` → `SMOKE_OK`.
 - `npm test` en verde de punta a punta: **1192 pruebas** entre `unit` y `security` (1113 antes), más
   los grupos `package` y `scaffold`.
