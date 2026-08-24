@@ -103,6 +103,8 @@ VSX** para buscar, instalar y desinstalar `.vsix` desde el registro abierto.
 - Auto-cierre de etiquetas que respeta las void (`<br>`) y las autocerradas (`<Foo />`).
 - 13 snippets de Blazor (`@page`, `@code`, `EditForm`, `@bind`, `[Parameter]`, …).
 - Pestañas con estado de scroll y cursor por archivo, y aviso de cambios sin guardar.
+- El editor nunca se queda mudo: su estado de escritura se recalcula al abrir, al cambiar de pestaña
+  y al terminar cualquier operación en segundo plano, incluso si esa operación ha fallado.
 
 ![Editor con un componente Blazor generado](docs/screenshot-editor.png)
 
@@ -418,6 +420,10 @@ avisos de GitHub Security Advisories (`dotnet list package --vulnerable`).
 ### Paquetes NuGet
 
 - Panel visual: buscar en nuget.org, ver lo instalado, elegir versión, instalar y desinstalar.
+- **Instalación en varios proyectos a la vez**: marca los proyectos con sus casillas —o "Todos"— y el
+  paquete entra en todos. Añadir Serilog a una solución Clean son cuatro instalaciones, no una, y
+  hacerlas de una en una es cómo se olvida un proyecto. Va en serie, con barra de progreso, y si
+  falla en alguno se sigue con el resto y se dice **en cuáles** ha fallado.
 - Los iconos de los paquetes se dibujan localmente: el panel no revela a terceros qué estás mirando.
 
 ### Extensiones de Open VSX
@@ -459,6 +465,9 @@ una licencia que sí permite consumirlos desde otro producto.
   `Services`, `Pages`, `Components`, `Domain`, `Ports`, `wwwroot`…
 - Barra de actividad con una herramienta por dominio y barra de estado con lo imprescindible: SDK
   activo, estado del servidor de lenguaje, rama de Git y errores.
+- **La barra de actividad se ordena a tu gusto**: arrastra los iconos y el orden se guarda. "Ajustes"
+  se queda abajo, bajo el separador, que es donde se busca. Desde Ajustes → **Apariencia** se
+  restaura el orden de fábrica si hace falta.
 - **Ajustes** en la barra lateral, con efecto inmediato: tema, tamaño de fuente, tabulación,
   minimapa, ajuste de línea, formateo al guardar e IntelliSense.
 - Iconografía multirresolución propia: `.ico` (7 tamaños), `.icns` (11 entradas), PNG de 16 a 1024.

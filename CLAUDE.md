@@ -14,6 +14,12 @@ Su módulo estrella es el **Scaffolding Wizard**: un generador de arquitecturas 
 que produce soluciones .NET **compilables y ejecutables** siguiendo Clean Architecture,
 Arquitectura Hexagonal (Ports & Adapters) o Domain-Driven Design + CQRS.
 
+Desde la v2.2.0 el panel de NuGet **instala un paquete en varios proyectos a la vez** (casillas por
+proyecto, en serie y con resumen de lo que ha entrado y lo que no), la **barra de actividad se ordena
+arrastrando** los iconos, y tres fallos de uso que no aparecían en ningún registro están arreglados:
+el editor ya no puede quedarse admitiendo sólo borrado, las cajas de búsqueda no pierden el cursor al
+repintarse, e instalar una extensión ya no congela la ventana.
+
 Desde la v2.1.0 el IDE **se actualiza solo**: comprueba si hay una versión posterior cinco segundos
 después de arrancar, lo dice en una tarjeta flotante con las notas de la publicación y aplica la
 instalación **al cerrar**, sin interrumpir a nadie. Y trae un **explorador de extensiones de Open
@@ -94,6 +100,8 @@ IDE-DOTNET/
 │   │   ├── dev-tunnel.ts       # * Túneles: argumentos y reconocimiento de la URL pública (puro)
 │   │   ├── perf-counters.ts    # * dotnet-counters: dos generaciones de contadores (puro)
 │   │   ├── nuget-audit.ts      # * dotnet list package --vulnerable: JSON y tabla (puro)
+│   │   ├── nuget-install.ts    # * Instalar un paquete en varios proyectos: plan y progreso (puro)
+│   │   ├── activity-bar.ts     # * Orden de la barra de actividad: ids, normalización y movida (puro)
 │   │   ├── updates.ts          # * Actualizaciones: SemVer, feed de releases y artefactos (puro)
 │   │   ├── open-vsx.ts         # * Registro de extensiones: URLs, respuestas y hosts (puro)
 │   │   ├── vsix.ts             # * Formato .vsix: manifiesto, carpeta y contribuciones (puro)
@@ -133,6 +141,8 @@ IDE-DOTNET/
 │   │   └── debug/              # NetCoreDbg + bridge DAP + controlador de sesión
 │   └── renderer/           # UI (Monaco, explorador, paneles, wizard, depuración)
 │       ├── icons.ts            # Sistema de iconos: 65 piezas vectoriales propias
+│       ├── focus-guard.ts      # * Conservar foco y cursor al repintar una vista entera (puro)
+│       ├── editor-state.ts     # * Cuándo se puede escribir en el editor (puro)
 │       ├── ai-availability.ts  # Estado del asistente en la barra de actividad (puro)
 │       ├── icon-gallery.ts     # Galería de revisión visual (modo --icons)
 │       ├── file-icons.ts       # Icono/insignia por archivo, carpeta y proyecto + anidamiento
@@ -401,6 +411,40 @@ npx electron . --smoke-test
 - Los iconos se dibujan localmente (ADR-049), como en NuGet: la CSP no admite imágenes remotas y
   descargarlas le contaría al registro qué está mirando el usuario.
 
+### Barra de actividad y paneles laterales (`src/shared/activity-bar.ts`, `src/renderer/focus-guard.ts`)
+
+- **El orden lo decide el usuario y se guarda por identificador** (`activityBar.order`), nunca por
+  posición. Lo guardado es una sugerencia: `normalizeActivityOrder` descarta lo desconocido y
+  completa lo que falte, porque el archivo lo escribe una versión del IDE y lo lee otra.
+- **Los modos `--ui=` pulsan por `data-tool-id`.** Con un orden que cambia el usuario, un índice
+  posicional no significa nada; y ya se había roto dos veces sin él.
+- **Un repintado no puede robar el foco.** Las vistas se repintan enteras mientras se escribe
+  (rebote de búsqueda), así que los campos que importan llevan `data-focus-key` y el repintado va
+  envuelto en `repaintPreservingFocus`. El valor lo pinta siempre la vista desde su estado; la foto
+  sólo manda sobre la selección.
+- **Sólo manda la última respuesta.** Las búsquedas de NuGet y de Open VSX llevan número de orden:
+  dos consultas en vuelo pueden volver al revés.
+- **Instalar en varios proyectos es en serie** (`src/shared/nuget-install.ts`): `dotnet add package`
+  restaura, y varias restauraciones a la vez se pelean por la caché de NuGet. El paso se cierra
+  emparejando por `taskId`, nunca "el que esté corriendo": al panel le llegan todas las tareas del
+  IDE. Un fallo no cancela los que quedan, y el resumen **nombra** los proyectos que fallaron.
+
+### Editor (`src/renderer/views/editor.ts`, `src/renderer/editor-state.ts`)
+
+- **El estado de sólo lectura se recalcula, no se supone.** `readOnly` en Monaco es pegajoso: si
+  algo lo enciende y el camino que debía apagarlo muere, el editor se queda mudo el resto de la
+  sesión —admite borrar y no admite escribir—. `refreshEditability()` lo recalcula en cada punto de
+  control, incluido el `finally` de toda operación asíncrona.
+- **Nada asíncrono bloquea la escritura.** Sólo dos cosas hacen el editor de sólo lectura, y las dos
+  son estructurales: que no haya archivo abierto y que se esté enseñando una comparación (ADR-021).
+- **El autoguardado guarda la pestaña que cambió**, no la activa: el temporizador salta un segundo
+  después y para entonces se puede haber cambiado de pestaña.
+
+### Toolchain y extensiones: nada síncrono en el hilo principal
+
+- `inflateRaw` y el hash troceado (`sha256Async`), nunca `inflateRawSync` ni `createHash().update()`
+  sobre un búfer entero (ADR-051). Ver la sección de trampas.
+
 ### Servidor de lenguaje (`src/main/lsp/`, `src/shared/lsp-*.ts`)
 
 - **La versión de Roslyn se fija, no se elige sola** (ADR-040). El feed publica 763 compilaciones y
@@ -648,9 +692,11 @@ npm run fetch:toolchain -- --platform win32 --arch x64
   máquina de quien la escribió y falla en la del usuario. Se mira el estado del índice, no el texto.
 - **`core.autocrlf` en Windows** devuelve el archivo restaurado con CRLF aunque el blob esté en LF:
   comparar byte a byte en una prueba comprueba la configuración de git del equipo, no el código.
-- **Las acciones `--ui=` pulsan por índice posicional** dentro de `.activity-item`. Añadir una
-  herramienta a la barra de actividad las rompe todas en silencio: hay que actualizar los índices
-  de `UI_ACTIONS` en `src/main/main.ts`, donde el orden está escrito en un comentario.
+- **Las acciones `--ui=` ya no pulsan por índice posicional.** Lo hicieron hasta la v2.2.0 y se
+  rompieron en silencio dos veces al añadir una herramienta (Fase 15 y Fase 17). Ahora se pulsa por
+  `data-tool-id` (`.activity-item[data-tool-id=nuget]`), que además es obligatorio desde que el
+  usuario puede reordenar la barra arrastrando: la posición ya no significa nada. Una prueba de
+  `tests/unit/activity-bar.test.mjs` vigila que no vuelva ningún índice.
 - **`--ui=` pulsa a los 3,2 s**, que no bastan si se arranca con una solución abierta (Monaco y el
   parseo de la solución tardan más). El síntoma es que la acción "no hace nada", sin ningún error:
   se resuelve con `--ui-wait=<ms>`.
@@ -726,12 +772,42 @@ npm run fetch:toolchain -- --platform win32 --arch x64
 - **`GET /releases` de un repositorio sin publicar responde 404, no `[]`.** Un repositorio público
   con cero releases devuelve una lista vacía; uno privado o inexistente, un 404. Enseñar
   "404 Not Found" a quien pulsa "Buscar ahora" convierte un estado normal en un error incomprensible.
-- **Añadir una herramienta a la barra de actividad desplaza los índices de `--ui=`** (otra vez). La
-  Fase 17 metió "Extensiones" en el 9 y "Ajustes" pasó al 10, lo que habría roto en silencio
-  `settings`, `light`, `probe-theme` y `ai-toggle`.
+- **Añadir una herramienta a la barra de actividad desplazaba los índices de `--ui=`** (pasó dos
+  veces: la Fase 15 con "Pruebas" y la Fase 17 con "Extensiones", que empujó "Ajustes" al 10). Ya no
+  puede pasar: se pulsa por `data-tool-id`. Lo que sí hay que hacer al añadir una herramienta es
+  darla de alta en `ACTIVITY_TOOLS` (`src/shared/activity-bar.ts`) y en `activityButton()`.
 - **Un modelo de texto que ya trae su marca no se pinta dentro de una `<ul>`.** Las notas de una
   release convierten `- ` en `· ` a propósito —los encabezados no llevan marca y las viñetas sí—, y
   meterlas en una lista de verdad pinta dos viñetas en unas líneas y ninguna en otras.
+- **`inflateRawSync` y `createHash().update()` hacen su trabajo en C++, pero en tu hilo.** En
+  Electron ese hilo es el que repinta la ventana y atiende el IPC del renderer, así que
+  descomprimir e instalar un paquete se sentía como una aplicación colgada. Las dos tienen variante
+  asíncrona (`inflateRaw` va al pool de libuv; el hash se trocea) y además cada `await` es un
+  respiro para el bucle. La misma regla vale para `existsSync` y compañía en el proceso principal.
+- **Una prueba de rendimiento calibrada contra tu CPU no vale para la de al lado.** El primer
+  intento de probar lo anterior medía el hueco más largo entre disparos de un temporizador y exigía
+  que fuera corto; falló porque esta máquina hashea 96 MB en 17 ms (SHA-NI) y ni el camino síncrono
+  llegaba al umbral. Lo que sí es invariante es **cuántas vueltas da el bucle de eventos**: cero en
+  el camino síncrono, una por bloque en el asíncrono.
+- **Un repintado completo destruye el `<input>` que se está usando.** Las vistas de la barra lateral
+  vacían su contenedor y lo reconstruyen; si el repintado lo dispara un rebote de búsqueda, el nodo
+  enfocado desaparece a mitad de palabra y se siente como si el IDE se comiera las letras. Se marca
+  el campo con `data-focus-key` y se repinta con `repaintPreservingFocus` (`dom.ts`).
+- **Una casilla que no se pinta desde el estado se desmarca sola.** El `<input type="checkbox">` de
+  "pre" en NuGet no recibía `checked` al reconstruirse: la preferencia seguía activa por dentro y la
+  marca desaparecía a la vista en cada búsqueda. `el()` no tiene opción `checked`; hay que ponerlo a
+  mano sobre el nodo.
+- **Recargar la solución no es abrir otra solución.** Instalar un paquete cambia el `.csproj`, así
+  que el renderer relee la solución al terminar **cada** tarea de `dotnet`. Una vista que trate toda
+  relectura como "solución nueva" y reinicie su estado ahí tira la selección del usuario a media
+  operación: en NuGet mataba la instalación en varios proyectos después del segundo, sin decir nada.
+- **`dragover` tiene que llamar a `preventDefault()`.** Sin eso, HTML5 Drag and Drop no considera el
+  elemento un destino válido y el `drop` no llega nunca. Falla en silencio: se ve el icono moverse
+  con el ratón y al soltar no pasa nada.
+- **Matar Electron es matar un árbol de procesos.** `child.kill()` en Windows termina sólo al padre;
+  los procesos de GPU, renderer y utilidades siguen vivos con la tubería de salida abierta y
+  `node --test` no puede salir. La suite se colgaba indefinidamente tras un timeout de la prueba de
+  humo. Se baja el árbol con `taskkill /T` y se sueltan las tuberías.
 - **Un clon limpio no es tu árbol de trabajo.** La suite pasaba en local y falló en CI en la primera
   ejecución del pipeline sobre un checkout nuevo, por dos motivos a la vez: las plantillas llegaron
   con CRLF (Git para Windows y los runners traen `core.autocrlf` activado) y el binario de Electron

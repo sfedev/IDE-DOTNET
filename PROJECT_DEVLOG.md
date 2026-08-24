@@ -340,6 +340,39 @@ por tanto **compila** pero no **ejecuta** los proyectos generados. Se añade el 
 
 ---
 
+### Fase 18 — Bugs de usabilidad y rendimiento, y dos mejoras de UX
+- [x] F18.1 Instalar deja de bloquear el hilo principal: `readEntryAsync` (`inflateRaw` en el pool de
+      libuv) y `sha256Async` (troceado con cesión del bucle), y fuera `existsSync` de los dos
+      instaladores (ADR-051)
+- [x] F18.2 Pruebas de responsividad que miden vueltas del bucle de eventos, no tiempo, cada una con
+      su control por el camino síncrono
+- [x] F18.3 `focus-guard.ts` + `repaintPreservingFocus`: el repintado devuelve el foco y el cursor al
+      campo marcado con `data-focus-key` (ADR-052)
+- [x] F18.4 Las búsquedas de NuGet y de Open VSX descartan las respuestas que llegan tarde
+- [x] F18.5 La casilla "pre" de NuGet se pinta desde el estado en vez de reconstruirse en blanco
+- [x] F18.6 `editor-state.ts`: una única regla para el estado de escritura del editor, recalculada en
+      cada punto de control y en el `finally` de toda operación asíncrona (ADR-053)
+- [x] F18.7 `save()` captura sus fallos y avisa; el autoguardado guarda la pestaña que cambió, no la
+      que esté activa al saltar el temporizador
+- [x] F18.8 `nuget-install.ts`: plan de instalación en varios proyectos, en serie, emparejando por
+      `taskId`, con progreso y resumen que nombra los que fallan
+- [x] F18.9 Panel de NuGet con casillas por proyecto, "Todos"/"Ninguno", barra de progreso global y
+      botón que dice en cuántos proyectos va a entrar el paquete
+- [x] F18.10 Recargar la solución deja de tirar la selección y el plan en marcha: sólo se reinicia el
+      estado al cambiar de solución de verdad
+- [x] F18.11 `activity-bar.ts`: orden de la barra por identificador, normalizado al leerlo, con
+      "Ajustes" fijo bajo el separador (ADR-054)
+- [x] F18.12 Reordenar arrastrando los iconos, persistido en `activityBar.order`, con "Restaurar el
+      orden" en Ajustes cuando hay algo que deshacer
+- [x] F18.13 Los modos `--ui=` pulsan por `data-tool-id`, con prueba estructural que lo vigila
+- [x] F18.14 La prueba de humo mata el árbol de procesos de Electron: la suite dejaba de poder salir
+      tras un timeout
+- [x] F18.15 Verificado sobre la aplicación real con `--probe=`: foco y cursor conservados tras el
+      rebote y 30 resultados repintados, instalación real en los 6 proyectos de una solución Clean,
+      arrastre persistido y `--ui=` funcionando con la barra reordenada
+
+---
+
 ## Decisiones técnicas (ADR corto)
 
 ### ADR-001 — Base del IDE: Electron + Monaco (no fork de VS Code, no Theia)
@@ -462,6 +495,124 @@ proceso, así que el alcance es la parte importante de la decisión y no un deta
 - La opción (b) se descartó porque el problema no es la elección de versión —eso ya se resolvió para
   Roslyn en la ADR-040— sino la consulta en sí: incluso fijando la versión hay que resolver la URL
   del artefacto, y eso pasa por la API.
+---
+
+### ADR-051 — En el proceso principal, nada de CPU síncrona sobre búferes grandes
+**Fecha:** 2026-08-24
+**Contexto:** Instalar una extensión de Open VSX daba tirones severos y ratos de ventana congelada.
+La red y el disco ya eran asíncronos; lo que bloqueaba eran las dos operaciones de CPU que hay en
+medio: `inflateRawSync` por cada archivo del `.vsix` y `createHash().update(buffer)` por cada archivo
+extraído y por el paquete entero. Las dos trabajan en C++, y por eso es fácil darlas por gratuitas,
+pero lo hacen **en el hilo que llama** — en Electron, el mismo que repinta la ventana y atiende el
+IPC del renderer.
+**Opciones:**
+- (a) dejarlo y avisar con un spinner;
+- (b) mover la instalación a un `worker_thread`;
+- (c) usar las variantes asíncronas que ya ofrecen `zlib` y `crypto`, y trocear lo que no la tenga.
+**Decisión:** (c).
+**Consecuencias:**
+
+- `readEntryAsync` usa `inflateRaw`, que va al pool de libuv: el trabajo sale del hilo principal y,
+  de propina, cada `await` de la extracción es una vuelta del bucle de eventos.
+- `sha256Async` trocea en bloques de 4 MiB y cede con `setImmediate` entre bloques. `hash.update()`
+  no tiene variante asíncrona útil aquí, así que lo que se controla es la duración de cada bloque.
+- La variante síncrona de `readEntry` se conserva **para leer una entrada suelta y pequeña** (el
+  `extension.vsixmanifest` de un `.vsix` son unos kilobytes); una prueba estructural exige que la
+  extracción no vuelva a usarla.
+- Se va también `existsSync` de los dos instaladores: la ausencia de un archivo la resuelve igual de
+  bien el `readFile` que venía después.
+- (b) se descartó por desproporcionada: un worker obliga a serializar búferes de cientos de MB o a
+  compartir memoria, y el problema se resuelve entero sin salir del hilo.
+- Lo que **no** cambia: el manifiesto anota exactamente los mismos tamaños y hashes, que es de lo
+  que depende que una copia corrupta se detecte (ADR-041). Hay una prueba que lo compara contra el
+  cálculo síncrono.
+
+---
+
+### ADR-052 — El repintado devuelve el foco; no se deja de repintar
+**Fecha:** 2026-08-24
+**Contexto:** Al hacer una pausa breve escribiendo en la búsqueda de NuGet o en la de extensiones, el
+cursor desaparecía y las letras siguientes se perdían. La causa no es el rebote —hace falta— sino lo
+que dispara: la vista vacía su contenedor y lo reconstruye, y el `<input>` enfocado es uno de los
+nodos que se destruyen. En el panel de extensiones pasa tres veces por búsqueda.
+**Opciones:**
+- (a) repintar sólo la lista de resultados y dejar la barra de búsqueda fuera del repintado;
+- (b) introducir reconciliación de DOM (un mini DOM virtual) en las vistas;
+- (c) conservar y restaurar el foco alrededor del repintado.
+**Decisión:** (c), con las reglas en un módulo puro (`src/renderer/focus-guard.ts`).
+**Consecuencias:**
+
+- Cada campo que quiera sobrevivir se marca con `data-focus-key`, y el repintado va envuelto en
+  `repaintPreservingFocus`. Sólo se restaura si el foco estaba **dentro** del contenedor repintado:
+  un repintado del panel no puede robarle el cursor a la terminal.
+- **El valor no se restaura nunca**: lo pinta la vista desde su estado, que es la verdad. La foto
+  sólo manda sobre la selección, y sólo mientras el texto no haya cambiado; si cambió, el cursor se
+  va al final.
+- (a) es más quirúrgico pero no generaliza: hay varios paneles con caja de búsqueda y habría que
+  inventar la excepción en cada uno, y cualquier vista futura repetiría el fallo.
+- (b) es la solución "de libro" y es la que no encaja aquí: el renderer construye el DOM a mano a
+  propósito (nada de `innerHTML`), y meter un reconciliador cambiaría cómo se escribe toda la
+  interfaz para arreglar un problema de dos paneles.
+
+---
+
+### ADR-053 — El estado de sólo lectura del editor se recalcula en cada punto de control
+**Fecha:** 2026-08-24
+**Contexto:** Se investigó un síntoma reproducible a ratos: el editor dejaba de admitir texto nuevo
+pero seguía permitiendo borrar, y sólo se arreglaba reiniciando. Al buscar el culpable no apareció:
+**hoy ningún camino enciende `readOnly` en el editor de código** —sólo lo declara el editor de
+diferencias, y ahí es por diseño (ADR-021)—. Lo que sí es cierto es la propiedad que hace posible el
+fallo: `readOnly` en Monaco es pegajoso y nadie lo revisaba nunca. Basta con que algún camino
+asíncrono lo encienda y muera antes de apagarlo.
+**Opciones:**
+- (a) no tocar nada, porque hoy no hay ningún camino que lo encienda;
+- (b) envolver en `try/finally` los caminos asíncronos que existen hoy;
+- (c) hacer que el valor deje de ser una suposición y se recalcule desde una regla única.
+**Decisión:** (c), y (b) como parte de ella.
+**Consecuencias:**
+
+- `src/renderer/editor-state.ts` es la única regla, pura y probada. Sólo dos cosas hacen el editor de
+  sólo lectura, y las dos son estructurales: que no haya archivo abierto y que se esté enseñando una
+  comparación.
+- **Nada asíncrono bloquea la escritura**, y es deliberado: formatear al guardar tarda lo que tarde
+  el servidor de lenguaje, y prohibir teclear durante ese rato sería un remedio peor que la
+  enfermedad. Las operaciones en vuelo se cuentan sólo para que su `finally` sea un punto de
+  recálculo.
+- `refreshEditability()` se llama al montar, al abrir, al activar, al cerrar y al entrar y salir de
+  una comparación. Un bloqueo que se cuele dura, como mucho, hasta el siguiente cambio de pestaña.
+- Monaco dice **por qué** no se puede escribir (`readOnlyMessage`). Un editor que no acepta lo que se
+  teclea y no dice nada es exactamente el fallo que se estaba investigando.
+- (a) se descartó porque el coste de la garantía es una función pura y seis llamadas, y el coste de
+  no tenerla es una sesión de trabajo perdida por un fallo que no deja rastro en ningún registro.
+
+---
+
+### ADR-054 — La barra de actividad se ordena a gusto, y se pulsa por identificador
+**Fecha:** 2026-08-24
+**Contexto:** El orden de la barra estaba escrito a mano en `renderActivityBar` y los modos de
+diagnóstico `--ui=` pulsaban los iconos por índice posicional dentro de `.activity-item`. Eso se
+rompió en silencio dos veces al añadir una herramienta (Fase 15 y Fase 17), las dos anotadas en
+`CLAUDE.md` como trampa conocida.
+**Opciones:**
+- (a) un orden fijo mejor pensado;
+- (b) reordenar desde una lista en Ajustes;
+- (c) reordenar arrastrando los propios iconos, con el orden en las preferencias.
+**Decisión:** (c).
+**Consecuencias:**
+
+- El orden se guarda como lista de identificadores en `activityBar.order`, nunca como posiciones, y
+  `normalizeActivityOrder` lo trata como una sugerencia: descarta lo desconocido y lo repetido, y
+  completa al final lo que falte. Un archivo escrito por una versión anterior tiene que dar una
+  barra completa, no una barra a la que le falta un icono.
+- **"Ajustes" no se mueve**: vive bajo el separador, al fondo, que es donde se busca en cualquier
+  editor. Dejarlo subir sólo serviría para que alguien lo perdiera de vista.
+- Los `--ui=` pasan a `[data-tool-id=…]`. Con un orden que cambia el usuario, la posición ya no
+  significa nada; una prueba estructural vigila que no vuelva ningún índice.
+- Ajustes no tiene una lista para reordenar —se reordena donde se ve el resultado— pero sí la salida
+  de emergencia: "Restaurar el orden", que sólo aparece cuando hay algo que deshacer.
+- (b) se descartó porque duplica la barra en un sitio donde no está: dos representaciones del mismo
+  orden, y la de Ajustes siempre peor.
+
 ---
 
 ## Bitácora de iteraciones
@@ -2615,3 +2766,99 @@ salida y la compilación lo dio por bueno igualmente. Además, `runtime-smoke` l
 `stdio: ['ignore', 'pipe', 'pipe']` y **sólo consume `stderr`**: toda la salida de restore y build se
 descarta, que es la parte que explicaría por qué no se copió. Antes de proponer ninguna hipótesis en
 un Mac, capturar esa salida.
+
+### Iteración 26 — 2026-08-24 — Fase 18: tres bugs de uso y dos mejoras de UX
+
+**Objetivo:** tres fallos que se notan usando el IDE y no aparecen en ningún registro —el editor que
+deja de admitir texto, el cursor que se pierde al buscar, la ventana que se congela instalando— y dos
+huecos de UX: instalar un paquete en varios proyectos a la vez y poder ordenar la barra de actividad.
+
+**Hecho:**
+
+- **Instalar deja de bloquear el hilo principal** (ADR-051). `readEntryAsync` con `inflateRaw` (pool
+  de libuv) y `sha256Async` troceado en bloques de 4 MiB; fuera `existsSync` de los dos instaladores.
+- **El repintado devuelve el foco** (ADR-052). `data-focus-key` + `repaintPreservingFocus`, con las
+  reglas en un módulo puro. De paso, las respuestas de búsqueda que llegan tarde ya no pisan a las
+  nuevas, y la casilla "pre" de NuGet se pinta desde el estado en vez de reconstruirse en blanco.
+- **El editor recalcula si se puede escribir** (ADR-053), en cada punto de control y en el `finally`
+  de toda operación asíncrona. Y `save()` deja de tragarse sus fallos.
+- **NuGet instala en varios proyectos a la vez**: casillas por proyecto, "Todos"/"Ninguno", barra de
+  progreso global e instalación en serie con resumen que nombra los proyectos que fallan.
+- **La barra de actividad se reordena arrastrando** (ADR-054), con el orden en `activityBar.order` y
+  los `--ui=` pulsando por `data-tool-id`.
+- 79 pruebas nuevas: 72 unitarias (barra de actividad 19, instalación en varios proyectos 18, foco 15,
+  estado del editor 12, responsividad de la instalación 8) y 7 estructurales de endurecimiento.
+
+**Decisiones registradas:** ADR-051 (nada de CPU síncrona en el proceso principal), ADR-052 (el
+repintado devuelve el foco), ADR-053 (el estado de escritura se recalcula), ADR-054 (barra ordenable
+y pulsada por identificador).
+
+**Errores encontrados y solucionados:**
+
+1. *Síntoma:* el editor admitía borrar y no admitía escribir.
+   *Causa raíz:* **no se encontró ningún camino que encienda `readOnly`** en el editor de código —lo
+   declara sólo el editor de diferencias, y ahí es por diseño (ADR-021)—. Lo que sí es cierto, y es
+   lo que hace posible el fallo, es que el valor era una suposición que nadie revisaba nunca:
+   `readOnly` en Monaco es pegajoso y no se apaga solo.
+   *Arreglo:* una regla única y pura, recalculada en cada punto de control. No se ha "arreglado al
+   culpable" porque hoy no existe; se ha quitado la propiedad que lo haría posible mañana. Queda
+   escrito para que la próxima sesión no vuelva a buscarlo a ciegas.
+2. *Síntoma:* la primera versión de las pruebas de responsividad daba un verde falso, con el
+   **control** en rojo.
+   *Causa raíz:* medían el hueco más largo entre disparos de un temporizador y exigían que fuera
+   corto. Esta máquina hashea 96 MB en 17 ms —SHA-NI—, así que ni siquiera el camino síncrono
+   llegaba al umbral. Una prueba calibrada contra la CPU de quien la escribe no vale para la máquina
+   de al lado.
+   *Arreglo:* se mide cuántas vueltas da el bucle de eventos, que es invariante: cero en el camino
+   síncrono, una por bloque o por archivo en el asíncrono. Cada medición conserva su control.
+3. *Síntoma:* la instalación en varios proyectos moría después del segundo, sin decir nada.
+   *Causa raíz:* instalar cambia el `.csproj`, así que el renderer relee la solución al terminar
+   **cada** tarea de `dotnet`; `setSolution` trataba toda relectura como "otra solución" y reiniciaba
+   su estado, tirando la selección del usuario y el plan en marcha.
+   *Arreglo:* sólo se reinicia cuando la solución cambia de verdad (ruta y directorio). En una
+   relectura sólo se descartan los proyectos que hayan desaparecido del `.sln`.
+4. *Síntoma:* soltar un icono de la barra no movía nada a la vista, aunque la preferencia sí se
+   guardaba.
+   *Causa raíz:* dos cosas a la vez. `applySettings` sólo repinta la barra cuando el parche toca al
+   asistente; y la guarda que debía evitar guardar por nada (`order === this.activityOrder()`)
+   comparaba contra otra llamada que normaliza y devuelve **un array nuevo**, así que nunca era
+   cierta.
+   *Arreglo:* repintar cuando el parche trae `activityBar`, y comparar contra el array que se le pasó
+   a `moveActivityTool`.
+5. *Síntoma:* la suite se quedaba colgada indefinidamente tras un timeout de la prueba de humo.
+   *Causa raíz:* `child.kill()` en Windows mata sólo al padre; los procesos de GPU y renderer de
+   Electron siguen vivos con la tubería de salida abierta y `node --test` no puede salir.
+   *Arreglo:* `taskkill /T` y las tuberías sueltas.
+6. *Trampa conocida que volvió a morder:* un heredoc se come un nivel de escapes. Pasó dos veces al
+   escribir por shell archivos con literales de plantilla dentro. Van seis. Reescritos con la
+   herramienta de edición, que es lo que la propia guía dice desde la Iteración 22.
+
+**Verificado sobre la aplicación real** (con `--probe=`, no mirando capturas):
+
+- **El foco, con la búsqueda de verdad contra nuget.org:** se escribe "Serilog", se deja el cursor en
+  la posición 3, se espera a que salte el rebote y lleguen los 30 resultados —dos repintados
+  completos— y la respuesta es
+  `enfocado=nuget-search valor=Serilog cursor=3 resultados=30`.
+- **La instalación en varios proyectos, de punta a punta** sobre una solución Clean generada con el
+  wizard: `6 proyectos seleccionados`, el botón dice `Instalar en 6` y su tooltip nombra los seis; el
+  progreso avanza (`Humanizer.Core 3.0.10: 2 de 6 — Acme.Shop.Application`, `3 de 6 —
+  Acme.Shop.Infrastructure`, `4 de 6 — Acme.Shop.Blazor`) y al final los **seis** `.csproj` tienen su
+  `<PackageReference Include="Humanizer.Core" />` con la versión centralizada en
+  `Directory.Packages.props`, que es lo que hace el SDK en una solución con gestión centralizada.
+- **La barra de actividad:** los once botones salen con su `data-tool-id` y "Ajustes" no es
+  arrastrable; un arrastre de "Extensiones" al primer puesto deja DOM y preferencias de acuerdo
+  (`dom=extensions explorer git … settings`, `settings=extensions explorer git …`), sobrevive a un
+  reinicio, y `--ui=nuget` sigue abriendo NuGet con la barra reordenada — que es exactamente lo que
+  los índices posicionales no habrían soportado.
+- `npx electron . --smoke-test` → `SMOKE_OK`.
+- `npm test` en verde de punta a punta: **1192 pruebas** entre `unit` y `security` (1113 antes), más
+  los grupos `package` y `scaffold`.
+
+**Versión:** dos funcionalidades nuevas y tres correcciones, sin cambios incompatibles:
+2.1.0 → **2.2.0** (ADR-009).
+
+**Lo que queda anotado para la próxima sesión:** el fallo del editor no tiene hoy un culpable en el
+código. Si vuelve a aparecer, lo primero es mirar `readOnlyMessage` — ahora Monaco dice por qué no
+deja escribir— y `editorContext()`, en vez de volver a buscar quién enciende `readOnly`.
+
+---
