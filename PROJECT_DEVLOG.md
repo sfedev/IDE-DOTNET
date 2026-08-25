@@ -5,6 +5,7 @@ Bitácora viva de desarrollo. Se actualiza **en cada iteración** del bucle de t
 - **Proyecto:** DotForge IDE — distribución de IDE para C# / .NET 9+ / Blazor
 - **Inicio:** 2026-08-23
 - **Estado global:** 
+  artefactos de macOS) está bloqueado por plataforma y documentado en la Fase 5.
 
 Leyenda: `[ ]` pendiente · `[~]` en curso · `[x]` completado y **verificado con un comando**
 
