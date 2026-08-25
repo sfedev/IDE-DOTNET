@@ -39,6 +39,9 @@ falla el IDE **conmuta solo a OmniSharp** sin que tengas que enterarte.
 La v2.1.0 añade lo que le faltaba a la distribución: el IDE **se actualiza solo** —te avisa en una
 tarjeta y se instala al cerrar, sin interrumpirte— y trae un **explorador de extensiones de Open
 VSX** para buscar, instalar y desinstalar `.vsix` desde el registro abierto.
+La v2.5.0 convierte el panel inferior en una terminal de verdad: **varias pestañas y un selector de
+intérprete** —PowerShell, el símbolo del sistema o la terminal asistida de siempre—, con colores,
+`Ctrl+C` y autocompletado nativo.
 
 ![DotForge IDE con una solución DDD abierta](docs/screenshot-workspace.png)
 
@@ -350,7 +353,18 @@ composición, donde se registran las implementaciones en el contenedor de depend
 Ante la duda, el linter calla: un proyecto con un nombre que no encaja en ninguna capa, o una
 solución cuya arquitectura no se reconoce, no producen ni un aviso.
 
-### Terminal: navegación, Docker, Azure y npm
+### Terminal: varias pestañas, navegación, Docker, Azure y npm
+
+**Elige intérprete.** El botón `+` del panel abre una pestaña nueva y pregunta con qué: PowerShell,
+PowerShell 7, el símbolo del sistema (o zsh y bash fuera de Windows) y la **terminal asistida**, que
+es la de siempre. Las de intérprete llevan pseudoterminal de verdad: colores, `Ctrl+C`,
+autocompletado nativo y su propio `cd`. La asistida se queda porque es la única que sabe sugerirte
+subcomandos y ramas mientras escribes. Conviven todas las pestañas que quieras, cada una con su
+sesión; cerrar una cierra su intérprete, y cerrar el IDE se las lleva todas.
+
+Un intérprete que no tienes instalado aparece atenuado y con el motivo, no escondido.
+
+#### La terminal asistida
 
 **Se navega con `cd`.** A una subcarpeta, a otra solución, a otra unidad: la terminal lleva la
 cuenta de dónde estás y el prompt lo dice. Se entienden las tres formas de escribirlo que conviven
@@ -755,9 +769,11 @@ src/
   trabajo diferencial del producto.
 - **`src/scaffold/` no importa `electron`.** Así el generador se prueba con Node puro, sin display,
   y la CLI y el asistente comparten exactamente el mismo código.
-- **Cero dependencias nativas.** No hay `node-pty` ni módulos que requieran recompilación: el
-  empaquetado es reproducible y no hay paso de rebuild en la máquina del usuario. El precio es que
-  la terminal no tiene pseudoterminal.
+- **Nada que haya que compilar en tu máquina.** La única dependencia nativa es `node-pty`, y es
+  opcional: publica los binarios ya compilados dentro del paquete y son Node-API, ABI estable, así
+  que valen para Electron sin `electron-rebuild`. No hay node-gyp, no hay Build Tools, no hay paso
+  de rebuild por plataforma. Y si el binario falta, el IDE lo dice y sigue funcionando con la
+  terminal asistida.
 - **El asistente de IA habla HTTP, sin SDK de proveedor.** Un constructor de peticiones y un parser
   de streaming por formato, los dos funciones puras: se prueban sin red y sin claves. Y el prompt
   de sistema con las reglas de arquitectura lo compone el **proceso principal**, no el renderer, así
@@ -859,9 +875,12 @@ propio.
 
 Se listan explícitamente porque un README que sólo cuenta lo que funciona no sirve para decidir.
 
-- **La terminal no es un pseudoterminal.** Ejecuta comandos y muestra su salida; los programas
-  interactivos (REPL, `vim`) no funcionarán. Es la consecuencia directa de no usar `node-pty`, que
-  es una dependencia nativa. Los programas admitidos están en una lista blanca corta y auditable.
+- **La terminal asistida no es un pseudoterminal.** Ejecuta comandos de una lista blanca corta y
+  auditable y muestra su salida; los programas interactivos (REPL, `vim`) no funcionan **en ella**.
+  Desde la v2.5.0 no es la única: el botón `+` del panel abre pestañas de PowerShell o del símbolo
+  del sistema con pseudoterminal de verdad. La asistida se queda porque es la única que sugiere
+  subcomandos y ramas mientras escribes, y la única que funciona si `node-pty` no está disponible.
+- **Las pestañas de terminal no se guardan entre sesiones.** Reabrir el IDE las cierra todas.
 - **`dist:mac` requiere macOS o Linux.** Limitación de electron-builder, no de este proyecto.
 - **Artefactos sin firmar.** No hay certificados; ver [Firma](#firma).
 - **NetCoreDbg en macOS Intel** depende de que la release publique `netcoredbg-osx-amd64.zip`; la

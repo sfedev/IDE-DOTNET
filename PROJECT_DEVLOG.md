@@ -433,6 +433,48 @@ por tanto **compila** pero no **ejecuta** los proyectos generados. Se añade el 
 
 ---
 
+### Fase 21 — Múltiples perfiles de terminal y tres bugs de arranque y de uso
+- [x] F21.1 `src/shared/json-text.ts`: `stripBom` y `parseJsonText`. La marca de orden de bytes UTF-8
+      de Windows deja de romper el parseo de los JSON que el IDE no escribe (ADR-058)
+- [x] F21.2 Aplicado a los diez lectores que leen JSON ajeno: `launchSettings.json`, `package.json`,
+      `appsettings*.json`, manifiestos de `.vsix` y de instalación, ajustes, perfiles de inicio,
+      llavero y actualización pendiente
+- [x] F21.3 `selectProfile` prefiere HTTPS cuando no hay coincidencia de nombre: las plantillas del
+      SDK declaran `http` primero y era justo el perfil sin TLS el que se arrancaba
+- [x] F21.4 `--launch-profile <nombre>` explícito en `dotnet run` y `dotnet watch`, resuelto por el
+      proceso principal; `launchProfileArgs` acota la bandera a los verbos que la aceptan
+- [x] F21.5 `src/renderer/views/confirm-dialog.ts` (nuevo): diálogo modal propio y asíncrono, con
+      Escape, foco atrapado dentro del cuadro, foco previo devuelto y tercer botón opcional
+- [x] F21.6 `EditorView.confirmDiscard`: recalcula la editabilidad y devuelve el foco a Monaco en un
+      `finally`, así que ninguna respuesta —ni un fallo— deja el editor sin teclado
+- [x] F21.7 `ConfirmationLock`: como mucho un modal a la vez y el cerrojo se suelta pase lo que pase
+- [x] F21.8 Cerrar la ventana con cambios sin guardar pregunta de verdad: en Electron, un
+      `preventDefault()` en `beforeunload` no enseña ningún diálogo y deja el aspa muerta
+- [x] F21.9 Las otras cuatro confirmaciones bloqueantes (git, EF Core, contenedores, extensiones)
+      pasan al mismo diálogo
+- [x] F21.10 `src/shared/terminal-profiles.ts` (nuevo): catálogo de perfiles, filtrado por
+      plataforma, saneado del identificador y numeración de pestañas por perfil
+- [x] F21.11 `src/main/services/terminal-pty-service.ts` (nuevo): sesiones de `node-pty` con carga
+      tardía y tolerante, tope de sesiones, tope de escritura y `programExists` (ADR-059)
+- [x] F21.12 Canales `terminal:profiles`, `terminal:create`, `terminal:write`, `terminal:resize` y
+      `terminal:dispose`, más los eventos `event:terminal-data` y `event:terminal-exit`
+- [x] F21.13 Panel: tira de pestañas de terminal con su aspa, botón `+` con menú de intérpretes y lo
+      no disponible atenuado con el motivo escrito
+- [x] F21.14 `src/renderer/xterm-bridge.ts` (nuevo) y xterm.js servido desde `build/vendor/xterm/`,
+      como Monaco, con los colores tomados del tema activo
+- [x] F21.15 Limpieza: cerrar la pestaña cierra la sesión; `before-quit`, `process.on('exit')` y el
+      cierre de la ventana se llevan todos los árboles de procesos
+- [x] F21.16 Comando "Nueva terminal" en la paleta y en el menú Ver
+- [x] F21.17 Modos de diagnóstico `--ui=unsaved` y `--ui=terminal-pty`
+- [x] F21.18 Pruebas: 37 nuevas (29 de perfiles, sesiones y arranque, 8 estructurales de seguridad de
+      la superficie nueva) más `tests/unit/pty-session.probe.mjs`, que abre un intérprete de verdad
+      en un proceso aparte
+- [x] F21.19 Verificado sobre la aplicación real: `echo` de ida y vuelta en PowerShell, tres pestañas
+      a la vez, cierre de una sola, cero procesos huérfanos al salir, y el editor recuperando el
+      teclado tras las dos respuestas del aviso de cambios sin guardar
+
+---
+
 ## Decisiones técnicas (ADR corto)
 
 ### ADR-001 — Base del IDE: Electron + Monaco (no fork de VS Code, no Theia)
@@ -792,6 +834,110 @@ evidente es quién decide de dónde cuelga.
   el disco es el que repinta la ventana y atiende el IPC del renderer. Hay una prueba estructural que
   se pone en rojo si vuelve a aparecer un `readFileSync` ahí dentro, porque es de lo más fácil de
   colar en una revisión: compila, funciona y sólo se nota con una solución grande delante.
+
+---
+
+### ADR-058 — El JSON que el IDE no escribe se lee con tolerancia a la marca de orden de bytes
+**Fecha:** 2026-08-25
+**Contexto:** una Web API generada por el propio DotForge arrancaba en el puerto 5000, por HTTP, en
+Production y sin *static web assets*, con el IDE diciendo que estaba lanzando el perfil `https`. Tres
+causas encadenadas, y ninguna de las tres da un error que se vea:
+
+1. El `launchSettings.json` guardado por Visual Studio empieza por `EF BB BF`. `JSON.parse` la
+   rechaza en la posición 0 y `readLaunchEnvironment` devolvía cero variables con un aviso que sólo
+   aparece en la salida del depurador.
+2. Cuando sí se leía, `selectProfile` cogía "el primero declarado" si no había uno con el nombre del
+   proyecto. Las plantillas del SDK declaran `http` **antes** que `https`.
+3. Y `dotnet run` sin `--launch-profile` hace lo mismo por su cuenta: aplica el primero del archivo,
+   sin importar cuál hubiera resuelto el IDE.
+
+**Opciones:**
+- (a) quitar el BOM sólo en `launch-settings.ts`, que es donde se vio;
+- (b) un lector compartido (`parseJsonText`) para **todo** JSON que el IDE no haya escrito él;
+- (c) leer los archivos como `latin1` y convertir, o normalizar la codificación al abrir el proyecto.
+
+**Decisión:** (b), más la prioridad de HTTPS y `--launch-profile` explícito.
+**Consecuencias:**
+
+- El BOM no es un problema de `launchSettings.json`: es un problema de **cualquier archivo que
+  escriba otra herramienta**. `appsettings.json`, el `package.json` de una extensión, un
+  `.vsix` de un publicador cualquiera. Arreglarlo en un sitio garantiza que vuelva a aparecer en
+  otro dentro de seis meses, así que se arregla en el único sitio por el que pasan todos.
+- **Sólo la marca del principio.** Un U+FEFF en mitad del archivo es un carácter de contenido —un
+  espacio de ancho cero— y borrarlo cambiaría el valor de una cadena. `stripBom` mira la posición 0
+  y nada más.
+- Se sigue lanzando `SyntaxError` con cualquier otro error de formato. Lo que se arregla es una
+  diferencia de codificación, no una invitación a tragarse un archivo roto: (c) se descartó por eso
+  —convertir a ciegas oculta los archivos que de verdad están mal— y porque reescribir el archivo
+  del usuario para "normalizarlo" es meter mano en su repositorio sin que lo haya pedido.
+- **HTTPS gana el desempate, el nombre del proyecto gana sobre HTTPS.** Quien llama a su perfil como
+  el proyecto está diciendo cuál quiere; entre los demás, arrancar en claro deja el certificado de
+  desarrollo sin usar y rompe a cualquier cliente que apunte al puerto seguro. Entre varios HTTPS
+  sigue mandando el orden del archivo, que es el criterio del SDK.
+- **El perfil se nombra siempre, no sólo cuando alguien lo pide.** El fallo era de omisión: mientras
+  la bandera no esté, la CLI y el IDE pueden estar hablando de perfiles distintos sin que nada lo
+  diga. `launchProfileArgs` la acota a `run` y `watch` —los demás verbos la rechazan— y el nombre
+  viaja como argumento suelto del array, porque un perfil puede llamarse "IIS Express".
+- Lo resuelve el **proceso principal**, no el renderer: el archivo está en el disco y el renderer no
+  conoce `launchSettings.json`. Misma regla que la verbosidad de la CLI y que el prompt del
+  asistente (ADR-016).
+
+---
+
+### ADR-059 — Pseudoterminales con node-pty: se rompe el "sin dependencias nativas", pero no lo que protegía
+**Fecha:** 2026-08-25
+**Contexto:** la terminal integrada no tenía PTY por una decisión explícita de la Fase 9: `node-pty`
+es nativa, y el proyecto se había comprometido a no tener ninguna para que el empaquetado fuera
+reproducible y no hiciera falta compilar nada en la máquina del usuario. A cambio, la terminal
+ejecutaba comandos concretos de una lista blanca y enseñaba su salida.
+
+Eso cubre el flujo de .NET y no cubre nada interactivo: ni un REPL, ni `dotnet user-secrets set` con
+su aviso, ni `git rebase -i`, ni el prompt de PowerShell con sus colores, ni `Ctrl+C`. Para
+cualquiera de esas cosas hay que salir del IDE, que es justo lo que un IDE existe para evitar.
+
+**Opciones:**
+- (a) dejarlo como está y asumir que la terminal del IDE es de segunda;
+- (b) `node-pty` como dependencia normal, con paso de rebuild por plataforma;
+- (c) `node-pty` como `optionalDependency`, cargada tarde y con degradación explícita, conviviendo
+  con la terminal asistida;
+- (d) escribir un PTY propio, o lanzar el intérprete con tuberías fingiendo una consola.
+
+**Decisión:** (c).
+**Consecuencias:**
+
+- **El compromiso que importaba sigue en pie.** Lo inaceptable de una dependencia nativa no era el
+  `.node`: era el paso de rebuild —node-gyp, Visual Studio Build Tools, un artefacto distinto por
+  versión de Electron— y que el empaquetado dejara de ser reproducible. `node-pty` publica desde la
+  1.1 los binarios ya compilados dentro del propio paquete y son **Node-API**, que es ABI estable,
+  así que valen para Electron sin `electron-rebuild`. La prueba de empaquetado que prohibía la
+  dependencia se reescribe para exigir lo que de verdad se quería: ninguna dependencia **que haya
+  que compilar**, y que ésta venga con binario para esta plataforma.
+- **Es opcional, y la ausencia es un valor.** Se carga con `createRequire` dentro de un `try`, la
+  primera vez que hace falta. Sin binario —o con npm 11 bloqueando los scripts de instalación, que
+  es el caso normal— los perfiles de PTY se ofrecen **atenuados y con el motivo escrito** y la
+  terminal asistida sigue funcionando. Misma regla que con Docker apagado (ADR-033): que falte una
+  fuente no puede vaciar el panel.
+- **La asistida no se sustituye: deja de ser la única.** Sigue siendo la única que sugiere
+  subcomandos y ramas mientras se escribe —conoce la línea entera, cosa que un PTY no—, y la única
+  que funciona en una instalación sin binario. Es un perfil más del menú, con su ventaja dicha ahí
+  mismo.
+- **Dentro de un PTY no hay lista blanca de programas, y eso es deliberado.** Una terminal que sólo
+  deja ejecutar doce cosas no es una terminal; quien abre PowerShell está pidiendo PowerShell. Lo
+  que sí queda acotado, y por escrito en `tests/security/hardening.test.mjs`, es **quién** abre una
+  sesión y con qué: el perfil llega como identificador y pasa por `coerceProfileId`, que sólo puede
+  devolver uno del catálogo, así que no hay forma de pedirle al canal que lance un programa
+  arbitrario; el `cwd` **no llega del renderer** (se toma de la sesión de la terminal, como la raíz
+  de la búsqueda en el ADR-057); y hay tope de sesiones y tope por escritura.
+- (d) se descartó sin dudar: un pseudoterminal es una primitiva del sistema operativo, y ConPTY en
+  Windows no se emula con tuberías. Lo que se consigue fingiendo es exactamente lo que ya había.
+- **Cerrar la pestaña es cerrar la sesión**, y cerrar el IDE se lleva todas. Un intérprete
+  invisible que sigue vivo con un `dotnet watch` dentro ocupando un puerto es de los estados más
+  desconcertantes que puede dejar un programa.
+- **La pestaña no se cierra sola cuando el intérprete termina.** Si el `exit` fue un error, lo
+  último que escribió es lo único que lo explica.
+- xterm.js **no se bundlea**, por la misma razón que Monaco: son 500 KB que se sirven mejor como
+  archivo del vendor, y hay una prueba que vigila que el bundle del renderer siga siendo un orden de
+  magnitud más pequeño que lo que dice no incrustar.
 
 ---
 
@@ -3293,3 +3439,105 @@ eso es abrir esa carpeta.
   (1269 antes) más las de empaquetado y las tres arquitecturas compilando y pasando sus pruebas.
 
 ---
+
+### Iteración 30 — 2026-08-25 — Fase 21: la terminal es una terminal, y tres cosas que estaban rotas
+
+**Objetivo:** dos fallos que se notan al primer minuto de uso y una funcionalidad que llevaba doce
+fases pendiente por una decisión que había dejado de ser cierta.
+
+Los fallos: una Web API generada por el propio DotForge arrancaba en el puerto 5000, por HTTP y en
+Production, con el IDE diciendo que lanzaba el perfil `https`; y cerrar una pestaña con cambios sin
+guardar dejaba el editor sin aceptar texto —admitiendo Retroceso y no las letras— hasta reiniciar la
+aplicación, con la ventana además incapaz de cerrarse mientras el aviso estuviera en pantalla.
+
+La funcionalidad: pestañas de terminal con intérprete de verdad.
+
+**Hecho, archivo a archivo:**
+
+- `src/shared/json-text.ts` (**nuevo**): `stripBom` y `parseJsonText`. Aplicado a los diez lectores
+  de JSON ajeno: `launch-settings.ts`, `node-scripts.ts`, `settings-service.ts`,
+  `startup-service.ts`, `solution-service.ts`, `updater-service.ts`, `ai/secret-store.ts`,
+  `efcore.ts`, `toolchain-manifest.ts` y `vsix.ts`.
+- `src/main/services/launch-settings.ts`: `servesHttps` y la prioridad de HTTPS en `selectProfile`.
+- `src/main/services/dotnet-service.ts` y `src/main/ipc/register.ts`: `launchProfileArgs` y
+  `resolveLaunchProfile`. `dotnet run` y `dotnet watch` nombran el perfil que van a lanzar.
+- `src/renderer/views/confirm-dialog.ts` (**nuevo**): `askDialog` y `confirmDialog`. Sustituyen a
+  `window.confirm` en las cinco confirmaciones del IDE.
+- `src/renderer/editor-state.ts`: `ConfirmationLock` y `unsavedChangesMessage`.
+- `src/renderer/views/editor.ts`: `confirmDiscard`, con el recálculo de editabilidad y el foco
+  devuelto a Monaco en un `finally`.
+- `src/renderer/index.ts`: `confirmClose` con tres respuestas y el pestillo `closing`.
+- `src/shared/terminal-profiles.ts` (**nuevo**): el catálogo.
+- `src/main/services/terminal-pty-service.ts` (**nuevo**): las sesiones.
+- `src/renderer/xterm-bridge.ts` (**nuevo**) y `src/renderer/views/panel.ts`: las pestañas.
+- `src/shared/contracts.ts`, `src/main/preload.ts`, `src/main/ipc/register.ts`: cinco canales y dos
+  eventos nuevos.
+- `scripts/build.mjs`, `electron-builder.yml`, `src/renderer/static/index.html`: xterm en el vendor y
+  `node-pty` fuera del asar.
+- `src/main/main.ts`: `--ui=unsaved`, `--ui=terminal-pty` y la limpieza de sesiones al salir.
+- Pruebas: `tests/unit/terminal-profiles.test.mjs` (**nuevo**), `tests/unit/pty-session.probe.mjs`
+  (**nuevo**), `tests/unit/launch-settings.test.mjs`, `tests/unit/editor-state.test.mjs`,
+  `tests/security/hardening.test.mjs`, `tests/package/packaging.test.mjs`.
+
+**Decisiones registradas:** ADR-058 (marca de orden de bytes, perfil HTTPS y `--launch-profile`) y
+ADR-059 (pseudoterminales con `node-pty` como dependencia opcional).
+
+**Errores encontrados y solucionados:**
+
+1. *Síntoma:* con las pruebas de sesión dentro de `node --test`, las 24 pasaban en verde y el proceso
+   no terminaba nunca; a los 200 s la suite se declaraba fallida sin decir qué.
+   *Causa raíz:* al matar una sesión de ConPTY, node-pty lanza un ayudante
+   (`conpty_console_list_agent`) para enumerar los procesos de la consola, y ese ayudante deja vivo
+   el bucle de eventos del padre. Es el tercer caso de la misma familia en este proyecto, después de
+   la prueba de humo de Electron y del servidor HTTP sin cerrar.
+   *Arreglo:* las que abren un intérprete viven en `tests/unit/pty-session.probe.mjs`, que es un
+   proceso aparte y sale con `process.exit`. La prueba lo lanza y comprueba lo que imprime.
+2. *Síntoma:* las pseudoterminales funcionaban en la aplicación y las pruebas las declaraban no
+   disponibles, así que se saltaban solas. Verde diciendo que no hay nada que probar.
+   *Causa raíz:* `typeof require === 'function' ? require : otraCosa`. En el bundle ESM, esbuild
+   reescribe `require` por un sustituto que **pasa el `typeof`** y lanza al llamarlo ("Dynamic
+   require is not supported"), así que se elegía siempre el camino roto.
+   *Arreglo:* `createRequire` con ancla explícita —junto al bundle y, si no, el directorio de
+   trabajo— y sin tocar el identificador `require`. Anotado en `CLAUDE.md`.
+3. *Síntoma:* el menú del botón `+` ofrecía "PowerShell 7" en un equipo sin PowerShell 7; al
+   pulsarlo, el panel saltaba a Salida con un error y la terminal desaparecía de la vista.
+   *Causa raíz:* `availability()` sólo comprobaba `node-pty`, no el intérprete concreto. El catálogo
+   declara más perfiles de los que suele haber instalados.
+   *Arreglo:* `programExists` busca por `PATH` (con `PATHEXT` en Windows) y el canal
+   `terminal:profiles` marca el perfil como no disponible **con su motivo**, en vez de dejar que el
+   fallo llegue después y en otro panel.
+4. *Síntoma:* `--ui=terminal-pty` no abría nada y no daba ningún error.
+   *Causa raíz:* pulsaba el primer perfil cuyo texto contuviera "PowerShell", que tras el arreglo
+   anterior era el deshabilitado.
+   *Arreglo:* el modo de diagnóstico pulsa el primero **habilitado**, que es lo que haría una
+   persona.
+5. *Síntoma:* un `` escrito a mano acabó en `panel.ts` como carácter ESC literal, invisible.
+   *Causa raíz:* la trampa de siempre —contrabarras a través del shell—, esta vez al revés: el
+   heredoc se comió el escape y lo que llegó al archivo fue el carácter de control.
+   *Arreglo:* reescrito con la herramienta de edición. Y una comprobación de caracteres de control
+   sobre los archivos tocados, que encontró un segundo caso en `terminal-pty-service.ts`.
+
+**Lo que no se ha hecho, y por qué:** las pestañas de terminal **no se persisten** entre sesiones.
+Reabrir tres PowerShell al arrancar el IDE parece cómodo hasta que uno de ellos estaba en mitad de
+algo; y "restaurar" una terminal es, como mucho, volver a abrirla vacía en el mismo directorio, que
+no es restaurar nada. Tampoco hay perfiles definidos por el usuario: el catálogo es fijo. Añadir uno
+propio (un WSL concreto, un `cmd` con variables de entorno) es una funcionalidad con su interfaz y
+su persistencia, y a medias sería un archivo de configuración escondido.
+
+**Verificado sobre la aplicación real**, con una solución Clean generada:
+
+- **El aviso de cambios sin guardar, por los dos caminos.** Tras "Seguir editando":
+  `readOnly=false`, foco en `native-edit-context` y `trigger('type')` inserta tres caracteres. Tras
+  "Cerrar sin guardar": 0 pestañas, y al reabrir un archivo se vuelve a escribir. Antes, cualquiera
+  de las dos respuestas dejaba el editor mudo.
+- **Un `echo` de ida y vuelta en PowerShell:** escrito con el teclado sobre el emulador, ejecutado
+  por el intérprete y con el prompt de vuelta debajo.
+- **Tres pestañas a la vez** —asistida, PowerShell, símbolo del sistema, PowerShell 2— con la
+  numeración por perfil, y cerrando una sola sin tocar las demás.
+- **Cero procesos huérfanos** al salir: `OpenConsole.exe` a cero y el recuento de `powershell.exe`
+  igual que antes de arrancar.
+- **El perfil que se ofrece es el que hay:** "PowerShell 7" aparece deshabilitado y con el motivo,
+  porque `pwsh.exe` no está instalado en este equipo.
+- `npx electron . --menu-dump` → **ningún acelerador repetido** con "Nueva terminal" dentro.
+- `npm test` entero en verde: **1318 pruebas unitarias** (1290 antes) más seguridad, empaquetado y
+  las tres arquitecturas compilando y pasando las suyas.
