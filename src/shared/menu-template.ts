@@ -193,6 +193,7 @@ export function buildMenuTemplate(options: MenuTemplateOptions): MenuSection[] {
         command('Ajustes', 'view.settings', 'CmdOrCtrl+,'),
         separator,
         command('Terminal integrada', 'view.terminal', 'CmdOrCtrl+J'),
+        command('Nueva terminal', 'terminal.new'),
         command('Salida', 'view.output'),
         command('Problemas', 'view.problems', 'CmdOrCtrl+Shift+M'),
         command('Registro de la aplicación', 'view.logs', 'CmdOrCtrl+Shift+L'),

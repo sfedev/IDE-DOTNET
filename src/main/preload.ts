@@ -52,7 +52,11 @@ import type {
   SolutionInfo,
   TerminalContext,
   TerminalCwd,
+  TerminalDataEvent,
+  TerminalExitEvent,
+  TerminalProfileInfo,
   TerminalRunResult,
+  TerminalSessionInfo,
   AuditReport,
   TestCase,
   TestRunRequest,
@@ -182,6 +186,13 @@ const api: DotForgeApi = {
     allowed: () => ipcRenderer.invoke(IPC.terminalAllowed) as Promise<string[]>,
     context: () => ipcRenderer.invoke(IPC.terminalContext) as Promise<TerminalContext>,
     cwd: () => ipcRenderer.invoke(IPC.terminalCwd) as Promise<TerminalCwd>,
+    profiles: () => ipcRenderer.invoke(IPC.terminalProfiles) as Promise<TerminalProfileInfo[]>,
+    create: (profileId, size) =>
+      ipcRenderer.invoke(IPC.terminalCreate, profileId, size ?? null) as Promise<TerminalSessionInfo>,
+    write: (terminalId, data) => ipcRenderer.invoke(IPC.terminalWrite, terminalId, data) as Promise<boolean>,
+    resize: (terminalId, columns, rows) =>
+      ipcRenderer.invoke(IPC.terminalResize, terminalId, columns, rows) as Promise<boolean>,
+    dispose: (terminalId) => ipcRenderer.invoke(IPC.terminalDispose, terminalId) as Promise<boolean>,
   },
 
   nuget: {
@@ -287,6 +298,8 @@ const api: DotForgeApi = {
     onMetricsSample: (handler) => subscribe<MetricsEvent>(IPC_EVENTS.metricsSample, handler),
     onUpdateState: (handler) => subscribe<UpdateState>(IPC_EVENTS.updateState, handler),
     onSearchProgress: (handler) => subscribe<SearchProgress>(IPC_EVENTS.searchProgress, handler),
+    onTerminalData: (handler) => subscribe<TerminalDataEvent>(IPC_EVENTS.terminalData, handler),
+    onTerminalExit: (handler) => subscribe<TerminalExitEvent>(IPC_EVENTS.terminalExit, handler),
   },
 };
 

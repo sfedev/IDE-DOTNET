@@ -24,6 +24,7 @@ import { lspClient } from './lsp/lsp-client.js';
 import * as aiService from './services/ai/ai-service.js';
 import * as aiSecrets from './services/ai/secret-store.js';
 import * as metricsService from './services/metrics-service.js';
+import * as ptyService from './services/terminal-pty-service.js';
 import * as processRegistry from './services/process-registry.js';
 import * as settingsService from './services/settings-service.js';
 import * as startupService from './services/startup-service.js';
@@ -436,6 +437,18 @@ const UI_ACTIONS: Record<string, string> = {
     ".find((button) => button.textContent?.includes('Analizar'))?.click(), 900)",
   palette: "document.querySelector('#statusbar button:last-of-type')?.click()",
   terminal: "[...document.querySelectorAll('.panel-tab')].find((tab) => tab.textContent?.includes('Terminal'))?.click()",
+  /**
+   * Fase 21: abre el panel, despliega el selector de intérpretes y arranca PowerShell.
+   *
+   * Los dos retardos son reales y no de cortesía: el menú pide los perfiles al proceso principal
+   * (que carga `node-pty` la primera vez) y la sesión tarda lo que tarde el intérprete en pintar
+   * su prompt.
+   */
+  'terminal-pty':
+    "[...document.querySelectorAll('.panel-tab')].find((tab) => tab.textContent?.includes('Terminal'))?.click();" +
+    "setTimeout(() => document.querySelector('.terminal-new')?.click(), 600);" +
+    'setTimeout(() => [...document.querySelectorAll(".terminal-profile")]' +
+    ".find((item) => !item.disabled && item.textContent?.includes('PowerShell'))?.click(), 1800)",
   // Dos pasos: abrir ajustes y pulsar "Claro". Se encadenan con un retardo porque la vista se
   // repinta entre uno y otro.
   light:
@@ -789,7 +802,15 @@ app.on('before-quit', () => {
   // El monitor de rendimiento no pasa por el registro de tareas: tiene su propio proceso y su
   // propia parada. Sin esto, `dotnet-counters` sobrevive al IDE enganchado a la aplicación.
   metricsService.stop();
+  // Las pseudoterminales tampoco pasan por el registro de tareas: cada una es un intérprete con su
+  // propio árbol de hijos, y sin esto cerrar el IDE deja vivos tantos como pestañas hubiera.
+  ptyService.disposeAll();
   processRegistry.killAll();
 });
 
-process.on('exit', () => processRegistry.killAll());
+process.on('exit', () => {
+  // Los modos de diagnóstico salen con `app.exit()`, que no siempre pasa por `before-quit`: sin
+  // esta segunda red, una captura de pantalla podría dejar un intérprete vivo por el camino.
+  ptyService.disposeAll();
+  processRegistry.killAll();
+});

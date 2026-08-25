@@ -5133,3 +5133,186 @@ select.input {
 .search-match:hover .search-preview mark {
   background: var(--accent-softer);
 }
+
+/* =============================================================================================
+ * Pestañas de terminal (Fase 21)
+ * ========================================================================================== */
+
+.terminal-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/* La cabecera va arriba: abajo compite con el prompt, que ya vive ahí. */
+.terminal-strip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-deep);
+  flex-shrink: 0;
+}
+
+.terminal-strip .spacer {
+  flex: 1;
+}
+
+.terminal-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 6px 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  user-select: none;
+  max-width: 220px;
+}
+
+.terminal-chip:hover {
+  background: var(--surface-2);
+}
+
+.terminal-chip.active {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text-strong);
+}
+
+/* Un intérprete que ha terminado sigue enseñando lo último que escribió: se atenúa, no se borra. */
+.terminal-chip.exited .terminal-chip-label {
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+
+.terminal-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-chip-close {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.terminal-chip:hover .terminal-chip-close,
+.terminal-chip.active .terminal-chip-close {
+  opacity: 1;
+}
+
+.terminal-chip-close:hover {
+  background: var(--surface-3);
+  color: var(--text-strong);
+}
+
+.terminal-new {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.terminal-new:hover {
+  background: var(--surface-2);
+  color: var(--text-strong);
+  border-color: var(--border);
+}
+
+.terminal-profile-menu {
+  position: absolute;
+  top: 34px;
+  right: 8px;
+  z-index: 20;
+  width: min(420px, 82%);
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-popover);
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.terminal-profile {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.terminal-profile:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+/* Lo que no se puede usar se enseña atenuado con su motivo, nunca escondido (ADR-033). */
+.terminal-profile.unavailable,
+.terminal-profile:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.terminal-profile svg {
+  margin-top: 2px;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.terminal-profile-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.terminal-profile-label {
+  font-size: var(--text-sm);
+  color: var(--text-strong);
+}
+
+.terminal-profile-hint {
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+  line-height: 1.35;
+}
+
+/* Hueco del emulador. El relleno va aquí y no en xterm, que mide su propio hueco. */
+.terminal-body {
+  flex: 1;
+  min-height: 0;
+  padding: 6px 8px;
+  overflow: hidden;
+}
+
+.terminal-xterm {
+  width: 100%;
+  height: 100%;
+}

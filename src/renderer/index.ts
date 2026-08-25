@@ -33,6 +33,7 @@ import { TUNNEL_TOOLS, TunnelOutputScanner, TUNNEL_WARNING, tunnelInfo } from '.
 import { findTests } from '../shared/test-explorer.js';
 import type { ActivityToolId } from '../shared/activity-bar.js';
 import { moveActivityTool, normalizeActivityOrder, PINNED_ACTIVITY_TOOL } from '../shared/activity-bar.js';
+import { defaultProfileId } from '../shared/terminal-profiles.js';
 import { byId, clear, el } from './dom.js';
 import { installIconGallery } from './icon-gallery.js';
 import { icon, type IconName } from './icons.js';
@@ -227,6 +228,7 @@ class DotForgeApp {
     restartService: (service) => void this.restartService(service),
     stopDebug: () => void window.dotforge.debug.stop(),
     servicesChanged: () => this.startupBar.render(),
+    notify: (message, level) => this.notify(message, level),
   });
 
   /** Gestor de EF Core: migraciones, esquema y cadenas de conexión. */
@@ -1275,6 +1277,9 @@ class DotForgeApp {
     }
 
     this.editor.applySettings(this.settings);
+    // El emulador de terminal usa la misma tipografía que el editor: el código que se pega en una
+    // y se lee en el otro tiene que verse igual.
+    this.panel.applyTerminalSettings(this.settings.fontFamily, this.settings.fontSize);
     this.settingsView.setSettings(this.settings);
     this.welcome.render(this.info, this.settings);
 
@@ -1896,6 +1901,16 @@ class DotForgeApp {
           // El autocompletado sugiere contenedores e imágenes: se refrescan al abrir la terminal,
           // que es cuando el usuario puede haber levantado algo desde fuera del IDE.
           void this.refreshTerminalContext();
+        },
+      },
+      {
+        id: 'terminal.new',
+        icon: 'plus',
+        title: 'Nueva terminal',
+        group: 'Ver',
+        run: () => {
+          this.panel.show('terminal');
+          void this.panel.openTerminal(defaultProfileId(this.info?.platform ?? 'win32'));
         },
       },
       {
@@ -2743,6 +2758,13 @@ class DotForgeApp {
     // esperando esta respuesta, y por eso es un evento y no el valor de `search.inFiles`.
     window.dotforge.events.onSearchProgress((progress) => this.searchView.onProgress(progress));
 
+    // Salida y final de las pseudoterminales. Llegan por evento porque un intérprete escupe
+    // cuando quiere: el prompt aparece antes de que nadie haya escrito nada.
+    window.dotforge.events.onTerminalData(({ terminalId, data }) => this.panel.writeTerminal(terminalId, data));
+    window.dotforge.events.onTerminalExit(({ terminalId, exitCode }) =>
+      this.panel.noteTerminalExit(terminalId, exitCode),
+    );
+
     window.dotforge.events.onTaskStarted((task) => {
       this.panel.taskStarted(task);
       this.renderStatus();
@@ -2866,6 +2888,10 @@ class DotForgeApp {
      * Ahora se para el cierre, se pregunta con el diálogo propio —que es asíncrono y no bloquea el
      * renderer— y se vuelve a cerrar con el pestillo `closing` puesto para no volver a preguntar.
      */
+    // Cerrar la ventana cierra las terminales. En macOS se puede cerrar la ventana sin salir de la
+    // aplicación, y ahí el `before-quit` del proceso principal no llega a ejecutarse.
+    window.addEventListener('pagehide', () => this.panel.disposeTerminals());
+
     window.addEventListener('beforeunload', (event) => {
       if (this.closing || !this.editor.hasDirtyTabs()) return;
 
@@ -2984,9 +3010,15 @@ class DotForgeApp {
       (delta, start) => {
         const height = Math.min(Math.max(start - delta, 80), window.innerHeight - 240);
         byId('app').style.setProperty('--panel-height', `${height}px`);
+        // El intérprete tiene que enterarse del tamaño nuevo: si no, sigue partiendo las líneas
+        // donde las partía antes, que es el defecto que delata a una terminal mal integrada.
+        this.panel.fitTerminal();
       },
       'y',
     );
+
+    // Y también al cambiar el tamaño de la ventana.
+    window.addEventListener('resize', () => this.panel.fitTerminal());
   }
 }
 

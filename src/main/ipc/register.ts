@@ -28,7 +28,9 @@ import type {
   SolutionInfo,
   TerminalContext,
   TerminalCwd,
+  TerminalProfileInfo,
   TerminalRunResult,
+  TerminalSessionInfo,
 } from '../../shared/contracts.js';
 import type { GitDiffRequest } from '../../shared/git.js';
 import type { EfOperation, EfOperationOptions } from '../../shared/efcore.js';
@@ -44,6 +46,7 @@ import { isTrustedDownload, isValidSegment, SEARCH_PAGE_SIZE } from '../../share
 import type { InstalledExtension } from '../../shared/vsix.js';
 import type { SearchSummary } from '../../shared/file-search.js';
 import { coerceSearchOptions } from '../../shared/file-search.js';
+import { coerceProfileId, profilesFor } from '../../shared/terminal-profiles.js';
 import { describeFault, type ServerFault } from '../../shared/lsp-health.js';
 import { legendFromCapabilities } from '../../shared/semantic-tokens.js';
 import { filterForClass, filterForTests } from '../../shared/test-explorer.js';
@@ -71,6 +74,7 @@ import * as aiSecrets from '../services/ai/secret-store.js';
 import { AiRequestError, coerceChatRequest } from '../services/ai/validate.js';
 import * as commandRunner from '../services/command-runner.js';
 import * as terminalSession from '../services/terminal-session.js';
+import * as ptyService from '../services/terminal-pty-service.js';
 import { installApplicationMenu } from '../menu.js';
 import * as dockerService from '../services/docker-service.js';
 import * as dotnetService from '../services/dotnet-service.js';
@@ -954,6 +958,80 @@ export function registerIpcHandlers(): void {
 
     return { task, cwd: here, output: [] };
   });
+
+  // --- Pseudoterminales (Fase 21) ---------------------------------------------------------------
+
+  /**
+   * Perfiles del botón `+`, con su disponibilidad ya resuelta.
+   *
+   * Los de PTY se ofrecen **aunque `node-pty` no esté**: apagados y con el motivo escrito, igual
+   * que las acciones de Docker con el motor parado (ADR-033). Esconderlos dejaría al usuario sin
+   * saber que existen ni por qué no puede usarlos.
+   */
+  ipcMain.handle(IPC.terminalProfiles, async (): Promise<TerminalProfileInfo[]> => {
+    const state = ptyService.availability();
+
+    return Promise.all(
+      profilesFor(process.platform).map(async (profile) => {
+        if (profile.kind === 'lite') {
+          return { id: profile.id, label: profile.label, kind: profile.kind, hint: profile.hint, available: true, reason: null };
+        }
+
+        // Dos motivos distintos y hay que distinguirlos: no hay pseudoterminales en absoluto, o
+        // ese intérprete concreto no está instalado. El segundo es el caso normal de `pwsh.exe`,
+        // que es una instalación aparte, y decirlo aquí evita que el fallo llegue después y en
+        // otro panel, que es la peor forma de enterarse.
+        const installed = profile.file !== null && (await ptyService.programExists(profile.file));
+
+        return {
+          id: profile.id,
+          label: profile.label,
+          kind: profile.kind,
+          hint: profile.hint,
+          available: state.available && installed,
+          reason: !state.available ? state.reason : installed ? null : `${profile.file} no está instalado.`,
+        };
+      }),
+    );
+  });
+
+  /**
+   * Abre una pseudoterminal.
+   *
+   * El directorio **no llega del renderer**: se toma del de la terminal, igual que la raíz de la
+   * búsqueda se toma del guardián de rutas (ADR-057). Lo que llega es el identificador de perfil,
+   * que pasa por `coerceProfileId` y sólo puede acabar siendo uno de los del catálogo.
+   */
+  ipcMain.handle(IPC.terminalCreate, (_event, profileId: unknown, size: unknown): TerminalSessionInfo => {
+    const measured = typeof size === 'object' && size !== null ? (size as { columns?: unknown; rows?: unknown }) : {};
+
+    return ptyService.create(
+      {
+        profileId: coerceProfileId(profileId, process.platform),
+        cwd: terminalSession.cwd().path,
+        ...(typeof measured.columns === 'number' ? { columns: measured.columns } : {}),
+        ...(typeof measured.rows === 'number' ? { rows: measured.rows } : {}),
+      },
+      {
+        onData: (payload) => broadcast(IPC_EVENTS.terminalData, payload),
+        onExit: (payload) => broadcast(IPC_EVENTS.terminalExit, payload),
+      },
+    );
+  });
+
+  ipcMain.handle(IPC.terminalWrite, (_event, terminalId: unknown, data: unknown): boolean => {
+    if (typeof data !== 'string') return false;
+    return ptyService.write(requireString(terminalId, 'terminalId'), data);
+  });
+
+  ipcMain.handle(IPC.terminalResize, (_event, terminalId: unknown, columns: unknown, rows: unknown): boolean => {
+    if (typeof columns !== 'number' || typeof rows !== 'number') return false;
+    return ptyService.resize(requireString(terminalId, 'terminalId'), columns, rows);
+  });
+
+  ipcMain.handle(IPC.terminalDispose, (_event, terminalId: unknown): boolean =>
+    ptyService.dispose(requireString(terminalId, 'terminalId')),
+  );
 
   // --- NuGet ----------------------------------------------------------------------------------
   ipcMain.handle(IPC.nugetSearch, (_event, query: unknown, includePrerelease: unknown) =>

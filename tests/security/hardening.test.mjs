@@ -681,3 +681,78 @@ describe('búsqueda en los archivos', () => {
     assert.match(service, /shouldSkipDirectory\(entry\.name\)/);
   });
 });
+
+/**
+ * Pseudoterminales (Fase 21, ADR-059).
+ *
+ * Aquí la frontera se mueve a conciencia y por eso hay que vigilarla por escrito: dentro de una
+ * pestaña de PowerShell no hay lista blanca de programas, porque una terminal que sólo deja
+ * ejecutar doce cosas no es una terminal. Lo que sigue acotado es **quién** puede abrir una, con
+ * qué intérprete y en qué directorio, y eso no lo decide el renderer.
+ *
+ * Y la terminal asistida no cambia: su lista blanca y su `shell: false` siguen donde estaban, y las
+ * pruebas que los vigilan siguen en pie.
+ */
+describe('pseudoterminales', () => {
+  const service = readSource('src/main/services/terminal-pty-service.ts');
+  const register = readSource('src/main/ipc/register.ts');
+  const profiles = readSource('src/shared/terminal-profiles.ts');
+
+  it('el intérprete sale del catálogo, nunca de lo que mande el renderer', () => {
+    // El canal recibe un identificador, no una ruta de programa: `coerceProfileId` sólo puede
+    // devolver uno de los perfiles declarados, así que no hay forma de pedirle que lance
+    // cualquier cosa.
+    assert.match(register, /coerceProfileId\(profileId, process\.platform\)/);
+    assert.match(service, /const profile: TerminalProfile \| null = findProfile\(options\.profileId\)/);
+    assert.doesNotMatch(service, /options\.file/, 'el servicio no acepta un programa suelto');
+  });
+
+  it('el directorio tampoco: se toma del de la terminal, como la raíz de la búsqueda (ADR-057)', () => {
+    const handler = register.slice(register.indexOf('IPC.terminalCreate'), register.indexOf('IPC.terminalWrite'));
+    assert.match(handler, /cwd: terminalSession\.cwd\(\)\.path/);
+    assert.doesNotMatch(handler, /cwd:\s*(requireString|assertInsideWorkspace)/);
+  });
+
+  it('los argumentos del intérprete son los del catálogo, ya troceados', () => {
+    // Nunca una línea de shell, ni siquiera aquí: el intérprete se lanza con su array de argumentos
+    // y lo que el usuario escriba va por la entrada estándar, que es otra cosa.
+    assert.match(service, /const args = \[\.\.\.profile\.args\]/);
+    assert.match(service, /pty\.spawn\(profile\.file, args, \{/);
+    assert.doesNotMatch(profiles, /shell:\s*true/);
+  });
+
+  it('lo que se escribe está acotado en tamaño', () => {
+    assert.match(service, /MAX_WRITE_CHARS/);
+    assert.match(service, /data\.length > MAX_WRITE_CHARS \? data\.slice\(0, MAX_WRITE_CHARS\) : data/);
+  });
+
+  it('el número de sesiones a la vez está acotado', () => {
+    assert.match(service, /sessions\.size >= MAX_PTY_SESSIONS/);
+  });
+
+  it('el módulo nativo se carga tarde y su ausencia es un valor, no una excepción', () => {
+    // Es `optionalDependency`: una instalación sin binario para esta plataforma tiene que dejar el
+    // IDE funcionando con la terminal asistida, no romperlo al arrancar.
+    assert.doesNotMatch(service, /^import .* from 'node-pty'/m, 'no puede importarse arriba');
+    assert.match(service, /createRequire\(anchor\)\('node-pty'\)/);
+    assert.match(service, /catch \(error\) \{[\s\S]*loadError =/);
+  });
+
+  it('cerrar el IDE se lleva por delante los intérpretes abiertos', () => {
+    // Sin esto, cada pestaña deja vivo su árbol de procesos con lo que estuviera ejecutando
+    // dentro: un `dotnet watch` seguiría ocupando su puerto mucho después de cerrar la ventana.
+    const main = readSource('src/main/main.ts');
+    assert.match(main, /before-quit[\s\S]*ptyService\.disposeAll\(\)/);
+    assert.match(main, /process\.on\('exit'[\s\S]*ptyService\.disposeAll\(\)/);
+  });
+
+  it('la terminal asistida conserva su lista blanca: esto no la ha tocado', () => {
+    const runner = readSource('src/main/services/command-runner.ts');
+    assert.match(runner, /export const ALLOWED_COMMANDS = new Set\(\[/);
+    assert.ok(ALLOWED_COMMANDS.size > 0);
+    assert.throws(() => {
+      const program = 'formatear-el-disco';
+      if (!ALLOWED_COMMANDS.has(program)) throw new CommandError(`"${program}" no está permitido`);
+    }, CommandError);
+  });
+});

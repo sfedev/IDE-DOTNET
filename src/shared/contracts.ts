@@ -494,6 +494,46 @@ export interface TerminalRunResult {
 }
 
 /**
+ * Perfil de terminal tal y como lo ve el renderer.
+ *
+ * Lleva su disponibilidad ya resuelta: si `node-pty` no ha podido cargarse, el perfil se sigue
+ * ofreciendo pero apagado y con el motivo escrito, igual que las acciones de Docker cuando el
+ * motor no está (ADR-033). Un menú que esconde opciones no explica nada; uno que las enseña
+ * atenuadas, sí.
+ */
+export interface TerminalProfileInfo {
+  id: string;
+  label: string;
+  kind: 'pty' | 'lite';
+  hint: string;
+  available: boolean;
+  /** Por qué no está disponible. `null` si lo está. */
+  reason: string | null;
+}
+
+/** Sesión de pseudoterminal recién abierta. */
+export interface TerminalSessionInfo {
+  terminalId: string;
+  profileId: string;
+  /** Intérprete realmente lanzado. */
+  file: string;
+  pid: number;
+  cwd: string;
+}
+
+/** Trozo de salida de una sesión de pseudoterminal, con sus secuencias de escape intactas. */
+export interface TerminalDataEvent {
+  terminalId: string;
+  data: string;
+}
+
+/** El intérprete de una sesión ha terminado (un `exit`, un cierre, un fallo). */
+export interface TerminalExitEvent {
+  terminalId: string;
+  exitCode: number;
+}
+
+/**
  * Estado del motor de Docker.
  *
  * Que Docker no esté instalado o no esté arrancado es un estado normal, no un error: se devuelve
@@ -670,6 +710,11 @@ export const IPC = {
   terminalAllowed: 'terminal:allowed',
   terminalContext: 'terminal:context',
   terminalCwd: 'terminal:cwd',
+  terminalProfiles: 'terminal:profiles',
+  terminalCreate: 'terminal:create',
+  terminalWrite: 'terminal:write',
+  terminalResize: 'terminal:resize',
+  terminalDispose: 'terminal:dispose',
 
   nugetSearch: 'nuget:search',
   nugetVersions: 'nuget:versions',
@@ -746,6 +791,8 @@ export const IPC_EVENTS = {
   metricsSample: 'event:metrics-sample',
   updateState: 'event:update-state',
   searchProgress: 'event:search-progress',
+  terminalData: 'event:terminal-data',
+  terminalExit: 'event:terminal-exit',
 } as const;
 
 export type IpcChannel = (typeof IPC)[keyof typeof IPC];
@@ -787,6 +834,7 @@ export type MenuCommand =
   | 'view.logs'
   | 'architecture.check'
   | 'view.terminal'
+  | 'terminal.new'
   | 'view.http'
   | 'view.settings'
   | 'view.toggle-theme'
@@ -974,6 +1022,27 @@ export interface DotForgeApi {
     context(): Promise<TerminalContext>;
     /** Directorio de trabajo actual. Lo pide el panel al pintar el prompt. */
     cwd(): Promise<TerminalCwd>;
+
+    /**
+     * Perfiles que puede abrir el botón `+`, con su disponibilidad resuelta.
+     *
+     * Se piden cada vez que se abre el menú y no una sola vez al arrancar: `node-pty` se carga la
+     * primera vez que hace falta, así que "está disponible" es una respuesta que puede cambiar
+     * entre la primera pregunta y la segunda.
+     */
+    profiles(): Promise<TerminalProfileInfo[]>;
+
+    /** Abre una pseudoterminal con ese perfil, en el directorio actual de la terminal. */
+    create(profileId: string, size?: { columns: number; rows: number }): Promise<TerminalSessionInfo>;
+
+    /** Manda texto tecleado a la entrada del intérprete, caracteres de control incluidos. */
+    write(terminalId: string, data: string): Promise<boolean>;
+
+    /** Reenvía el tamaño del hueco: sin esto el intérprete parte las líneas donde no toca. */
+    resize(terminalId: string, columns: number, rows: number): Promise<boolean>;
+
+    /** Cierra la sesión y mata su árbol de procesos. */
+    dispose(terminalId: string): Promise<boolean>;
   };
   nuget: {
     search(query: string, includePrerelease: boolean): Promise<NuGetSearchResult[]>;
@@ -1130,6 +1199,16 @@ export interface DotForgeApi {
     onMetricsSample(handler: (payload: MetricsEvent) => void): () => void;
     onUpdateState(handler: (state: UpdateState) => void): () => void;
     onSearchProgress(handler: (progress: SearchProgress) => void): () => void;
+
+    /**
+     * Salida de una pseudoterminal, con sus secuencias de escape intactas.
+     *
+     * Va por evento y no como respuesta a una llamada porque un intérprete escupe cuando quiere:
+     * el prompt aparece antes de que nadie haya escrito nada, y un `dotnet watch` sigue hablando
+     * mucho después.
+     */
+    onTerminalData(handler: (payload: TerminalDataEvent) => void): () => void;
+    onTerminalExit(handler: (payload: TerminalExitEvent) => void): () => void;
   };
 }
 

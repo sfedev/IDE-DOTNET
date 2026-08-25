@@ -17,7 +17,9 @@ import type {
   DotnetTaskStarted,
   ProjectKind,
   TerminalCwd,
+  TerminalProfileInfo,
 } from '../../shared/contracts.js';
+import { findProfile, terminalTabName } from '../../shared/terminal-profiles.js';
 import type { LogEvent, LogLevel } from '../../shared/log-events.js';
 import { countByLevel, filterEvents, firstNavigableFrame, LEVEL_LABEL, parseLogEvents } from '../../shared/log-events.js';
 import { byId, clear, el, repaintPreservingFocus } from '../dom.js';
@@ -25,6 +27,7 @@ import { FOCUS_KEY_ATTRIBUTE } from '../focus-guard.js';
 import { presentProject } from '../file-icons.js';
 import { icon, type IconName } from '../icons.js';
 import { detectListeningUrl, portOf } from '../run-output.js';
+import { applyTheme, createTerminal, type XtermFitAddon, type XtermTerminal } from '../xterm-bridge.js';
 import {
   applySuggestion,
   caretAfterApply,
@@ -36,6 +39,30 @@ import {
 } from '../terminal-suggest.js';
 
 const MAX_OUTPUT_LINES = 5000;
+
+/**
+ * Una pestaña de terminal.
+ *
+ * Las de tipo `lite` no tienen sesión ni emulador: son la terminal asistida de siempre, que pinta
+ * su propio `<input>` y su log. Las de tipo `pty` llevan un emulador de xterm y un contenedor DOM
+ * **persistente**, que se reinserta tal cual en cada repintado del panel: volver a abrir el
+ * emulador sobre un nodo nuevo perdería el histórico entero de la sesión.
+ */
+interface TerminalTab {
+  id: string;
+  profileId: string;
+  label: string;
+  kind: 'pty' | 'lite';
+  /** Identificador de la sesión en el proceso principal. `null` en la asistida y tras un `exit`. */
+  terminalId: string | null;
+  host: HTMLElement | null;
+  term: XtermTerminal | null;
+  fit: XtermFitAddon | null;
+  /** `term.open()` ya se ha llamado sobre un contenedor que estaba en el documento. */
+  opened?: boolean;
+  /** El intérprete ha terminado. La pestaña se queda, con lo último que escribió. */
+  exited: boolean;
+}
 
 /** Cuántas sugerencias se listan en el menú. Más que esto ya no se lee: se ojea. */
 const MAX_SUGGESTIONS = 8;
@@ -66,6 +93,14 @@ export interface PanelHost {
    * URL. Lo escucha la barra superior, que pinta una pastilla por proceso vivo.
    */
   servicesChanged(): void;
+  /**
+   * Aviso al usuario.
+   *
+   * Lo pide abrir una terminal: `pwsh.exe` ofrecido y no instalado, o `node-pty` ausente, son
+   * estados normales que hay que contar en una línea. Sin esto el botón `+` no haría nada visible,
+   * que es la peor de las respuestas posibles.
+   */
+  notify(message: string, level: 'info' | 'ok' | 'warn' | 'error'): void;
 }
 
 /**
@@ -206,6 +241,36 @@ export class PanelView {
   /** Ruta del prompt, para poder repintarla sin reconstruir la terminal. */
   private promptPath: HTMLElement | null = null;
   private terminalCwd: TerminalCwd | null = null;
+
+  /**
+   * Pestañas de terminal abiertas (Fase 21).
+   *
+   * La primera es la asistida y existe desde el arranque: es la que funciona siempre, incluso sin
+   * `node-pty`, y dejar el panel vacío con un botón `+` como única pista sería un callejón sin
+   * salida. Las de pseudoterminal se añaden desde el selector.
+   */
+  private readonly terminals: TerminalTab[] = [
+    {
+      id: 'term-0',
+      profileId: 'lite',
+      label: 'Terminal asistida',
+      kind: 'lite',
+      terminalId: null,
+      host: null,
+      term: null,
+      fit: null,
+      exited: false,
+    },
+  ];
+
+  private activeTerminal = 'term-0';
+  private terminalCounter = 0;
+  private terminalProfiles: TerminalProfileInfo[] = [];
+  private profileMenuOpen = false;
+
+  /** Tipografía del emulador. La reenvía el shell con los ajustes; es la del editor. */
+  private monospaceFont = 'Cascadia Code, Consolas, monospace';
+  private monospaceSize = 13;
 
   constructor(private readonly host: PanelHost) {}
 
@@ -1126,8 +1191,11 @@ export class PanelView {
    * Sin pseudoterminal: se ejecutan comandos concretos y se muestra su salida. A cambio, se
    * conoce la línea entera mientras se escribe, que es justo lo que hace posible sugerir
    * subcomandos y ramas sin ambigüedad.
+   *
+   * Desde la Fase 21 convive con las pestañas de pseudoterminal y ya no es la única: es una más
+   * del selector del botón `+`, y sigue siendo la única que sugiere.
    */
-  private renderTerminal(): HTMLElement {
+  private renderLiteTerminal(): HTMLElement {
     const container = el('div', { style: { display: 'flex', flexDirection: 'column', height: '100%' } });
     const channel = this.channel(TERMINAL_CHANNEL);
 
@@ -1351,9 +1419,358 @@ export class PanelView {
     });
   }
 
+  // --- Pestañas de terminal (Fase 21) --------------------------------------------------------
+
+  /**
+   * Cabecera de la terminal: una pestaña por sesión y el botón de abrir otra.
+   *
+   * Va arriba y no abajo porque compite visualmente con el prompt, que ya vive en la parte
+   * inferior; y las pestañas llevan el nombre del perfil, no "Terminal 1", porque con un
+   * PowerShell y una asistida abiertos lo que hay que distinguir es **qué** son.
+   */
+  private renderTerminalStrip(): HTMLElement {
+    const strip = el('div', { className: 'terminal-strip' });
+
+    for (const terminal of this.terminals) {
+      const isActive = terminal.id === this.activeTerminal;
+
+      strip.appendChild(
+        el(
+          'div',
+          {
+            className: `terminal-chip${isActive ? ' active' : ''}${terminal.exited ? ' exited' : ''}`,
+            title: terminal.exited ? `${terminal.label} — el intérprete ha terminado` : terminal.label,
+            on: { click: () => this.showTerminal(terminal.id) },
+          },
+          icon(terminal.kind === 'lite' ? 'zap' : 'terminal', { size: 13 }),
+          el('span', { className: 'terminal-chip-label', text: terminal.label }),
+          // La asistida no se puede cerrar cuando es la única: dejar el panel sin ninguna terminal
+          // y con un botón `+` como única pista sería un callejón sin salida.
+          this.terminals.length > 1
+            ? el(
+                'button',
+                {
+                  className: 'terminal-chip-close',
+                  title: 'Cerrar esta terminal',
+                  attrs: { 'aria-label': `Cerrar ${terminal.label}` },
+                  on: {
+                    click: (event) => {
+                      event.stopPropagation();
+                      void this.closeTerminal(terminal.id);
+                    },
+                  },
+                },
+                icon('x', { size: 11 }),
+              )
+            : null,
+        ),
+      );
+    }
+
+    strip.append(
+      el('span', { className: 'spacer' }),
+      el(
+        'button',
+        {
+          className: 'terminal-new',
+          title: 'Abrir otra terminal (elige el intérprete)',
+          attrs: { 'aria-label': 'Abrir otra terminal' },
+          on: {
+            click: () => {
+              this.profileMenuOpen = !this.profileMenuOpen;
+              if (this.profileMenuOpen) void this.loadTerminalProfiles();
+              else this.render();
+            },
+          },
+        },
+        icon('plus', { size: 13 }),
+        icon('chevron-down', { size: 11 }),
+      ),
+    );
+
+    if (this.profileMenuOpen) strip.appendChild(this.renderProfileMenu());
+
+    return strip;
+  }
+
+  /**
+   * Menú del botón `+`.
+   *
+   * Los perfiles no disponibles se enseñan **atenuados y con el motivo**, no escondidos: la misma
+   * regla que las acciones de Docker con el motor parado (ADR-033). Un menú que oculta lo que no
+   * puede hacer deja al usuario sin saber que existía.
+   */
+  private renderProfileMenu(): HTMLElement {
+    const menu = el('div', { className: 'terminal-profile-menu' });
+
+    if (this.terminalProfiles.length === 0) {
+      menu.appendChild(el('div', { className: 'empty-hint', text: 'Cargando intérpretes…' }));
+      return menu;
+    }
+
+    for (const profile of this.terminalProfiles) {
+      menu.appendChild(
+        el(
+          'button',
+          {
+            className: `terminal-profile${profile.available ? '' : ' unavailable'}`,
+            disabled: !profile.available,
+            title: profile.available ? profile.hint : (profile.reason ?? 'no disponible'),
+            on: {
+              click: () => {
+                this.profileMenuOpen = false;
+                void this.openTerminal(profile.id);
+              },
+            },
+          },
+          icon(profile.kind === 'lite' ? 'zap' : 'terminal', { size: 14 }),
+          el(
+            'span',
+            { className: 'terminal-profile-text' },
+            el('span', { className: 'terminal-profile-label', text: profile.label }),
+            el('span', { className: 'terminal-profile-hint', text: profile.available ? profile.hint : (profile.reason ?? '') }),
+          ),
+        ),
+      );
+    }
+
+    return menu;
+  }
+
+  /** Pide los perfiles al proceso principal y repinta. */
+  private async loadTerminalProfiles(): Promise<void> {
+    try {
+      this.terminalProfiles = await window.dotforge.terminal.profiles();
+    } catch {
+      this.terminalProfiles = [];
+    }
+    this.render();
+  }
+
+  /**
+   * Abre una pestaña nueva.
+   *
+   * La asistida no llama a nadie: es local y no tiene sesión detrás. Una de pseudoterminal pide la
+   * sesión al proceso principal **antes** de crear la pestaña, para que un `pwsh.exe` que no está
+   * instalado no deje una pestaña muerta con un mensaje dentro.
+   */
+  async openTerminal(profileId: string): Promise<void> {
+    const profile = findProfile(profileId);
+    if (!profile) return;
+
+    const sameProfile = this.terminals.filter((terminal) => terminal.profileId === profileId).length;
+    const label = terminalTabName(profile, sameProfile);
+    const id = `term-${++this.terminalCounter}`;
+
+    if (profile.kind === 'lite') {
+      this.terminals.push({ id, profileId, label, kind: 'lite', terminalId: null, host: null, term: null, fit: null, exited: false });
+      this.showTerminal(id);
+      return;
+    }
+
+    const created = createTerminal(this.terminalFont());
+    if (!created) {
+      this.host.notify('No se ha cargado el emulador de terminal (xterm).', 'error');
+      return;
+    }
+
+    let session;
+    try {
+      const proposed = created.fit?.proposeDimensions();
+      session = await window.dotforge.terminal.create(
+        profileId,
+        proposed ? { columns: proposed.cols, rows: proposed.rows } : undefined,
+      );
+    } catch (error) {
+      created.term.dispose();
+      this.host.notify(error instanceof Error ? error.message : String(error), 'error');
+      return;
+    }
+
+    // El contenedor sobrevive a los repintados del panel y se vuelve a insertar tal cual: volver a
+    // abrir el emulador sobre un nodo nuevo perdería el histórico entero de la sesión.
+    const host = el('div', { className: 'terminal-xterm' });
+
+    const terminal: TerminalTab = {
+      id,
+      profileId,
+      label,
+      kind: 'pty',
+      terminalId: session.terminalId,
+      host,
+      term: created.term,
+      fit: created.fit,
+      exited: false,
+    };
+
+    created.term.onData((data) => void window.dotforge.terminal.write(session.terminalId, data));
+    created.term.onResize(({ cols, rows }) => void window.dotforge.terminal.resize(session.terminalId, cols, rows));
+
+    this.terminals.push(terminal);
+    this.showTerminal(id);
+  }
+
+  /** Activa una pestaña de terminal. */
+  showTerminal(id: string): void {
+    if (!this.terminals.some((terminal) => terminal.id === id)) return;
+
+    this.activeTerminal = id;
+    this.profileMenuOpen = false;
+    this.render();
+    this.focusTerminal();
+  }
+
+  /**
+   * Cierra una pestaña y, con ella, el árbol de procesos de su intérprete.
+   *
+   * Cerrar la pestaña **es** cerrar la sesión: una terminal invisible que sigue viva con un
+   * `dotnet watch` dentro ocupando un puerto es exactamente lo que nadie espera.
+   */
+  async closeTerminal(id: string): Promise<void> {
+    const index = this.terminals.findIndex((terminal) => terminal.id === id);
+    if (index === -1 || this.terminals.length === 1) return;
+
+    const [terminal] = this.terminals.splice(index, 1);
+    if (!terminal) return;
+
+    if (terminal.terminalId) await window.dotforge.terminal.dispose(terminal.terminalId).catch(() => undefined);
+    terminal.term?.dispose();
+
+    if (this.activeTerminal === id) {
+      this.activeTerminal = this.terminals[Math.min(index, this.terminals.length - 1)]?.id ?? '';
+    }
+
+    this.render();
+  }
+
+  /** Trozo de salida de una sesión. Llega por evento porque un intérprete habla cuando quiere. */
+  writeTerminal(terminalId: string, data: string): void {
+    this.terminals.find((terminal) => terminal.terminalId === terminalId)?.term?.write(data);
+  }
+
+  /**
+   * El intérprete ha terminado.
+   *
+   * La pestaña **no se cierra sola**: si `exit` fue un error, lo último que escribió es lo único
+   * que explica por qué, y cerrarla se lo lleva por delante. Se marca como terminada y se deja.
+   */
+  noteTerminalExit(terminalId: string, exitCode: number): void {
+    const terminal = this.terminals.find((entry) => entry.terminalId === terminalId);
+    if (!terminal) return;
+
+    terminal.exited = true;
+    terminal.terminalId = null;
+    terminal.term?.writeln(`\r\n\u001b[90m[el intérprete ha terminado con código ${exitCode}]\u001b[0m`);
+
+    if (this.tab === 'terminal') this.render();
+  }
+
+  /** Cierra todas las sesiones. La llama el shell al descargarse la ventana. */
+  disposeTerminals(): void {
+    for (const terminal of this.terminals) {
+      if (terminal.terminalId) void window.dotforge.terminal.dispose(terminal.terminalId).catch(() => undefined);
+    }
+  }
+
+  /** Tipografía del emulador: la del editor, para que el código pegado se lea igual. */
+  private terminalFont(): { fontFamily: string; fontSize: number } {
+    return { fontFamily: this.monospaceFont, fontSize: this.monospaceSize };
+  }
+
+  /** El shell reenvía los ajustes: la terminal usa la misma tipografía que el editor. */
+  applyTerminalSettings(fontFamily: string, fontSize: number): void {
+    this.monospaceFont = fontFamily;
+    this.monospaceSize = fontSize;
+
+    for (const terminal of this.terminals) {
+      if (terminal.term) applyTheme(terminal.term, this.terminalFont());
+    }
+  }
+
+  private activeTerminalTab(): TerminalTab | null {
+    return this.terminals.find((terminal) => terminal.id === this.activeTerminal) ?? this.terminals[0] ?? null;
+  }
+
+  /**
+   * Cuerpo de la pestaña de terminal: la cabecera y, debajo, la sesión activa.
+   *
+   * Las de pseudoterminal reinsertan su contenedor **ya existente**; volver a abrir el emulador
+   * sobre un nodo nuevo en cada repintado perdería el histórico y el estado del intérprete.
+   */
+  private renderTerminal(): HTMLElement {
+    const container = el('div', { className: 'terminal-panel' });
+    container.appendChild(this.renderTerminalStrip());
+
+    const active = this.activeTerminalTab();
+
+    if (!active) {
+      container.appendChild(el('div', { className: 'empty-hint', text: 'No hay ninguna terminal abierta.' }));
+      return container;
+    }
+
+    if (active.kind === 'lite') {
+      container.appendChild(this.renderLiteTerminal());
+      return container;
+    }
+
+    const body = el('div', { className: 'terminal-body' });
+    if (active.host) body.appendChild(active.host);
+    container.appendChild(body);
+
+    // `open()` sólo la primera vez que el contenedor está dentro del documento: xterm mide el
+    // hueco al abrirse, y hacerlo sobre un nodo desconectado da un tamaño de cero.
+    setTimeout(() => {
+      if (!active.host || !active.term) return;
+
+      if (!active.opened) {
+        active.term.open(active.host);
+        active.opened = true;
+      }
+
+      try {
+        active.fit?.fit();
+      } catch {
+        // El panel puede estar plegado y medir 0 px: no hay nada que ajustar todavía.
+      }
+
+      // El foco sólo se toma si no lo tenía nadie fuera del panel. El panel se repinta entero cada
+      // vez que una tarea arranca o termina, y una compilación de fondo no puede llevarse el cursor
+      // del editor a la terminal a mitad de una línea.
+      const focused = document.activeElement;
+      const outside = focused instanceof HTMLElement && !byId('panel').contains(focused);
+      if (!outside) active.term.focus();
+    }, 0);
+
+    return container;
+  }
+
   /** La terminal recibe el foco cuando se abre desde la paleta o el menú. */
   focusTerminal(): void {
+    const active = this.activeTerminalTab();
+    if (active?.kind === 'pty') {
+      active.term?.focus();
+      return;
+    }
+
     this.terminalInput?.focus();
+  }
+
+  /**
+   * Reajusta el tamaño de la sesión visible.
+   *
+   * Lo llama el redimensionado del panel: sin esto el intérprete sigue creyendo que la ventana
+   * mide lo que medía y parte las líneas donde no toca, que es el defecto que delata a una
+   * terminal que no reenvía su tamaño.
+   */
+  fitTerminal(): void {
+    const active = this.activeTerminalTab();
+    if (active?.kind !== 'pty') return;
+
+    try {
+      active.fit?.fit();
+    } catch {
+      // Hueco de cero: el panel está plegado.
+    }
   }
 
   /** Texto actual de la terminal. Sólo lo usan las pruebas de humo de la interfaz. */

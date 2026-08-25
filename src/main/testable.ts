@@ -77,6 +77,26 @@ export type { DirectoryTarget, ResolveContext, ShortenOptions, TerminalIntent } 
 export * as terminalSession from './services/terminal-session.js';
 
 /**
+ * Fase 21 - perfiles de terminal y sesiones de pseudoterminal.
+ *
+ * El catalogo es dato puro; el servicio no importa `electron`, asi que las pruebas pueden abrir un
+ * interprete de verdad en un directorio temporal y comprobar que escribe, que responde y que al
+ * cerrarlo no queda nada vivo. Es la unica forma honesta de probar una terminal.
+ */
+export {
+  coerceProfileId,
+  defaultProfileId,
+  findProfile,
+  profilesFor,
+  TERMINAL_PROFILES,
+  terminalTabName,
+} from '../shared/terminal-profiles.js';
+export type { TerminalKind, TerminalProfile } from '../shared/terminal-profiles.js';
+
+export * as ptyService from './services/terminal-pty-service.js';
+export { MAX_PTY_SESSIONS, MAX_WRITE_CHARS, PtyUnavailableError } from './services/terminal-pty-service.js';
+
+/**
  * Contenido de la barra de menú.
  *
  * Vive como dato puro para poder comprobar lo que se rompe en silencio: un menú que manda un

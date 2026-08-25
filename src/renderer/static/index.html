@@ -26,6 +26,8 @@
     <link rel="stylesheet" href="styles/theme.css" />
     <link rel="stylesheet" href="styles/layout.css" />
     <link rel="stylesheet" href="styles/components.css" />
+    <!-- xterm.js: la hoja del emulador de terminal. Se sirve del vendor, como Monaco. -->
+    <link rel="stylesheet" href="vendor/xterm/xterm.css" />
   </head>
   <body>
     <div id="app" class="app" data-theme="dotforge-dark">
@@ -81,6 +83,13 @@
       <div class="update-host" id="update-host" hidden></div>
     </div>
 
+    <!--
+      xterm ANTES que el loader de Monaco, y no es un capricho de orden: su envoltorio UMD mira
+      `define.amd` primero, así que cargado después del loader AMD se registraría como módulo
+      anónimo y nunca dejaría `window.Terminal`.
+    -->
+    <script src="vendor/xterm/xterm.js"></script>
+    <script src="vendor/xterm/addon-fit.js"></script>
     <script src="vendor/monaco/vs/loader.js"></script>
     <script src="renderer.js"></script>
   </body>

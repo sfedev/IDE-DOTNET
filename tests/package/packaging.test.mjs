@@ -49,13 +49,52 @@ describe('package.json', () => {
     assert.equal(packageJson.bin.dotforge, 'build/cli.js');
   });
 
-  it('no tiene dependencias nativas que requieran compilación en el equipo del usuario', () => {
-    // Todas las dependencias de runtime deben ser JavaScript puro: si entra una nativa, hay que
-    // añadir un paso de rebuild por plataforma y el empaquetado deja de ser reproducible.
+  /**
+   * La regla no es "ninguna dependencia nativa": es **ninguna que haya que compilar** (ADR-059).
+   *
+   * Lo que hacía inaceptable una nativa era el paso de rebuild por plataforma —node-gyp, Visual
+   * Studio Build Tools, un artefacto distinto por versión de Electron—, no el hecho de que hubiera
+   * un `.node` por medio. `node-pty` publica los binarios ya compilados dentro del paquete y son
+   * Node-API, que es ABI estable: valen para Electron sin `electron-rebuild`.
+   *
+   * Sigue siendo `optionalDependency` y no `dependency`, y eso tampoco es un detalle: una
+   * instalación sin binario para esta plataforma tiene que dejar el IDE funcionando con la terminal
+   * asistida, no romperlo.
+   */
+  it('la única dependencia nativa es node-pty, y es opcional', () => {
     const nativeSuspects = ['node-pty', 'sqlite3', 'better-sqlite3', 'serialport', 'canvas', 'sharp'];
     for (const suspect of nativeSuspects) {
-      assert.ok(!packageJson.dependencies?.[suspect], `dependencia nativa detectada: ${suspect}`);
+      assert.ok(!packageJson.dependencies?.[suspect], `dependencia nativa en "dependencies": ${suspect}`);
     }
+
+    for (const suspect of nativeSuspects.filter((name) => name !== 'node-pty')) {
+      assert.ok(!packageJson.optionalDependencies?.[suspect], `dependencia nativa inesperada: ${suspect}`);
+    }
+
+    assert.ok(packageJson.optionalDependencies?.['node-pty'], 'node-pty debe declararse como opcional');
+  });
+
+  it('node-pty trae binarios precompilados: no hay paso de rebuild en el equipo del usuario', () => {
+    // Si algún día dejaran de venir en el paquete, esto se pone en rojo antes de que alguien
+    // descubra en su máquina que hace falta node-gyp.
+    const prebuilds = join(root, 'node_modules', 'node-pty', 'prebuilds');
+    if (!existsSync(prebuilds)) return; // Instalación sin el opcional: es un estado válido.
+
+    const platforms = readdirSync(prebuilds);
+    assert.ok(platforms.length > 0, 'node-pty no trae ningún binario precompilado');
+
+    const mine = `${process.platform}-${process.arch}`;
+    assert.ok(platforms.includes(mine), `no hay binario precompilado para ${mine}: ${platforms.join(', ')}`);
+  });
+
+  it('el bundle del proceso principal no incrusta node-pty: se resuelve en ejecución', () => {
+    // Un binario nativo no se puede bundlear, y además su ausencia tiene que ser un valor y no un
+    // error de carga: por eso es externo y se resuelve con `createRequire` dentro de un try/catch.
+    const main = readFileSync(join(buildDir, 'main.js'), 'utf8');
+
+    assert.match(main, /createRequire\)?\(\w+\)\("node-pty"\)/, 'el módulo se resuelve en ejecución');
+    // Una marca del código de node-pty: si apareciera, es que ha entrado en el bundle.
+    assert.doesNotMatch(main, /WindowsPtyAgent/, 'node-pty no puede acabar dentro del bundle');
   });
 
   it('no usa "type": "module": el proceso principal de Electron se carga como CommonJS', () => {
@@ -99,6 +138,12 @@ describe('electron-builder.yml', () => {
     assert.match(builderConfig, /build\/vendor/);
   });
 
+  it('deja node-pty fuera del asar y lo incluye en el paquete', () => {
+    // Node necesita una ruta real para cargar un `.node`: dentro del asar no se puede.
+    assert.match(builderConfig, /asarUnpack:[\s\S]*node_modules\/node-pty/);
+    assert.match(builderConfig, /files:[\s\S]*node_modules\/node-pty/);
+  });
+
   it('copia las plantillas de scaffolding a resources/templates', () => {
     assert.match(builderConfig, /extraResources:/);
     assert.match(builderConfig, /from:\s*build\/templates/);
@@ -126,6 +171,9 @@ describe('salida de la compilación', () => {
     'styles/components.css',
     'vendor/monaco/vs/loader.js',
     'vendor/monaco/vs/editor/editor.main.js',
+    'vendor/xterm/xterm.js',
+    'vendor/xterm/xterm.css',
+    'vendor/xterm/addon-fit.js',
     'templates/_common/Directory.Build.props.tmpl',
     'templates/clean/src/__Solution__.Domain/__Solution__.Domain.csproj.tmpl',
     'templates/hexagonal/src/__Solution__.Ports/__Solution__.Ports.csproj.tmpl',

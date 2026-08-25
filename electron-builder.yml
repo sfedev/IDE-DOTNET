@@ -8,8 +8,10 @@
 #    mejor sobre archivos reales que dentro del archivo empaquetado.
 #  - Las plantillas de scaffolding van a `resources/templates`, fuera del asar, porque el
 #    generador las lee con `fs` desde `process.resourcesPath`.
-#  - Sin dependencias nativas: no hay paso de rebuild y el mismo artefacto vale para cualquier
-#    máquina de la misma plataforma y arquitectura.
+#  - `node-pty` es la única dependencia nativa, y es opcional (ADR-059). No hay paso de rebuild:
+#    publica los binarios ya compilados dentro del paquete y son Node-API, que es ABI estable, así
+#    que valen para Electron sin recompilar. Va fuera del asar porque un `.node` no se puede cargar
+#    desde dentro del archivo empaquetado.
 
 appId: dev.dotforge.ide
 productName: DotForge IDE
@@ -24,6 +26,8 @@ files:
   - '!build/templates/**'
   - '!**/*.map'
   - package.json
+  # La única dependencia de runtime que no está bundleada: es nativa y se carga con `require`.
+  - node_modules/node-pty/**/*
 
 extraResources:
   - from: build/templates
@@ -34,6 +38,8 @@ extraResources:
 asar: true
 asarUnpack:
   - build/vendor/**
+  # Un binario nativo no se puede cargar desde dentro del asar: Node necesita una ruta real.
+  - node_modules/node-pty/**
 
 # Sin publicador: los artefactos se generan en local y no se suben a ningún sitio.
 publish: null

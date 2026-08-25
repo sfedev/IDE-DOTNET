@@ -14,6 +14,14 @@ Su módulo estrella es el **Scaffolding Wizard**: un generador de arquitecturas 
 que produce soluciones .NET **compilables y ejecutables** siguiendo Clean Architecture,
 Arquitectura Hexagonal (Ports & Adapters) o Domain-Driven Design + CQRS.
 
+Desde la v2.5.0 la terminal **abre varias pestañas y elige intérprete**: PowerShell, el símbolo del
+sistema o la terminal asistida de siempre, cada una en la suya, con colores, `Ctrl+C` y
+autocompletado nativo (`node-pty` + `xterm.js`). Y trae dos arreglos de arranque que dolían: los
+`launchSettings.json` con marca de orden de bytes ya se leen —la aplicación arrancaba en el puerto
+5000, en Production y sin *static web assets*—, `dotnet run` nombra explícitamente el perfil que se
+va a lanzar, y el aviso de cambios sin guardar ya no deja el editor sin teclado ni la ventana sin
+poder cerrarse.
+
 Desde la v2.4.0 el IDE **busca dentro de los archivos**: `Ctrl+Shift+F` abre un panel con las tres
 banderas de siempre (mayúsculas, palabra completa, expresión regular), patrones glob de inclusión y
 exclusión, resultados agrupados por archivo y salto a la **línea y columna exactas**, con la
@@ -112,6 +120,8 @@ IDE-DOTNET/
 │   │   ├── nuget-audit.ts      # * dotnet list package --vulnerable: JSON y tabla (puro)
 │   │   ├── file-search.ts      # * Buscar en los archivos: qué casa, qué entra y cómo se recorta (puro)
 │   │   ├── terminal-cwd.ts     # * Navegación de la terminal: qué es un `cd` y cómo se pinta (puro)
+│   │   ├── terminal-profiles.ts # * Perfiles de terminal: catálogo, plataforma y nombre de pestaña (puro)
+│   │   ├── json-text.ts        # * JSON escrito por otras herramientas: la marca de orden de bytes (puro)
 │   │   ├── menu-template.ts    # * Contenido de la barra de menú, con aceleradores de roles (puro)
 │   │   ├── nuget-install.ts    # * Instalar un paquete en varios proyectos: plan y progreso (puro)
 │   │   ├── activity-bar.ts     # * Orden de la barra de actividad: ids, normalización y movida (puro)
@@ -133,6 +143,7 @@ IDE-DOTNET/
 │   │   ├── testable.ts         # Bundle sin Electron: rutas, .sln/.csproj, MSBuild (tests)
 │   │   ├── ipc/register.ts     # ÚNICA superficie expuesta al renderer
 │   │   ├── services/terminal-session.ts  # Directorio de trabajo de la terminal (resuelve y valida)
+│   │   ├── services/terminal-pty-service.ts # Sesiones de pseudoterminal (node-pty, opcional)
 │   │   ├── services/           # Solución, NuGet, tareas dotnet, terminal, rutas, ZIP, settings,
 │   │   │                       # git-service.ts (estado y operaciones de control de fuentes),
 │   │   │                       # efcore-service.ts (dotnet ef + migraciones del disco),
@@ -157,6 +168,7 @@ IDE-DOTNET/
 │   └── renderer/           # UI (Monaco, explorador, paneles, wizard, depuración)
 │       ├── icons.ts            # Sistema de iconos: 65 piezas vectoriales propias
 │       ├── focus-guard.ts      # * Conservar foco y cursor al repintar una vista entera (puro)
+│       ├── xterm-bridge.ts     # Emulador de terminal: tipos propios y colores del tema activo
 │       ├── editor-state.ts     # * Cuándo se puede escribir en el editor (puro)
 │       ├── ai-availability.ts  # Estado del asistente en la barra de actividad (puro)
 │       ├── icon-gallery.ts     # Galería de revisión visual (modo --icons)
@@ -172,7 +184,8 @@ IDE-DOTNET/
 │       │                       # containers (contenedores y Docker Compose),
 │       │                       # tests (explorador de pruebas), metrics (monitor de rendimiento),
 │       │                       # extensions (panel de Open VSX), update-card (tarjeta flotante),
-│       │                       # search (buscar en los archivos)
+│       │                       # search (buscar en los archivos),
+│       │                       # confirm-dialog (modal propio, asíncrono)
 │       └── styles/             # theme.css (tokens), layout.css, components.css
 ├── resources/              # Iconos multirresolución, branding
 ├── scripts/                # Build, generación de iconos, fetch de toolchain, verificación
@@ -260,7 +273,8 @@ npx electron . --smoke-test
   un usuario (`wizard`, `settings`, `nuget`, `debug`, `ai`, `terminal`, `palette`, `light`,
   `nesting`, `startup`, `startup-dialog`, `terminal-suggest`, `git`, `git-diff`, `startup-play`,
   `startup-run-mode`, `ai-toggle`, `efcore`, `http`, `logs`, `startup-logs`, `containers`,
-  `tests`, `tests-run`, `metrics`, `audit`, `extensions`, `update`, `search`, `unsaved`). `search`
+  `tests`, `tests-run`, `metrics`, `audit`, `extensions`, `update`, `search`, `unsaved`,
+  `terminal-pty`). `search`
   además **escribe** en la caja: el panel de búsqueda no enseña nada hasta que hay una consulta, así
   que abrirlo y ya no revisa nada. `update` pinta la tarjeta de
   actualización con un estado de ejemplo: publicar una versión de verdad para poder mirarla no es
@@ -475,6 +489,29 @@ npx electron . --smoke-test
   se comprueba de un vistazo.
 - `cd` a secas **vuelve a la raíz de la solución**, no al hogar (POSIX) ni imprime (cmd). Dentro de
   un IDE es lo que uno quiere; sin solución abierta, al hogar.
+
+### Pseudoterminales (`src/main/services/terminal-pty-service.ts`, `src/shared/terminal-profiles.ts`)
+
+- **La asistida no desaparece: deja de ser la única** (ADR-059). Una pestaña `lite` es la terminal
+  de siempre, con su lista blanca, su `shell: false` y sus sugerencias; una pestaña `pty` es un
+  intérprete de verdad con `node-pty` y `xterm.js`. Las dos conviven en el mismo panel.
+- **Dentro de un PTY no hay lista blanca**, y eso es deliberado: una terminal que sólo deja ejecutar
+  doce programas no es una terminal. Lo que sigue acotado es **quién** abre una, con qué intérprete
+  y en qué directorio: el perfil llega como identificador y pasa por `coerceProfileId`, que sólo
+  puede devolver uno del catálogo, y el `cwd` **no llega del renderer** (se toma de la sesión de la
+  terminal, como la raíz de la búsqueda en el ADR-057).
+- **`node-pty` es `optionalDependency` y se carga tarde, dentro de un `try`.** Si falta el binario
+  de esta plataforma —o npm ha bloqueado los scripts de instalación—, los perfiles de PTY se
+  ofrecen **atenuados y con el motivo escrito** y la asistida sigue funcionando (ADR-033).
+- **Un intérprete que se ofrece y no está instalado es peor que uno que no se ofrece.** `pwsh.exe`
+  es una instalación aparte: `terminal:profiles` comprueba el `PATH` antes de darlo por disponible.
+- **Cerrar la pestaña es cerrar la sesión**, y cerrar el IDE se lleva todas (`before-quit` y
+  `process.on('exit')`). Una terminal invisible con un `dotnet watch` dentro ocupando un puerto es
+  exactamente lo que nadie espera.
+- **La pestaña no se cierra sola cuando el intérprete termina.** Si el `exit` fue un error, lo
+  último que escribió es lo único que lo explica.
+- xterm **no se bundlea**, como Monaco: se sirve desde `build/vendor/xterm/`. Sus `<script>` van
+  **antes** que el loader AMD de Monaco en `index.html`; ver la sección de trampas.
 
 ### Barra de menú (`src/shared/menu-template.ts`, `src/main/menu.ts`)
 
@@ -956,3 +993,39 @@ npm run fetch:toolchain -- --platform win32 --arch x64
   nodo **desconectado**: conserva el valor viejo y su cursor, mientras el vivo está en otra parte.
   El síntoma es una medición que dice que el arreglo del foco no funciona cuando sí funciona. Se
   vuelve a consultar el selector en cada paso, y se comprueba contra `document.activeElement`.
+- **Un envoltorio UMD cargado después del loader AMD de Monaco no deja su global.** El `<script>`
+  de xterm comprueba `define.amd` **antes** que el objeto global, así que puesto detrás de
+  `vendor/monaco/vs/loader.js` se registra como módulo anónimo y `window.Terminal` no existe nunca.
+  No da ningún error: simplemente no está. Va antes, y hay un comentario en `index.html` diciendo
+  por qué.
+- **`require` no sobrevive a esbuild en el bundle ESM.** Lo reescribe por un sustituto que **pasa un
+  `typeof … === 'function'`** y lanza al llamarlo ("Dynamic require is not supported"). Cargar un
+  módulo opcional con `typeof require === 'function' ? require : otraCosa` elige siempre el
+  sustituto roto, y el síntoma es que la funcionalidad va en la aplicación y las pruebas la declaran
+  no disponible: la suite pasa en verde diciendo que no hay nada que probar. Se resuelve con
+  `createRequire` y un ancla explícita.
+- **Matar una sesión de ConPTY deja vivo el bucle de eventos.** node-pty lanza un ayudante
+  (`conpty_console_list_agent`) para enumerar los procesos de la consola, y con él dentro de
+  `node --test` la suite terminaba todas sus pruebas en verde y no salía nunca. Las que abren un
+  intérprete de verdad viven en `tests/unit/pty-session.probe.mjs`, que es un proceso aparte y sale
+  con `process.exit`. Es el tercer caso de la misma familia: la prueba de humo de Electron y el
+  servidor HTTP sin cerrar ya habían colgado la suite antes.
+- **En Electron, `preventDefault()` en `beforeunload` no enseña ningún diálogo.** Chromium tiene el
+  suyo desactivado, así que avisar de cambios sin guardar así deja el aspa de la ventana sin hacer
+  nada y sin explicar por qué: el IDE se percibe colgado. Hay que preguntar con un diálogo propio y
+  volver a cerrar con un pestillo puesto, o `window.close()` vuelve a disparar `beforeunload` y
+  pregunta en bucle.
+- **`window.confirm` bloquea el renderer entero.** Es síncrono: mientras está abierto no se atiende
+  IPC, no se repinta y la ventana no se puede cerrar. Y al cerrarse un modal, el `<textarea>` oculto
+  sobre el que Monaco escucha el teclado **no** recupera el foco solo, así que el editor se queda
+  aceptando las teclas que llegan como comandos (Retroceso, Suprimir, las flechas) y descartando las
+  que llegan como entrada de texto: "sólo deja borrar". El foco se devuelve a mano en un `finally`.
+- **Los archivos JSON de un proyecto .NET no los escribe este IDE.** Visual Studio guarda
+  `launchSettings.json` y `appsettings.json` con marca de orden de bytes UTF-8 más a menudo de lo
+  que uno esperaría, y `JSON.parse` la rechaza en la posición 0 con un mensaje que ni siquiera
+  consigue imprimir el carácter que le molesta. Si el error se traga, el síntoma aparece tres
+  pantallas más allá: la aplicación arranca en el puerto 5000, en Production y sin static web
+  assets. Se lee con `parseJsonText` (ADR-058).
+- **`dotnet run` sin `--launch-profile` aplica el primer perfil del archivo**, que en las plantillas
+  del SDK es el de HTTP. El IDE resolvía el perfil de HTTPS, lo enseñaba, y arrancaba el otro: la
+  aplicación escuchaba en un puerto distinto del que se anunciaba y todo lo demás parecía correcto.

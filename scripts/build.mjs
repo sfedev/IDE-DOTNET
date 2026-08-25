@@ -68,6 +68,8 @@ const targets = [
     format: 'esm',
     target: 'node20',
     bundle: true,
+    // Igual que en el bundle del proceso principal: `node-pty` es nativo y opcional.
+    external: ['node-pty'],
     banner,
   },
   {
@@ -98,7 +100,9 @@ const targets = [
     format: 'cjs',
     target: 'node20',
     bundle: true,
-    external: ['electron'],
+    // `node-pty` es nativo y opcional: no se puede bundlear y su ausencia tiene que ser un valor,
+    // no un error de carga. Se resuelve en ejecución contra el node_modules empaquetado.
+    external: ['electron', 'node-pty'],
     banner,
   },
   {
@@ -166,11 +170,34 @@ async function copyAssets() {
     console.warn('  monaco      AVISO: no se encuentra monaco-editor en node_modules');
   }
 
-  const xtermCss = join(root, 'node_modules/@xterm/xterm/css/xterm.css');
-  if (existsSync(xtermCss)) {
-    await mkdir(join(outDir, 'vendor'), { recursive: true });
-    await cp(xtermCss, join(outDir, 'vendor/xterm.css'));
+  /**
+   * xterm.js, servido como archivo y no bundleado.
+   *
+   * Misma decisión que con Monaco: son 500 KB que no tienen por qué entrar en el bundle del
+   * renderer, y la prueba de empaquetado vigila justamente que ese bundle siga siendo un orden de
+   * magnitud más pequeño que lo que dice no incrustar.
+   *
+   * Y **los `<script>` de xterm van antes que el loader de Monaco** en `index.html`: su envoltorio
+   * UMD comprueba `define.amd` primero, así que cargado después del loader AMD se registraría como
+   * módulo anónimo en vez de dejar `window.Terminal`.
+   */
+  const xtermFiles = [
+    ['node_modules/@xterm/xterm/css/xterm.css', 'vendor/xterm/xterm.css'],
+    ['node_modules/@xterm/xterm/lib/xterm.js', 'vendor/xterm/xterm.js'],
+    ['node_modules/@xterm/addon-fit/lib/addon-fit.js', 'vendor/xterm/addon-fit.js'],
+  ];
+
+  let xtermCopied = 0;
+  for (const [from, to] of xtermFiles) {
+    const source = join(root, from);
+    if (!existsSync(source)) continue;
+    await mkdir(dirname(join(outDir, to)), { recursive: true });
+    await cp(source, join(outDir, to));
+    xtermCopied++;
   }
+
+  if (xtermCopied > 0) console.log(`  xterm       ${xtermCopied} archivos`);
+  else console.warn('  xterm       AVISO: no se encuentra @xterm en node_modules');
 
   const staticFrom = join(root, 'src/renderer/static');
   const staticCount = await copyDirectory(staticFrom, outDir);
