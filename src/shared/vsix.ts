@@ -17,6 +17,7 @@
  * extensión instalada, en vez de dejar creer que un depurador de Python va a funcionar aquí.
  */
 import { compareVersions, parseVersion } from './updates.js';
+import { parseJsonText } from './json-text.js';
 
 /** Prefijo del subárbol que se instala. */
 export const VSIX_ROOT = 'extension/';
@@ -97,7 +98,7 @@ function requireSegment(value: string | null, field: string): string {
 export function parseVsixManifest(json: string): VsixManifest {
   let raw: unknown;
   try {
-    raw = JSON.parse(json);
+    raw = parseJsonText(json);
   } catch (error) {
     throw new VsixError(`el manifiesto de la extensión no es JSON válido: ${(error as Error).message}`);
   }

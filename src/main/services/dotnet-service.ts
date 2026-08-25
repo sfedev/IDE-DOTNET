@@ -46,6 +46,32 @@ const TASK_ARGS: Record<DotnetTaskKind, string[]> = {
 export const LONG_RUNNING: ReadonlySet<DotnetTaskKind> = new Set<DotnetTaskKind>(['run', 'watch']);
 
 /**
+ * Verbos que aceptan `--launch-profile`.
+ *
+ * Sólo `run` y `watch` arrancan la aplicación; a `build` o a `test` la bandera les sobra y además
+ * la rechazan, así que la lista es cerrada y no "todo lo que no sea build".
+ */
+const ACCEPTS_LAUNCH_PROFILE: ReadonlySet<DotnetTaskKind> = new Set<DotnetTaskKind>(['run', 'watch']);
+
+/**
+ * Argumentos del perfil de `launchSettings.json`.
+ *
+ * Sin esto, `dotnet run --project X` aplica **el primer perfil declarado**, que en las plantillas
+ * del SDK es el de HTTP: el proyecto arrancaba en claro aunque el IDE hubiera resuelto —y estuviera
+ * enseñando— el perfil HTTPS. Nombrarlo explícitamente hace que lo que se lanza sea lo que se dijo
+ * que se iba a lanzar.
+ *
+ * El nombre viaja como un argumento suelto del array, nunca interpolado en una línea: un perfil
+ * puede llamarse "IIS Express", con espacio.
+ */
+export function launchProfileArgs(kind: DotnetTaskKind, launchProfile: string | undefined): string[] {
+  if (!ACCEPTS_LAUNCH_PROFILE.has(kind)) return [];
+
+  const name = (launchProfile ?? '').trim();
+  return name === '' ? [] : ['--launch-profile', name];
+}
+
+/**
  * Línea de argumentos de una tarea, con la verbosidad ya inyectada.
  *
  * La posición no es un detalle: `dotnet watch` quiere su bandera **antes** del subcomando (todo
@@ -53,16 +79,19 @@ export const LONG_RUNNING: ReadonlySet<DotnetTaskKind> = new Set<DotnetTaskKind>
  * detrás del objetivo. Los argumentos extra se dejan siempre los últimos: si alguno abre la
  * sección de argumentos de la aplicación (`--`), lo nuestro ya ha quedado del lado de la CLI.
  */
-function buildArgs(request: DotnetTaskRequest, verbosity: DotnetVerbosity): string[] {
+export function buildArgs(request: DotnetTaskRequest, verbosity: DotnetVerbosity): string[] {
   const [verb, ...rest] = TASK_ARGS[request.kind];
   const plan = verbosityPlan(request.kind, verbosity);
 
   // `dotnet run` y `dotnet watch` reciben el proyecto tras `--project`; el resto lo reciben suelto.
+  // El perfil va pegado al proyecto —los dos son "qué se arranca"— y antes de la verbosidad, que
+  // es "cuánto se cuenta".
   return [
     verb ?? request.kind,
     ...plan.leading,
     ...rest,
     request.target,
+    ...launchProfileArgs(request.kind, request.launchProfile),
     ...plan.trailing,
     ...(request.extraArgs ?? []),
   ];

@@ -8,6 +8,7 @@ import { existsSync } from 'node:fs';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { XMLParser } from 'fast-xml-parser';
+import { parseJsonText } from '../../shared/json-text.js';
 
 import type {
   DotForgeManifest,
@@ -346,7 +347,7 @@ async function readManifest(directory: string): Promise<DotForgeManifest | null>
   const manifestPath = join(directory, 'dotforge.json');
   if (!existsSync(manifestPath)) return null;
   try {
-    return JSON.parse(await readFile(manifestPath, 'utf8')) as DotForgeManifest;
+    return parseJsonText<DotForgeManifest>(await readFile(manifestPath, 'utf8'));
   } catch {
     return null;
   }

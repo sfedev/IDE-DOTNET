@@ -12,6 +12,7 @@ import type { AppSettings } from '../../shared/contracts.js';
 import { DEFAULT_SETTINGS } from '../../shared/contracts.js';
 import { normalizeActivityOrder } from '../../shared/activity-bar.js';
 import { coerceVerbosity } from '../../shared/dotnet-verbosity.js';
+import { parseJsonText } from '../../shared/json-text.js';
 import { coerceAiSettings } from './ai/preferences.js';
 
 let settingsPath: string;
@@ -80,7 +81,7 @@ export async function load(): Promise<AppSettings> {
   }
 
   try {
-    cached = coerce(JSON.parse(await readFile(settingsPath, 'utf8')));
+    cached = coerce(parseJsonText(await readFile(settingsPath, 'utf8')));
   } catch {
     // Preferencias ilegibles: se vuelve a los valores por defecto en vez de romper el arranque.
     cached = { ...DEFAULT_SETTINGS };

@@ -24,6 +24,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { parseJsonText } from '../../shared/json-text.js';
 
 import {
   assetFor,
@@ -131,7 +132,7 @@ async function readPending(): Promise<PendingInstall | null> {
   if (!existsSync(path)) return null;
 
   try {
-    const raw = JSON.parse(await readFile(path, 'utf8')) as Partial<PendingInstall>;
+    const raw = parseJsonText<Partial<PendingInstall>>(await readFile(path, 'utf8'));
     if (typeof raw.version !== 'string' || typeof raw.file !== 'string') return null;
     return { version: raw.version, file: raw.file, savedAtUtc: raw.savedAtUtc ?? '' };
   } catch {

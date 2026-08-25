@@ -14,6 +14,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import type { StartupConfig } from '../../shared/startup.js';
+import { parseJsonText } from '../../shared/json-text.js';
 import { coerceStartupConfig, DEFAULT_STARTUP_CONFIG } from '../../shared/startup.js';
 
 let storePath: string;
@@ -29,7 +30,7 @@ async function readStore(): Promise<Store> {
   if (!storePath || !existsSync(storePath)) return {};
 
   try {
-    const parsed: unknown = JSON.parse(await readFile(storePath, 'utf8'));
+    const parsed: unknown = parseJsonText(await readFile(storePath, 'utf8'));
     return typeof parsed === 'object' && parsed !== null ? (parsed as Store) : {};
   } catch {
     // Archivo corrupto: se ignora en vez de impedir que el IDE arranque. La siguiente escritura

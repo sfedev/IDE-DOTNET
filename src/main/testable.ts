@@ -97,7 +97,21 @@ export {
   parseLaunchSettings,
   readLaunchEnvironment,
   selectProfile,
+  servesHttps,
 } from './services/launch-settings.js';
+
+/**
+ * Construcción de la línea de argumentos de una tarea de .NET.
+ *
+ * Se exporta para poder afirmar en una prueba **el orden exacto** de lo que se le pasa a `dotnet`:
+ * el perfil de arranque, la verbosidad y los argumentos extra tienen cada uno su sitio, y
+ * equivocarse de sitio no da error —la bandera se le pasa a la aplicación hija en vez de a la CLI
+ * y no pasa nada visible—.
+ */
+export { buildArgs as dotnetTaskArgs, launchProfileArgs, LONG_RUNNING } from './services/dotnet-service.js';
+
+/** Lectura de JSON escrito por otras herramientas: la marca de orden de bytes de Windows. */
+export { BOM, parseJsonText, stripBom } from '../shared/json-text.js';
 
 // --- Asistente de IA -----------------------------------------------------------------------
 // Sólo las piezas puras. `secret-store.ts` y `ai-service.ts` quedan fuera a propósito: el primero

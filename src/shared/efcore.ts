@@ -23,6 +23,8 @@
 // Modelo
 // ---------------------------------------------------------------------------------------------
 
+import { stripBom } from './json-text.js';
+
 export interface EfMigration {
   /** Identificador completo: `20260101120000_InitialCreate`. */
   id: string;
@@ -351,7 +353,7 @@ export function parseConnectionStrings(appsettings: string): ConnectionStringInf
   let parsed: unknown;
 
   try {
-    parsed = JSON.parse(stripJsonComments(appsettings));
+    parsed = JSON.parse(stripJsonComments(stripBom(appsettings)));
   } catch {
     return [];
   }

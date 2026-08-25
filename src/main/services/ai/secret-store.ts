@@ -20,6 +20,7 @@ import { safeStorage } from 'electron';
 
 import type { AiProviderId } from '../../../shared/ai.js';
 import { AI_PROVIDER_IDS } from '../../../shared/ai.js';
+import { parseJsonText } from '../../../shared/json-text.js';
 
 let storePath = '';
 
@@ -49,7 +50,7 @@ export async function load(): Promise<void> {
   if (storePath === '' || !existsSync(storePath) || !isEncryptionAvailable()) return;
 
   try {
-    const raw: unknown = JSON.parse(await readFile(storePath, 'utf8'));
+    const raw: unknown = parseJsonText(await readFile(storePath, 'utf8'));
     if (typeof raw !== 'object' || raw === null) return;
 
     for (const [provider, value] of Object.entries(raw as Record<string, unknown>)) {

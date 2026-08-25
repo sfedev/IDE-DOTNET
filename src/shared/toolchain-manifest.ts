@@ -25,6 +25,8 @@
  */
 
 /** Nombre del archivo dentro del directorio de la instalación. */
+import { parseJsonText } from './json-text.js';
+
 export const MANIFEST_FILE = '.dotforge-install.json';
 
 export interface ManifestFile {
@@ -95,7 +97,7 @@ function isManifestFile(value: unknown): value is ManifestFile {
 export function parseManifest(text: string): InstallManifest | null {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(text);
+    parsed = parseJsonText(text);
   } catch {
     return null;
   }

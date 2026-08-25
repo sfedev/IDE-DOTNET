@@ -280,6 +280,14 @@ export interface DotnetTaskRequest {
   target: string;
   /** Argumentos adicionales, ya troceados (nunca una línea de shell). */
   extraArgs?: string[];
+  /**
+   * Perfil de `launchSettings.json` con el que arrancar (`run` y `watch`).
+   *
+   * Si no se indica, lo resuelve el proceso principal leyendo el archivo del proyecto: el
+   * renderer no conoce los perfiles y no tiene por qué. Se acepta aquí para poder forzar uno
+   * concreto desde la interfaz sin cambiar el canal.
+   */
+  launchProfile?: string;
   /** Etiqueta del canal de salida. Se devuelve tal cual en `DotnetTaskStarted`. */
   label?: string;
 }

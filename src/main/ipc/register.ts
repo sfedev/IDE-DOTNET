@@ -78,6 +78,7 @@ import * as efcoreService from '../services/efcore-service.js';
 import * as fileService from '../services/file-service.js';
 import * as httpClient from '../services/http-client-service.js';
 import * as gitService from '../services/git-service.js';
+import { readLaunchEnvironment } from '../services/launch-settings.js';
 import { readNpmScripts } from '../services/node-scripts.js';
 import * as metricsService from '../services/metrics-service.js';
 import * as nugetService from '../services/nuget-service.js';
@@ -127,6 +128,30 @@ function requireString(value: unknown, name: string): string {
 const TASK_KINDS: ReadonlySet<string> = new Set<DotnetTaskKind>([
   'build', 'rebuild', 'clean', 'restore', 'test', 'run', 'watch', 'format',
 ]);
+
+/**
+ * Perfil de `launchSettings.json` con el que arrancar un proyecto.
+ *
+ * Se resuelve aquí y no en el renderer por la misma razón que la verbosidad: el archivo está en el
+ * disco y quien lo lee es el proceso principal. Y se resuelve **siempre**, no sólo cuando alguien
+ * lo pide, porque el fallo que arregla es de omisión: sin `--launch-profile`, `dotnet run` aplica
+ * el primer perfil declarado —el de HTTP en las plantillas del SDK— mientras el IDE decía estar
+ * arrancando el de HTTPS.
+ *
+ * Nunca lanza: un proyecto sin perfiles, una biblioteca de clases o un `.sln` como objetivo
+ * devuelven `undefined` y la tarea se lanza como siempre.
+ */
+async function resolveLaunchProfile(kind: DotnetTaskKind, target: string): Promise<string | undefined> {
+  if (kind !== 'run' && kind !== 'watch') return undefined;
+  if (!/\.[a-z]+proj$/i.test(target)) return undefined;
+
+  try {
+    const launch = await readLaunchEnvironment(dirname(target), basename(target).replace(/\.[a-z]+proj$/i, ''));
+    return launch.profile ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Forma de un nombre completamente cualificado de prueba.
@@ -837,7 +862,7 @@ export function registerIpcHandlers(): void {
   });
 
   // --- Tareas de .NET -------------------------------------------------------------------------
-  ipcMain.handle(IPC.dotnetRunTask, (_event, request: unknown) => {
+  ipcMain.handle(IPC.dotnetRunTask, async (_event, request: unknown) => {
     if (typeof request !== 'object' || request === null) throw new Error('petición de tarea inválida');
 
     const task = request as DotnetTaskRequest;
@@ -851,9 +876,16 @@ export function registerIpcHandlers(): void {
     const label = typeof task.label === 'string' && task.label.trim() !== '' ? task.label.trim() : undefined;
 
     // El nivel de detalle lo decide el proceso principal a partir de las preferencias, no el
-    // renderer: es la misma regla que con el prompt del asistente (ADR-016).
+    // renderer: es la misma regla que con el prompt del asistente (ADR-016). Y con el perfil de
+    // arranque pasa lo mismo: el renderer no conoce `launchSettings.json`, así que se resuelve
+    // aquí con el mismo criterio que usa el depurador —nombre del proyecto, y si no, HTTPS—.
+    const launchProfile =
+      typeof task.launchProfile === 'string' && task.launchProfile.trim() !== ''
+        ? task.launchProfile.trim()
+        : await resolveLaunchProfile(task.kind, target);
+
     return dotnetService.runTask(
-      { kind: task.kind, target, extraArgs, label },
+      { kind: task.kind, target, extraArgs, label, ...(launchProfile ? { launchProfile } : {}) },
       taskCallbacks,
       settingsService.current().dotnetVerbosity,
     );

@@ -14,6 +14,8 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import { parseJsonText } from '../../shared/json-text.js';
+
 export interface LaunchProfile {
   name: string;
   /** `Project`, `Executable`, `IISExpress`... Sólo interesa `Project`. */
@@ -40,7 +42,9 @@ const EMPTY: LaunchEnvironment = { env: {}, profile: null, warning: null };
  * @throws SyntaxError si el JSON está mal formado. El llamante decide si eso es fatal.
  */
 export function parseLaunchSettings(source: string): LaunchProfile[] {
-  const parsed: unknown = JSON.parse(source);
+  // `parseJsonText` y no `JSON.parse`: el archivo lo escribe Visual Studio, que en Windows lo
+  // guarda con marca de orden de bytes más veces de las que uno esperaría (ADR-058).
+  const parsed: unknown = parseJsonText(source);
   if (typeof parsed !== 'object' || parsed === null) return [];
 
   const profiles = (parsed as { profiles?: unknown }).profiles;
@@ -76,18 +80,34 @@ export function parseLaunchSettings(source: string): LaunchProfile[] {
   return result;
 }
 
+/** ¿Este perfil escucha en HTTPS? Se mira la lista entera: `applicationUrl` admite varias URLs. */
+export function servesHttps(profile: LaunchProfile): boolean {
+  return (profile.applicationUrl ?? '')
+    .split(';')
+    .some((url) => url.trim().toLowerCase().startsWith('https://'));
+}
+
 /**
  * Elige qué perfil aplicar.
  *
  * Mismo criterio que Visual Studio: sólo perfiles `Project` —`IISExpress` necesita IIS y
- * `Executable` lanza otro programa— y, entre ellos, el que se llama como el proyecto; si no
- * existe, el primero declarado, que es el que el SDK considera por defecto.
+ * `Executable` lanza otro programa— y, entre ellos, el que se llama como el proyecto.
+ *
+ * **Sin coincidencia de nombre manda HTTPS, no el orden del archivo.** Las plantillas del SDK
+ * declaran `http` antes que `https`, así que "el primero" es justo el perfil sin TLS: se arrancaba
+ * en claro, el certificado de desarrollo no se usaba nunca y cualquier cliente que apuntase al
+ * puerto seguro —una SPA, un `.http` con `https://localhost:7xxx`, otro servicio de la misma
+ * solución— fallaba a conectar sin decir por qué. Entre varios HTTPS gana el primero declarado,
+ * que sigue siendo el criterio del SDK.
  */
 export function selectProfile(profiles: LaunchProfile[], projectName: string): LaunchProfile | null {
   const runnable = profiles.filter((profile) => profile.commandName === 'Project');
   if (runnable.length === 0) return null;
 
-  return runnable.find((profile) => profile.name === projectName) ?? runnable[0] ?? null;
+  const named = runnable.find((profile) => profile.name === projectName);
+  if (named) return named;
+
+  return runnable.find(servesHttps) ?? runnable[0] ?? null;
 }
 
 /**
