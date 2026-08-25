@@ -260,11 +260,14 @@ npx electron . --smoke-test
   un usuario (`wizard`, `settings`, `nuget`, `debug`, `ai`, `terminal`, `palette`, `light`,
   `nesting`, `startup`, `startup-dialog`, `terminal-suggest`, `git`, `git-diff`, `startup-play`,
   `startup-run-mode`, `ai-toggle`, `efcore`, `http`, `logs`, `startup-logs`, `containers`,
-  `tests`, `tests-run`, `metrics`, `audit`, `extensions`, `update`, `search`). `search` además
-  **escribe** en la caja: el panel de búsqueda no enseña nada hasta que hay una consulta, así que
-  abrirlo y ya no revisa nada. `update` pinta la tarjeta de
+  `tests`, `tests-run`, `metrics`, `audit`, `extensions`, `update`, `search`, `unsaved`). `search`
+  además **escribe** en la caja: el panel de búsqueda no enseña nada hasta que hay una consulta, así
+  que abrirlo y ya no revisa nada. `update` pinta la tarjeta de
   actualización con un estado de ejemplo: publicar una versión de verdad para poder mirarla no es
-  una opción, y no mirarla nunca tampoco.
+  una opción, y no mirarla nunca tampoco. `unsaved` abre un archivo, **escribe en él con el propio
+  Monaco** (`trigger('type')`, que respeta `readOnly`) y pulsa el aspa de la pestaña: deja el aviso
+  de cambios sin guardar en pantalla para poder contestarlo desde `--probe=` y comprobar que el
+  editor recupera el teclado.
 - `--ui-wait=<ms>` — cuánto se espera antes de **pulsar** la acción de `--ui=`. Los 3,2 s por
   defecto no bastan si se arranca con una solución abierta: la interfaz todavía está cargando
   Monaco y el control que hay que pulsar aún no existe.

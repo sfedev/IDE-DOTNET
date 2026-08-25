@@ -99,3 +99,56 @@ export class PendingOperations {
     return this.counts.size;
   }
 }
+
+/** Texto del aviso al cerrar una pestaña con cambios sin guardar. */
+export function unsavedChangesMessage(name: string): string {
+  return `"${name}" tiene cambios sin guardar. Si cierras la pestaña, se pierden.`;
+}
+
+/**
+ * Cerrojo de las confirmaciones modales del gestor de pestañas.
+ *
+ * Existe por dos fallos distintos que compartían causa: **una confirmación que no se suelta**.
+ *
+ *  1. `window.confirm` es síncrono y bloquea el hilo del renderer entero mientras está abierto. Con
+ *     él en pantalla, el IDE no atiende IPC, no repinta y **no puede cerrarse**: el aspa de la
+ *     ventana no hacía nada hasta contestar. Un diálogo propio es asíncrono y no tiene ese problema,
+ *     pero hereda el otro.
+ *  2. Dos confirmaciones a la vez. Cerrar todas las pestañas al cerrar la solución, o pulsar el aspa
+ *     de la ventana mientras ya hay un aviso abierto, apilaba diálogos sobre el mismo editor. El
+ *     segundo se quedaba sin quien lo cerrase y el editor no volvía a recibir el teclado.
+ *
+ * La regla es una sola: **hay como mucho una confirmación abierta, y el cerrojo se suelta pase lo
+ * que pase**. Si llega otra mientras hay una en curso, se contesta con el valor prudente (`busy`)
+ * en vez de encolarse; encolar diálogos es lo que produce la pila de la que no se sale.
+ *
+ * Puro y sin DOM: la garantía —"pase lo que pase, se suelta"— se prueba con Node pelado.
+ */
+export class ConfirmationLock {
+  private busy = false;
+
+  isBusy(): boolean {
+    return this.busy;
+  }
+
+  /**
+   * Ejecuta la confirmación con el cerrojo tomado.
+   *
+   * @param ask     lo que abre el diálogo y resuelve con la respuesta.
+   * @param whenBusy qué contestar si ya hay una confirmación abierta.
+   *
+   * El `finally` suelta el cerrojo también cuando `ask` **lanza**, que es el caso que importa: un
+   * fallo pintando el diálogo dejaría, si no, todas las pestañas siguientes sin poder cerrarse y
+   * sin ningún error visible.
+   */
+  async run<T>(ask: () => Promise<T>, whenBusy: T): Promise<T> {
+    if (this.busy) return whenBusy;
+
+    this.busy = true;
+    try {
+      return await ask();
+    } finally {
+      this.busy = false;
+    }
+  }
+}

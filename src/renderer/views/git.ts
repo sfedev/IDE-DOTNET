@@ -20,6 +20,7 @@ import type { GitCommandResult, GitFileChange, GitFileDiff, GitRepositoryStatus 
 import { buildDiffRequest, describeLetter, isValidBranchName, syncSummary } from '../../shared/git.js';
 import { byId, clear, el } from '../dom.js';
 import { icon, type IconName } from '../icons.js';
+import { confirmDialog } from './confirm-dialog.js';
 
 export interface GitViewHost {
   notify(message: string, level: 'info' | 'ok' | 'warn' | 'error'): void;
@@ -148,7 +149,7 @@ export class GitView {
    * La confirmación no es un trámite: para un archivo sin rastrear, "descartar" significa
    * **borrarlo del disco**, y eso hay que decirlo con esas palabras antes de hacerlo.
    */
-  private discard(changes: GitFileChange[]): void {
+  private async discard(changes: GitFileChange[]): Promise<void> {
     if (changes.length === 0) return;
 
     const untracked = changes.filter((change) => change.untracked);
@@ -164,9 +165,15 @@ export class GitView {
           ? `${untracked.length} de ellos se borrarán del disco (no están rastreados) y el resto volverá a su última versión.`
           : 'Volverán a su última versión guardada.';
 
-    if (!window.confirm(`¿Descartar los cambios de ${detail}?\n\n${consequence}\n\nEsta acción no se puede deshacer.`)) {
-      return;
-    }
+    const confirmed = await confirmDialog({
+      title: 'Descartar los cambios',
+      message: `Se van a descartar los cambios de ${detail}. ${consequence}`,
+      detail: 'Esta acción no se puede deshacer.',
+      confirmLabel: 'Descartar',
+      tone: 'danger',
+    });
+
+    if (!confirmed) return;
 
     void this.perform(() => window.dotforge.git.discard(changes.map((change) => change.path)));
   }
@@ -556,7 +563,7 @@ export class GitView {
 
       if (section === 'unstaged') {
         bulk.append(
-          this.iconAction('undo', 'Descartar todos los cambios', () => this.discard(changes)),
+          this.iconAction('undo', 'Descartar todos los cambios', () => void this.discard(changes)),
           this.iconAction('plus', 'Preparar todos los cambios', () =>
             this.stage(changes.map((change) => change.path)),
           ),
@@ -613,7 +620,7 @@ export class GitView {
       actions.appendChild(this.iconAction('minus', 'Quitar de preparados', () => this.unstage([change.path])));
     } else {
       actions.append(
-        this.iconAction('undo', 'Descartar los cambios de este archivo', () => this.discard([change])),
+        this.iconAction('undo', 'Descartar los cambios de este archivo', () => void this.discard([change])),
         this.iconAction('plus', 'Preparar este archivo', () => this.stage([change.path])),
       );
     }

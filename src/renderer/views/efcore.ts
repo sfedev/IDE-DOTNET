@@ -31,6 +31,7 @@ import { describeColumn } from '../../shared/efcore-schema.js';
 import { isValidMigrationName } from '../../shared/efcore.js';
 import { byId, clear, el } from '../dom.js';
 import { icon, type IconName } from '../icons.js';
+import { confirmDialog } from './confirm-dialog.js';
 
 export interface EfCoreHost {
   notify(message: string, level: 'info' | 'ok' | 'warn' | 'error'): void;
@@ -240,16 +241,22 @@ export class EfCoreView {
     void this.run('migrations-add', { name: name.trim() });
   }
 
-  private removeLastMigration(): void {
+  private async removeLastMigration(): Promise<void> {
     const last = this.migrations?.migrations[this.migrations.migrations.length - 1];
     if (!last) return;
 
     const applied = last.applied;
-    const message = applied
-      ? `"${last.name}" ya está aplicada en la base de datos. Quitarla revertirá ese cambio. ¿Continuar?`
-      : `¿Quitar la migración "${last.name}"?`;
+    const confirmed = await confirmDialog({
+      title: 'Quitar la última migración',
+      message: `Se va a quitar "${last.name}".`,
+      detail: applied
+        ? 'Ya está aplicada en la base de datos: quitarla revertirá ese cambio.'
+        : 'Todavía no está aplicada: sólo se borran sus archivos.',
+      confirmLabel: 'Quitar',
+      tone: 'danger',
+    });
 
-    if (!window.confirm(message)) return;
+    if (!confirmed) return;
     void this.run('migrations-remove', applied ? { force: true } : {});
   }
 
@@ -481,7 +488,7 @@ export class EfCoreView {
             disabled: busy,
             title: 'Quitar la última migración (dotnet ef migrations remove)',
             attrs: { 'aria-label': 'Quitar la última migración' },
-            on: { click: () => this.removeLastMigration() },
+            on: { click: () => void this.removeLastMigration() },
           },
           icon('undo', { size: 15 }),
         ),

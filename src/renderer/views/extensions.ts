@@ -28,6 +28,7 @@ import { hasNewerVersion } from '../../shared/vsix.js';
 import { byId, clear, debounce, el, repaintPreservingFocus } from '../dom.js';
 import { FOCUS_KEY_ATTRIBUTE } from '../focus-guard.js';
 import { icon } from '../icons.js';
+import { confirmDialog } from './confirm-dialog.js';
 
 export interface ExtensionsHost {
   notify(message: string, level: 'info' | 'ok' | 'warn' | 'error'): void;
@@ -145,7 +146,14 @@ export class ExtensionsView {
 
   private async uninstall(extension: InstalledExtension): Promise<void> {
     if (this.working !== null) return;
-    if (!window.confirm(`¿Desinstalar "${extension.displayName}"?`)) return;
+    const confirmed = await confirmDialog({
+      title: 'Desinstalar la extensión',
+      message: `Se va a desinstalar "${extension.displayName}".`,
+      detail: 'Se borra su carpeta de la instalación; volver a instalarla la descarga otra vez.',
+      confirmLabel: 'Desinstalar',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
 
     this.working = extension.id;
     this.render();

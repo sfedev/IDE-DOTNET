@@ -26,6 +26,7 @@ import { matchComposeState } from '../../shared/compose.js';
 import { supportLabel } from '../../shared/docker.js';
 import { byId, clear, el } from '../dom.js';
 import { icon, type IconName } from '../icons.js';
+import { confirmDialog } from './confirm-dialog.js';
 
 export interface ContainersHost {
   notify(message: string, level: 'info' | 'ok' | 'warn' | 'error'): void;
@@ -148,7 +149,18 @@ export class ContainersView {
     if (this.runningTaskId !== null) return;
 
     // Eliminar un contenedor borra sus datos si no tiene volumen: se confirma nombrando cuál.
-    if (action === 'remove' && !window.confirm(`¿Eliminar el contenedor "${container}"?`)) return;
+    if (
+      action === 'remove' &&
+      !(await confirmDialog({
+        title: 'Eliminar el contenedor',
+        message: `Se va a eliminar "${container}".`,
+        detail: 'Si no tiene volumen, sus datos se pierden.',
+        confirmLabel: 'Eliminar',
+        tone: 'danger',
+      }))
+    ) {
+      return;
+    }
 
     try {
       const task = await window.dotforge.docker.containerRun(action, container);

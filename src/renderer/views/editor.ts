@@ -10,12 +10,20 @@ import type * as MonacoApi from 'monaco-editor';
 import type { AppSettings, EditorDocument, GitFileDiff } from '../../shared/contracts.js';
 import { diffKey } from '../../shared/git.js';
 import { baseName, byId, clear, el } from '../dom.js';
-import { isReadOnly, PendingOperations, readOnlyMessage, type EditorContext } from '../editor-state.js';
+import {
+  ConfirmationLock,
+  isReadOnly,
+  PendingOperations,
+  readOnlyMessage,
+  unsavedChangesMessage,
+  type EditorContext,
+} from '../editor-state.js';
 import { didChange, didClose, didOpen, didSave } from '../lsp-bridge.js';
 import { iconForFile } from '../file-icons.js';
 import { icon } from '../icons.js';
 import { installTagAutoClose } from '../languages/razor.js';
 import { DARK_THEME, getMonaco, LIGHT_THEME } from '../monaco-setup.js';
+import { confirmDialog } from './confirm-dialog.js';
 
 export interface OpenTab {
   path: string;
@@ -81,6 +89,15 @@ export class EditorView {
    * recalcula el estado del editor, y para poder afirmar que ninguna se queda colgada.
    */
   private readonly pending = new PendingOperations();
+
+  /**
+   * Cerrojo de las confirmaciones de cierre.
+   *
+   * Como mucho hay un aviso de "cambios sin guardar" en pantalla, y se suelta pase lo que pase.
+   * Ver `ConfirmationLock`: apilar modales sobre el mismo editor era la otra forma de que el
+   * teclado dejara de llegar a Monaco.
+   */
+  private readonly closeLock = new ConfirmationLock();
 
   /** Ids de decoración por archivo, necesarios para reemplazarlas sin duplicar. */
   private readonly breakpointDecorations = new Map<string, string[]>();
@@ -316,14 +333,46 @@ export class EditorView {
     this.editor.focus();
   }
 
+  /**
+   * Pregunta si se puede cerrar una pestaña con cambios sin guardar.
+   *
+   * Todo el cuidado del método está en el `finally`, y no es ceremonia: mientras el modal está
+   * abierto el foco vive en su botón y **no vuelve solo** al `<textarea>` oculto sobre el que
+   * Monaco escucha el teclado. Sin devolverlo, el editor se queda exactamente en el estado que se
+   * veía como "sólo deja borrar": las teclas que el navegador entrega como comandos (Retroceso,
+   * Suprimir, las flechas) siguen llegando y las que llegan como entrada de texto, no.
+   *
+   * Y se recalcula además el estado de escritura, porque la otra mitad del fallo era el `readOnly`
+   * pegajoso de Monaco (ver `editor-state.ts`). Recalcular aquí no cuesta nada y cierra la puerta a
+   * que un camino que muera a medias deje el editor mudo el resto de la sesión.
+   */
+  private async confirmDiscard(tab: OpenTab): Promise<boolean> {
+    try {
+      // Si ya hay un aviso abierto, la respuesta es "no cierres": es la prudente y, sobre todo, no
+      // apila un segundo modal encima del primero.
+      return await this.closeLock.run(
+        () =>
+          confirmDialog({
+            title: 'Cambios sin guardar',
+            message: unsavedChangesMessage(tab.name),
+            detail: tab.path,
+            confirmLabel: 'Cerrar sin guardar',
+            cancelLabel: 'Seguir editando',
+            tone: 'danger',
+          }),
+        false,
+      );
+    } finally {
+      this.refreshEditability();
+      this.editor?.focus();
+    }
+  }
+
   async close(path: string): Promise<boolean> {
     const tab = this.tabs.get(path);
     if (!tab) return true;
 
-    if (tab.dirty) {
-      const confirmed = window.confirm(`"${tab.name}" tiene cambios sin guardar.\n\n¿Cerrar de todos modos?`);
-      if (!confirmed) return false;
-    }
+    if (tab.dirty && !(await this.confirmDiscard(tab))) return false;
 
     didClose(tab.path);
     tab.model.dispose();

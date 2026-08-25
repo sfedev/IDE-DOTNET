@@ -496,6 +496,27 @@ const UI_ACTIONS: Record<string, string> = {
   'git-diff':
     "document.querySelector('.activity-item[data-tool-id=git]')?.click();" +
     "setTimeout(() => document.querySelector('.git-row')?.click(), 700)",
+  /**
+   * Fase 21: el aviso de cambios sin guardar, en pantalla.
+   *
+   * Abre el primer archivo del árbol, **escribe en él con el propio Monaco** —`trigger('type')`
+   * pasa por la misma tubería que una tecla, y por tanto respeta `readOnly`— y pulsa el aspa de la
+   * pestaña. Así el diálogo aparece por el mismo camino por el que aparece para un usuario, y no
+   * llamando a nada desde fuera.
+   *
+   * Con `--probe=` detrás se contesta al diálogo y se vuelve a escribir: es la única forma de
+   * comprobar de verdad que el editor recupera el teclado, que es el fallo que se estaba
+   * arreglando y que no se ve en una captura.
+   */
+  unsaved:
+    "[...document.querySelectorAll('.tree-row')].find((row) => /\\.(cs|md|json)$/.test(row.textContent.trim()))?.click();" +
+    'setTimeout(() => {' +
+    '  const editor = monaco.editor.getEditors()[0];' +
+    '  if (!editor) return;' +
+    '  editor.focus();' +
+    "  editor.trigger('keyboard', 'type', { text: '// sucio' });" +
+    "  setTimeout(() => document.querySelector('.tab.active .tab-close')?.click(), 600);" +
+    '}, 2000)',
   nesting:
     "[...document.querySelectorAll('.tree-row')]" +
     ".find((row) => row.textContent?.includes('appsettings.json'))" +

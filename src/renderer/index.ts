@@ -61,6 +61,8 @@ import { WelcomeView } from './views/welcome.js';
 import { WizardView } from './views/wizard.js';
 import { ExtensionsView } from './views/extensions.js';
 import { UpdateCard } from './views/update-card.js';
+import { askDialog, type DialogChoice } from './views/confirm-dialog.js';
+import { ConfirmationLock } from './editor-state.js';
 
 type SidebarView =
   | 'explorer'
@@ -91,6 +93,18 @@ class DotForgeApp {
 
   /** true entre que el depurador arranca de verdad y termina. Ver `onDebugState`. */
   private debugSessionActive = false;
+
+  /**
+   * El usuario ya ha contestado al aviso de cierre y la ventana se está yendo.
+   *
+   * Sin este pestillo, el `window.close()` que sigue a la respuesta vuelve a disparar
+   * `beforeunload`, encuentra las mismas pestañas sucias y pregunta otra vez: un bucle del que
+   * sólo se sale matando el proceso.
+   */
+  private closing = false;
+
+  /** Como mucho un aviso de cierre en pantalla, y se suelta pase lo que pase. */
+  private readonly closeLock = new ConfirmationLock();
   private gitTimer: number | undefined;
 
   /** Ramas del repositorio, para el autocompletado de la terminal. Se refrescan con el estado. */
@@ -409,6 +423,49 @@ class DotForgeApp {
   private async openSolutionDialog(): Promise<void> {
     const path = await window.dotforge.workspace.openSolutionDialog();
     if (path) await this.openWorkspace(path);
+  }
+
+  /**
+   * Pregunta qué hacer con lo que está sin guardar y cierra la ventana si procede.
+   *
+   * Tres respuestas, porque "no guardar" y "cancelar" no son lo mismo y con dos botones hay que
+   * negarle una de las tres al usuario. Si guardar falla —en Windows basta con que MSBuild tenga
+   * el archivo abierto— **no se cierra**: perder el trabajo por un error que nadie ha llegado a
+   * leer es exactamente lo que este aviso existe para evitar.
+   */
+  private async confirmClose(): Promise<void> {
+    const dirty = this.editor.listTabs().filter((tab) => tab.dirty);
+    if (dirty.length === 0) return;
+
+    const answer = await this.closeLock.run(
+      () =>
+        askDialog({
+          title: 'Cambios sin guardar',
+          message:
+            dirty.length === 1
+              ? `"${dirty[0]?.name}" tiene cambios sin guardar.`
+              : `${dirty.length} archivos tienen cambios sin guardar.`,
+          detail: dirty.map((tab) => tab.name).join(', '),
+          confirmLabel: 'Guardar y cerrar',
+          alternateLabel: 'Cerrar sin guardar',
+          cancelLabel: 'Seguir editando',
+        }),
+      'cancel' as DialogChoice,
+    );
+
+    if (answer === 'cancel') return;
+
+    if (answer === 'confirm') {
+      try {
+        await this.editor.saveAll();
+      } catch (error) {
+        this.notify(`No se ha podido guardar: ${this.messageOf(error)}. La ventana sigue abierta.`, 'error');
+        return;
+      }
+    }
+
+    this.closing = true;
+    window.close();
   }
 
   /**
@@ -2799,12 +2856,22 @@ class DotForgeApp {
       this.metricsView.applyEvent(state, samples, at);
     });
 
-    // Avisar de cambios sin guardar antes de cerrar la ventana.
+    /**
+     * Cerrar la ventana con cambios sin guardar.
+     *
+     * Antes esto sólo llamaba a `preventDefault()`, y en Electron eso **no** enseña ningún diálogo:
+     * Chromium tiene el suyo desactivado, así que el aspa de la ventana dejaba de funcionar y no
+     * aparecía nada que explicase por qué. El IDE se quedaba, a ojos del usuario, colgado.
+     *
+     * Ahora se para el cierre, se pregunta con el diálogo propio —que es asíncrono y no bloquea el
+     * renderer— y se vuelve a cerrar con el pestillo `closing` puesto para no volver a preguntar.
+     */
     window.addEventListener('beforeunload', (event) => {
-      if (this.editor.hasDirtyTabs()) {
-        event.preventDefault();
-        event.returnValue = '';
-      }
+      if (this.closing || !this.editor.hasDirtyTabs()) return;
+
+      event.preventDefault();
+      event.returnValue = '';
+      void this.confirmClose();
     });
   }
 

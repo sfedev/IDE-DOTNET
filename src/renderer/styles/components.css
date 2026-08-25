@@ -969,6 +969,27 @@ select.input {
   flex: 1;
 }
 
+/* Confirmación: un cuadro estrecho, sin cuerpo. Todo lo que hay que leer cabe en la cabecera. */
+.confirm-dialog {
+  width: min(460px, 92vw);
+}
+
+.confirm-dialog .dialog-footer {
+  justify-content: flex-end;
+}
+
+/* Lo que destruye algo se marca en rojo. Es el único sitio donde el acento no es el violeta. */
+.dialog-mark.danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.confirm-detail {
+  margin-top: 6px !important;
+  color: var(--text-faint) !important;
+  font-size: var(--text-xs) !important;
+}
+
 .dialog-body {
   flex: 1;
   overflow: auto;
