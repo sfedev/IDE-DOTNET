@@ -14,6 +14,11 @@ Su módulo estrella es el **Scaffolding Wizard**: un generador de arquitecturas 
 que produce soluciones .NET **compilables y ejecutables** siguiendo Clean Architecture,
 Arquitectura Hexagonal (Ports & Adapters) o Domain-Driven Design + CQRS.
 
+En la rama principal, **todavía sin publicar** (será la v2.6.0): la CI **publica la release** —un tag
+SemVer, una release en GitHub con sus binarios y sus notas, y el actualizador in-app con algo que
+ofrecer por primera vez desde que existe— y el panel de terminal **vuelve como se dejó**: las
+pestañas de cada solución, con su intérprete y su directorio, se recuerdan y se reabren.
+
 Desde la v2.5.0 la terminal **abre varias pestañas y elige intérprete**: PowerShell, el símbolo del
 sistema o la terminal asistida de siempre, cada una en la suya, con colores, `Ctrl+C` y
 autocompletado nativo (`node-pty` + `xterm.js`). Y trae dos arreglos de arranque que dolían: los
@@ -121,6 +126,7 @@ IDE-DOTNET/
 │   │   ├── file-search.ts      # * Buscar en los archivos: qué casa, qué entra y cómo se recorta (puro)
 │   │   ├── terminal-cwd.ts     # * Navegación de la terminal: qué es un `cd` y cómo se pinta (puro)
 │   │   ├── terminal-profiles.ts # * Perfiles de terminal: catálogo, plataforma y nombre de pestaña (puro)
+│   │   ├── terminal-layout.ts  # * Pestañas guardadas: saneado y plan de reapertura (puro)
 │   │   ├── json-text.ts        # * JSON escrito por otras herramientas: la marca de orden de bytes (puro)
 │   │   ├── menu-template.ts    # * Contenido de la barra de menú, con aceleradores de roles (puro)
 │   │   ├── nuget-install.ts    # * Instalar un paquete en varios proyectos: plan y progreso (puro)
@@ -144,6 +150,7 @@ IDE-DOTNET/
 │   │   ├── ipc/register.ts     # ÚNICA superficie expuesta al renderer
 │   │   ├── services/terminal-session.ts  # Directorio de trabajo de la terminal (resuelve y valida)
 │   │   ├── services/terminal-pty-service.ts # Sesiones de pseudoterminal (node-pty, opcional)
+│   │   ├── services/terminal-layout-store.ts # Pestañas recordadas, una entrada por solución
 │   │   ├── services/           # Solución, NuGet, tareas dotnet, terminal, rutas, ZIP, settings,
 │   │   │                       # git-service.ts (estado y operaciones de control de fuentes),
 │   │   │                       # efcore-service.ts (dotnet ef + migraciones del disco),
@@ -549,6 +556,25 @@ npx electron . --smoke-test
   último que escribió es lo único que lo explica.
 - xterm **no se bundlea**, como Monaco: se sirve desde `build/vendor/xterm/`. Sus `<script>` van
   **antes** que el loader AMD de Monaco en `index.html`; ver la sección de trampas.
+
+### Pestañas recordadas (`src/shared/terminal-layout.ts`, `src/main/services/terminal-layout-store.ts`)
+
+- **Se restaura la disposición, no la sesión** (ADR-061). Perfiles, orden, cuál estaba delante y el
+  directorio: no el histórico ni lo que estuviera corriendo, que no se puede. El ajuste
+  "Restaurar las pestañas" lo dice con esas palabras; hay un interruptor porque a quien tenía tres
+  PowerShell a medias eso le sobra.
+- **El `cwd` no llega del renderer.** Es la puerta de atrás al ADR-059: si llegara, volvería del
+  disco convertido en el directorio de un intérprete real sin haber tocado `terminal:create`. El
+  canal de guardado acepta identificadores de perfil y un índice; el directorio lo pone la sesión de
+  la terminal y la clave, `getWorkspaceRoot()`.
+- **Lo leído del disco se sanea igual que lo recibido del renderer**: ese identificador decide qué
+  intérprete se lanza, y el archivo lo escribe una versión del IDE y lo lee otra.
+- **Se anota en cada cambio de pestaña, no al cerrar.** Abrir otra solución cambia la clave con la
+  que se guarda; "guardar al salir" sería una carrera con el cambio de workspace.
+- **La pestaña asistida del arranque se consume, no se acompaña.** Ver la sección de trampas: es de
+  los errores que crecen en silencio.
+- Cambiar de solución con terminales abiertas **no** las cierra: sólo se restaura sobre un panel
+  intacto.
 
 ### Barra de menú (`src/shared/menu-template.ts`, `src/main/menu.ts`)
 
@@ -1066,6 +1092,16 @@ npm run fetch:toolchain -- --platform win32 --arch x64
 - **`dotnet run` sin `--launch-profile` aplica el primer perfil del archivo**, que en las plantillas
   del SDK es el de HTTP. El IDE resolvía el perfil de HTTPS, lo enseñaba, y arrancaba el otro: la
   aplicación escuchaba en un puerto distinto del que se anunciaba y todo lo demás parecía correcto.
+- **Restaurar sobre algo que ya está ahí lo duplica, y lo guardado crece solo.** El panel de
+  terminal arranca con una pestaña asistida; reabrir encima las guardadas y quitar la del arranque
+  *después* —y sólo si la disposición no incluía una asistida, que es el caso más normal— deja dos.
+  Y como al terminar se vuelve a anotar, la de más queda guardada: una más por cada apertura, sin
+  ningún error. La regla general: al restaurar un estado, **vaciar primero** y devolver el valor
+  inicial sólo si no ha entrado nada. Se ve midiendo dos reaperturas seguidas, nunca en una.
+- **Un guardia de longitud fija el tipo para el resto de la función.** `if (lista.length !== 1)
+  return;` deja `length` narrowed al literal `1`, y un `length === 0` posterior —perfectamente
+  alcanzable, porque los `await` de en medio modifican la lista— sale como `TS2367: types '1' and
+  '0' have no overlap`, que se lee como si el código fuera imposible. Se compara `> 1`.
 - **Una regla estructural sólo vigila la lista que le pasas.** La prueba que exige que ningún
   adquisidor escriba cabeceras a mano (ADR-050) llevaba dos módulos en su lista y el tercero
   —`updater-service.ts`, que hace exactamente el mismo par de peticiones— nació después y nunca se

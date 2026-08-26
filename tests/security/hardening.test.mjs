@@ -723,6 +723,35 @@ describe('pseudoterminales', () => {
     assert.doesNotMatch(handler, /cwd:\s*(requireString|assertInsideWorkspace)/);
   });
 
+  /**
+   * La disposición guardada es la puerta de atrás evidente a la garantía anterior.
+   *
+   * Si el renderer mandara el `cwd` al guardar, ese valor volvería al disco, y al restaurar sería
+   * el directorio de un intérprete real: el ADR-059 se habría perdido sin tocar `terminal:create`.
+   * Por eso el canal de guardado acepta perfiles y un índice, y nada más.
+   */
+  it('la disposición guardada no puede colar un directorio del renderer', () => {
+    const handler = register.slice(
+      register.indexOf('IPC.terminalLayoutSave'),
+      register.indexOf('IPC.terminalLayoutRestore'),
+    );
+
+    assert.match(handler, /coerceIncomingLayout\(patch, process\.platform\)/, 'lo que llega no se sanea');
+    assert.match(handler, /cwd: terminalSession\.cwd\(\)\.path/, 'el directorio no sale de la sesión');
+    assert.doesNotMatch(handler, /patch\.cwd|\.cwd\s*=\s*requireString/, 'el renderer manda un directorio');
+
+    // Y la clave tampoco: la pone el guardián de rutas, como la raíz de la búsqueda (ADR-057).
+    assert.match(handler, /const workspace = getWorkspaceRoot\(\)/);
+  });
+
+  it('un perfil guardado por otra versión no puede lanzar cualquier cosa', () => {
+    // El archivo lo escribe una versión del IDE y lo lee otra, y acaba decidiendo qué intérprete
+    // se abre: se sanea al leerlo del disco con el mismo `coerceProfileId` que al recibirlo.
+    const layout = readSource('src/shared/terminal-layout.ts');
+    assert.match(layout, /coerceProfileId\(entry, platform\)/);
+    assert.doesNotMatch(layout, /\bfile\b\s*:/, 'la disposición no guarda rutas de ejecutable');
+  });
+
   it('los argumentos del intérprete son los del catálogo, ya troceados', () => {
     // Nunca una línea de shell, ni siquiera aquí: el intérprete se lanza con su array de argumentos
     // y lo que el usuario escriba va por la entrada estándar, que es otra cosa.

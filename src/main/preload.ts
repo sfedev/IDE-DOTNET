@@ -54,6 +54,7 @@ import type {
   TerminalCwd,
   TerminalDataEvent,
   TerminalExitEvent,
+  TerminalLayoutRestore,
   TerminalProfileInfo,
   TerminalRunResult,
   TerminalSessionInfo,
@@ -193,6 +194,8 @@ const api: DotForgeApi = {
     resize: (terminalId, columns, rows) =>
       ipcRenderer.invoke(IPC.terminalResize, terminalId, columns, rows) as Promise<boolean>,
     dispose: (terminalId) => ipcRenderer.invoke(IPC.terminalDispose, terminalId) as Promise<boolean>,
+    saveLayout: (layout) => ipcRenderer.invoke(IPC.terminalLayoutSave, layout) as Promise<void>,
+    restoreLayout: () => ipcRenderer.invoke(IPC.terminalLayoutRestore) as Promise<TerminalLayoutRestore>,
   },
 
   nuget: {

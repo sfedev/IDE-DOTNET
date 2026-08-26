@@ -97,6 +97,26 @@ export * as ptyService from './services/terminal-pty-service.js';
 export { MAX_PTY_SESSIONS, MAX_WRITE_CHARS, PtyUnavailableError } from './services/terminal-pty-service.js';
 
 /**
+ * Disposición de las pestañas de terminal por solución.
+ *
+ * El modelo es puro y el almacén escribe un JSON en `userData`: se exporta el módulo entero porque
+ * su estado es de proceso (lo leído, cacheado) y las pruebas necesitan poder inicializarlo contra
+ * un directorio temporal y volver a leer del disco.
+ */
+export {
+  coerceIncomingLayout,
+  coerceStoredLayout,
+  emptyLayout,
+  isRestorable,
+  MAX_REMEMBERED_WORKSPACES,
+  MAX_RESTORED_TABS,
+  restorablePlan,
+} from '../shared/terminal-layout.js';
+export type { TerminalLayout } from '../shared/terminal-layout.js';
+
+export * as terminalLayoutStore from './services/terminal-layout-store.js';
+
+/**
  * Contenido de la barra de menú.
  *
  * Vive como dato puro para poder comprobar lo que se rompe en silencio: un menú que manda un

@@ -265,6 +265,8 @@ export class PanelView {
 
   private activeTerminal = 'term-0';
   private terminalCounter = 0;
+  /** Restaurando la disposición guardada: no se vuelve a anotar lo que se está reabriendo. */
+  private restoring = false;
   private terminalProfiles: TerminalProfileInfo[] = [];
   private profileMenuOpen = false;
 
@@ -1565,6 +1567,7 @@ export class PanelView {
     if (profile.kind === 'lite') {
       this.terminals.push({ id, profileId, label, kind: 'lite', terminalId: null, host: null, term: null, fit: null, exited: false });
       this.showTerminal(id);
+      this.saveTerminalLayout();
       return;
     }
 
@@ -1608,6 +1611,98 @@ export class PanelView {
 
     this.terminals.push(terminal);
     this.showTerminal(id);
+    this.saveTerminalLayout();
+  }
+
+  /**
+   * Vuelve a abrir las pestañas que tenía esta solución.
+   *
+   * Se llama al abrir una solución. Lo que llega ya viene filtrado por el proceso principal: si el
+   * ajuste está apagado, si no hay nada guardado o si lo guardado era ya lo que hay por defecto, la
+   * lista viene vacía y aquí no pasa nada.
+   *
+   * Restaurar es reabrir un intérprete **vacío** en el mismo directorio: no vuelve el histórico ni
+   * lo que estuviera corriendo.
+   *
+   * La pestaña asistida con la que arranca el panel se **retira antes** de reabrir nada, no
+   * después. Dejarla puesta y quitarla al final sólo si la disposición no la incluía sale mal en el
+   * caso más normal de todos: una disposición que sí incluye una asistida acaba con dos, la del
+   * arranque y la reabierta. Y como la disposición se vuelve a anotar al terminar, esa de más queda
+   * guardada y crece una por cada vez que se abre la solución. Si no entra ninguna —sin `node-pty`
+   * no se abre una pestaña de intérprete—, se devuelve: un panel de terminal sin ninguna pestaña no
+   * es un estado que el IDE sepa enseñar.
+   */
+  async restoreTerminals(): Promise<void> {
+    // Sólo sobre un panel intacto. Cambiar de solución con terminales ya abiertas no las cierra:
+    // dentro de una puede haber un `dotnet watch` corriendo, y llevárselo por delante para reabrir
+    // una pestaña vacía es un intercambio malísimo. Las que se abran a partir de ahí se anotan ya
+    // en la solución nueva, que es lo que hace falta para la próxima vez.
+    //
+    // `restoring` cierra además la puerta a entrar dos veces a la vez: abrir una solución llega por
+    // dos caminos (la llamada directa y el evento del proceso principal) y las dos pasarían este
+    // guardia mientras la primera está esperando a su primera pestaña.
+    if (this.restoring) return;
+    if (this.terminals.length > 1 || this.terminals[0]?.kind !== 'lite') return;
+
+    this.restoring = true;
+
+    let plan;
+    try {
+      plan = await window.dotforge.terminal.restoreLayout();
+    } catch {
+      this.restoring = false;
+      return;
+    }
+
+    if (plan.tabs.length === 0) {
+      this.restoring = false;
+      return;
+    }
+
+    const bootstrap = this.terminals.splice(0, 1);
+
+    try {
+      for (const profileId of plan.tabs) await this.openTerminal(profileId);
+    } finally {
+      // Si no ha entrado ninguna, la del arranque vuelve a su sitio.
+      if (this.terminals.length === 0) this.terminals.push(...bootstrap);
+      this.restoring = false;
+    }
+
+    const active = this.terminals[Math.min(plan.activeIndex, this.terminals.length - 1)];
+    if (active) this.activeTerminal = active.id;
+
+    if (plan.skipped > 0) {
+      this.host.notify(
+        `${plan.skipped} ${plan.skipped === 1 ? 'terminal guardada' : 'terminales guardadas'} no se ${plan.skipped === 1 ? 'ha' : 'han'} podido reabrir: no hay pseudoterminales disponibles.`,
+        'warn',
+      );
+    }
+
+    this.saveTerminalLayout();
+    this.render();
+  }
+
+  /**
+   * Anota qué pestañas hay abiertas.
+   *
+   * En cada cambio, no al cerrar: abrir otra solución cambia la clave con la que se guarda, y
+   * capturar el estado justo antes de ese cambio es una carrera. Guardando en el momento, la
+   * anotación siempre está al día. No se espera al resultado: es estado de comodidad, y un fallo
+   * al escribirlo no puede interrumpir lo que el usuario estaba haciendo.
+   */
+  private saveTerminalLayout(): void {
+    if (this.restoring) return;
+
+    void window.dotforge.terminal
+      .saveLayout({
+        tabs: this.terminals.map((terminal) => terminal.profileId),
+        activeIndex: Math.max(
+          0,
+          this.terminals.findIndex((terminal) => terminal.id === this.activeTerminal),
+        ),
+      })
+      .catch(() => undefined);
   }
 
   /** Activa una pestaña de terminal. */
@@ -1616,6 +1711,7 @@ export class PanelView {
 
     this.activeTerminal = id;
     this.profileMenuOpen = false;
+    this.saveTerminalLayout();
     this.render();
     this.focusTerminal();
   }
@@ -1640,6 +1736,7 @@ export class PanelView {
       this.activeTerminal = this.terminals[Math.min(index, this.terminals.length - 1)]?.id ?? '';
     }
 
+    this.saveTerminalLayout();
     this.render();
   }
 

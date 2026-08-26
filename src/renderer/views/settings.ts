@@ -115,6 +115,18 @@ export class SettingsView {
         }),
       ]),
 
+      this.group('Terminal', [
+        this.toggleRow('Restaurar las pestañas al abrir una solución', settings.restoreTerminals, (value) =>
+          this.host.apply({ restoreTerminals: value }),
+        ),
+        el('p', {
+          className: 'settings-note',
+          text:
+            'Vuelve a abrir las mismas pestañas, con su intérprete y en el mismo directorio. No ' +
+            'recupera lo que hubiera escrito ni lo que estuviera corriendo: son terminales nuevas.',
+        }),
+      ]),
+
       this.updatesGroup(settings.autoUpdateCheck),
 
       this.aiGroup(settings.ai),

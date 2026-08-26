@@ -534,6 +534,25 @@ export interface TerminalExitEvent {
 }
 
 /**
+ * Disposición de pestañas que el renderer manda para guardar.
+ *
+ * Sólo perfiles y cuál estaba delante. El directorio **no va aquí**: lo pone el proceso principal
+ * desde la sesión de la terminal, igual que al abrir una pestaña (ADR-059).
+ */
+export interface TerminalLayoutPatch {
+  tabs: string[];
+  activeIndex: number;
+}
+
+/** Lo que hay que volver a abrir al entrar en una solución. */
+export interface TerminalLayoutRestore {
+  tabs: string[];
+  activeIndex: number;
+  /** Cuántas pestañas guardadas no se pueden reabrir aquí (sin `node-pty`, por ejemplo). */
+  skipped: number;
+}
+
+/**
  * Estado del motor de Docker.
  *
  * Que Docker no esté instalado o no esté arrancado es un estado normal, no un error: se devuelve
@@ -604,6 +623,15 @@ export interface AppSettings {
    */
   autoUpdateCheck: boolean;
   /**
+   * Volver a abrir las pestañas de terminal de la solución al abrirla.
+   *
+   * Existe apagado porque restaurar una terminal es, como mucho, reabrirla **vacía** en el mismo
+   * directorio: no vuelve el histórico ni lo que estuviera corriendo. A quien tenía tres
+   * PowerShell a medias eso le reabre tres PowerShell que no son los suyos, y prefiere el panel
+   * limpio. Apagarlo no borra lo guardado: se sigue anotando, por si se vuelve a encender.
+   */
+  restoreTerminals: boolean;
+  /**
    * Personalización de la barra de actividad.
    *
    * `order` son identificadores de herramienta (`ACTIVITY_TOOLS` en `src/shared/activity-bar.ts`),
@@ -633,6 +661,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   lspEnabled: true,
   dotnetVerbosity: DEFAULT_DOTNET_VERBOSITY,
   autoUpdateCheck: true,
+  restoreTerminals: true,
   activityBar: { order: DEFAULT_ACTIVITY_ORDER },
   ai: DEFAULT_AI_SETTINGS,
 };
@@ -715,6 +744,8 @@ export const IPC = {
   terminalWrite: 'terminal:write',
   terminalResize: 'terminal:resize',
   terminalDispose: 'terminal:dispose',
+  terminalLayoutSave: 'terminal:layout-save',
+  terminalLayoutRestore: 'terminal:layout-restore',
 
   nugetSearch: 'nuget:search',
   nugetVersions: 'nuget:versions',
@@ -1043,6 +1074,24 @@ export interface DotForgeApi {
 
     /** Cierra la sesión y mata su árbol de procesos. */
     dispose(terminalId: string): Promise<boolean>;
+
+    /**
+     * Guarda qué pestañas hay abiertas en la solución actual.
+     *
+     * Se llama en cada cambio de pestaña, no al cerrar: abrir otra solución cambia la clave con la
+     * que se guarda, y capturar el estado justo antes de ese cambio es una carrera. Sin solución
+     * abierta no hace nada.
+     */
+    saveLayout(layout: TerminalLayoutPatch): Promise<void>;
+
+    /**
+     * Qué pestañas volver a abrir en la solución actual.
+     *
+     * Devuelve la lista vacía si no hay nada guardado, si el ajuste está desactivado o si lo
+     * guardado era ya lo que hay por defecto. Restaurar es reabrir un intérprete **vacío** en el
+     * mismo directorio: no vuelve el histórico ni lo que estuviera corriendo.
+     */
+    restoreLayout(): Promise<TerminalLayoutRestore>;
   };
   nuget: {
     search(query: string, includePrerelease: boolean): Promise<NuGetSearchResult[]>;

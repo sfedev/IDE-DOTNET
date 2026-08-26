@@ -28,6 +28,7 @@ import * as ptyService from './services/terminal-pty-service.js';
 import * as processRegistry from './services/process-registry.js';
 import * as settingsService from './services/settings-service.js';
 import * as startupService from './services/startup-service.js';
+import * as terminalLayoutStore from './services/terminal-layout-store.js';
 import * as updaterService from './services/updater-service.js';
 import * as extensionInstaller from './services/extension-installer.js';
 import { STARTUP_CHECK_DELAY_MS } from '../shared/updates.js';
@@ -694,6 +695,7 @@ app.on('second-instance', () => {
 app.whenReady().then(async () => {
   settingsService.initialize(app.getPath('userData'));
   startupService.initialize(app.getPath('userData'));
+  terminalLayoutStore.initialize(app.getPath('userData'));
   aiSecrets.initialize(app.getPath('userData'));
   await settingsService.load();
   await aiSecrets.load();

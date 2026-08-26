@@ -30,6 +30,7 @@ import type {
   TerminalCwd,
   TerminalProfileInfo,
   TerminalRunResult,
+  TerminalLayoutRestore,
   TerminalSessionInfo,
 } from '../../shared/contracts.js';
 import type { GitDiffRequest } from '../../shared/git.js';
@@ -47,6 +48,7 @@ import type { InstalledExtension } from '../../shared/vsix.js';
 import type { SearchSummary } from '../../shared/file-search.js';
 import { coerceSearchOptions } from '../../shared/file-search.js';
 import { coerceProfileId, profilesFor } from '../../shared/terminal-profiles.js';
+import { coerceIncomingLayout, isRestorable, restorablePlan } from '../../shared/terminal-layout.js';
 import { describeFault, type ServerFault } from '../../shared/lsp-health.js';
 import { legendFromCapabilities } from '../../shared/semantic-tokens.js';
 import { filterForClass, filterForTests } from '../../shared/test-explorer.js';
@@ -74,6 +76,7 @@ import * as aiSecrets from '../services/ai/secret-store.js';
 import { AiRequestError, coerceChatRequest } from '../services/ai/validate.js';
 import * as commandRunner from '../services/command-runner.js';
 import * as terminalSession from '../services/terminal-session.js';
+import * as terminalLayoutStore from '../services/terminal-layout-store.js';
 import * as ptyService from '../services/terminal-pty-service.js';
 import { installApplicationMenu } from '../menu.js';
 import * as dockerService from '../services/docker-service.js';
@@ -1032,6 +1035,47 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IPC.terminalDispose, (_event, terminalId: unknown): boolean =>
     ptyService.dispose(requireString(terminalId, 'terminalId')),
   );
+
+  /**
+   * Guarda la disposición de las pestañas de la solución actual.
+   *
+   * Del renderer llega **sólo** la lista de perfiles y cuál estaba delante, y pasa entera por
+   * `coerceIncomingLayout`. Ni la clave ni el directorio llegan de ahí: la primera la pone el
+   * guardián de rutas y el segundo la sesión de la terminal, exactamente igual que al abrir una
+   * pestaña. Si el renderer pudiera mandar un `cwd`, la garantía del ADR-059 se habría perdido por
+   * la puerta de atrás: al restaurar, ese `cwd` sería el directorio de un intérprete real.
+   */
+  ipcMain.handle(IPC.terminalLayoutSave, async (_event, patch: unknown): Promise<void> => {
+    const workspace = getWorkspaceRoot();
+    if (workspace === null) return;
+
+    const { tabs, activeIndex } = coerceIncomingLayout(patch, process.platform);
+    await terminalLayoutStore.save(workspace, { tabs, activeIndex, cwd: terminalSession.cwd().path }, process.platform);
+  });
+
+  /**
+   * Qué pestañas reabrir en la solución actual.
+   *
+   * El directorio guardado se aplica a la sesión **antes** de contestar, para que las pestañas que
+   * abra el renderer a continuación nazcan donde estaba el usuario. Se aplica con el mismo camino
+   * que un `cd`, así que una carpeta que ya no existe no se aplica: se responde desde la raíz de
+   * la solución, que es donde la sesión ya está.
+   */
+  ipcMain.handle(IPC.terminalLayoutRestore, async (): Promise<TerminalLayoutRestore> => {
+    const workspace = getWorkspaceRoot();
+    if (workspace === null || !settingsService.current().restoreTerminals) {
+      return { tabs: [], activeIndex: 0, skipped: 0 };
+    }
+
+    const layout = await terminalLayoutStore.load(workspace, process.platform);
+    if (!isRestorable(layout)) return { tabs: [], activeIndex: 0, skipped: 0 };
+
+    if (layout.cwd !== null) {
+      await terminalSession.changeDirectory(layout.cwd).catch(() => undefined);
+    }
+
+    return restorablePlan(layout, { ptyAvailable: ptyService.availability().available });
+  });
 
   // --- NuGet ----------------------------------------------------------------------------------
   ipcMain.handle(IPC.nugetSearch, (_event, query: unknown, includePrerelease: unknown) =>

@@ -565,6 +565,9 @@ class DotForgeApp {
     this.lintArchitecture();
     void this.loadStartupConfig();
     void this.refreshTerminalContext();
+    // Las pestañas de terminal que tenía esta solución. Sólo entra si el panel está intacto; lo
+    // decide el propio panel, que es quien sabe qué hay abierto.
+    if (solution) void this.panel.restoreTerminals();
 
     if (solution) {
       this.notify(

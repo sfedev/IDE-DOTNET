@@ -4,7 +4,7 @@ Bitácora viva de desarrollo. Se actualiza **en cada iteración** del bucle de t
 
 - **Proyecto:** DotForge IDE — distribución de IDE para C# / .NET 9+ / Blazor
 - **Inicio:** 2026-08-23
-- **Estado global:** 🟢 v2.5.0 — 22 fases cerradas, 319/320 hitos. El único pendiente (F5.7, artefactos de macOS) está bloqueado por plataforma y documentado en la Fase 5.
+- **Estado global:** 🟢 v2.5.0 — 23 fases cerradas, 328/329 hitos. El único pendiente (F5.7, artefactos de macOS) está bloqueado por plataforma y documentado en la Fase 5.
 
 Leyenda: `[ ]` pendiente · `[~]` en curso · `[x]` completado y **verificado con un comando**
 
@@ -497,6 +497,26 @@ por tanto **compila** pero no **ejecuta** los proyectos generados. Se añade el 
       incluido), 10 del contrato del workflow y 1 del alcance del agente
 - [x] F22.12 Verificado ejecutando los pasos del workflow: los cinco caminos de resolución del tag y
       los cuatro escenarios de publicación contra un `gh` de mentira
+
+### Fase 23 — Persistencia de las pestañas de terminal
+- [x] F23.1 `src/shared/terminal-layout.ts` (nuevo): modelo puro de la disposición, saneado de lo
+      que llega del renderer y del disco, y plan de reapertura (ADR-061)
+- [x] F23.2 `src/main/services/terminal-layout-store.ts` (nuevo): una entrada por solución en
+      `userData/terminal-layouts.json`, con poda por uso y lectura tolerante a la marca de orden de
+      bytes (ADR-058)
+- [x] F23.3 Canales `terminal:layout-save` y `terminal:layout-restore`; el `cwd` lo pone el proceso
+      principal desde la sesión de la terminal, nunca el renderer (ADR-059)
+- [x] F23.4 Se anota en cada cambio de pestaña, no al cerrar: abrir otra solución cambia la clave
+      con la que se guarda
+- [x] F23.5 El panel reabre las pestañas al abrir una solución, consumiendo la asistida del arranque
+      en vez de duplicarla, y sólo sobre un panel intacto
+- [x] F23.6 Un perfil que aquí no se puede abrir se salta y se dice cuántos, en vez de dejar
+      pestañas muertas
+- [x] F23.7 Ajuste "Restaurar las pestañas al abrir una solución", con la letra pequeña de qué
+      significa restaurar escrita al lado
+- [x] F23.8 Pruebas: 26 nuevas del modelo y del almacén, más 2 de seguridad de la superficie nueva
+- [x] F23.9 Verificado sobre la aplicación real: tres pestañas reabiertas en orden y con la activa
+      correcta, sin crecer entre reaperturas, y el ajuste apagado dejando el panel limpio
 
 ---
 
@@ -1019,6 +1039,54 @@ Iteración 31 lo dejó anotado como el bloqueante del siguiente ciclo.
 - **Publicar no es lo mismo que estar publicado.** El último paso pregunta a la API pública si la
   release aparece con al menos un artefacto. Es la diferencia entre comprobar la configuración y
   comprobar el resultado, que es la lección de la Iteración 31 con el empaquetado.
+
+---
+
+### ADR-061 — Las pestañas de terminal se restauran, y el archivo no puede colar un directorio
+**Fecha:** 2026-08-26
+**Contexto:** La Fase 21 dejó esto sin hacer a propósito, con un argumento que sigue siendo cierto:
+**restaurar una terminal es, como mucho, volver a abrirla vacía en el mismo directorio**. No vuelve
+el histórico, ni el proceso que estuviera corriendo, ni la línea a medio escribir. Y hay una razón
+técnica de fondo: el directorio *actual* de un intérprete detrás de un ConPTY no se puede consultar
+—el `cd` lo gobierna él—, así que lo único que se sabe de una pestaña es con qué perfil y en qué
+directorio **nació**. Lo que se pide de verdad, aun así, es real: al reabrir una solución uno espera
+encontrarse el panel como lo dejó.
+**Opciones:**
+- (a) no hacerlo, como hasta ahora;
+- (b) restaurar la disposición: perfiles, orden, cuál estaba delante y el directorio de la sesión;
+- (c) además, intentar recuperar el histórico de cada pestaña (grabar la salida y reproducirla);
+- (d) restaurar también al cambiar de solución con el IDE abierto, cerrando lo que hubiera.
+
+**Decisión:** (b), con un ajuste para apagarlo.
+**Consecuencias:**
+
+- **Se restaura la disposición, y se dice que es sólo eso.** El ajuste de Ajustes lleva la letra
+  pequeña escrita al lado: "no recupera lo que hubiera escrito ni lo que estuviera corriendo". El
+  argumento de la Fase 21 no se ha refutado, se ha convertido en un interruptor: a quien tenía tres
+  PowerShell a medias, reabrirle tres PowerShell que no son los suyos le sobra, y ahora puede
+  apagarlo. Apagarlo no borra lo guardado.
+- **(c) se descartó.** Reproducir la salida de un intérprete muerto pinta una sesión que parece viva
+  y no lo está: el prompt de arriba responde a un proceso que ya no existe. Es peor que un panel
+  vacío, porque miente.
+- **(d) también.** Cambiar de solución con terminales abiertas **no** las cierra: dentro de una
+  puede haber un `dotnet watch` corriendo, y llevárselo por delante para reabrir una pestaña vacía
+  es un intercambio malísimo. Sólo se restaura sobre un panel intacto.
+- **El `cwd` no llega del renderer, y ésa es la parte de seguridad.** Era la puerta de atrás
+  evidente al ADR-059: si el renderer mandara el directorio al guardar, ese valor volvería del
+  disco y sería el directorio de un intérprete real, sin haber tocado `terminal:create`. El canal de
+  guardado acepta identificadores de perfil y un índice, y nada más; el directorio lo pone el
+  proceso principal desde la sesión de la terminal y la clave la pone `getWorkspaceRoot()`. Hay una
+  prueba de seguridad por cada mitad.
+- **Lo guardado se sanea al leerlo**, no sólo al recibirlo: el archivo lo escribe una versión del
+  IDE y lo lee otra, y el identificador acaba decidiendo qué intérprete se lanza. Pasa por el mismo
+  `coerceProfileId` que ya trata un perfil desconocido como una migración y no como un error.
+- **Se anota en cada cambio, no al cerrar.** Abrir otra solución cambia la clave con la que se
+  guarda, así que "guardar al salir" obligaría a capturar el estado justo antes de ese cambio, que
+  es una carrera esperando a pasar. Anotando en el momento, la entrada siempre está al día y cambiar
+  de solución no tiene que hacer nada.
+- **Una pestaña que aquí no se puede abrir se salta y se dice.** Sin `node-pty`, una disposición de
+  tres PowerShell no puede dejar tres pestañas muertas con un mensaje dentro: se abre lo que se
+  puede y se avisa de cuántas se han quedado fuera y por qué (ADR-033, otra vez).
 
 ---
 
@@ -3778,3 +3846,85 @@ habría cambiado ese argumento.
 ```bash
 npm version 2.6.0 --no-git-tag-version && git commit -am "v2.6.0" && git tag v2.6.0 && git push --follow-tags
 ```
+
+---
+
+### Iteración 33 — 2026-08-26 — Fase 23: el panel de terminal vuelve como se dejó
+
+**Objetivo:** la segunda mitad del encargo, que la Fase 21 había dejado fuera con un argumento
+escrito. El argumento sigue siendo cierto —restaurar una terminal es, como mucho, volver a abrirla
+vacía en el mismo directorio— así que no se ha refutado: se ha convertido en un interruptor, con la
+letra pequeña dicha en el propio ajuste.
+
+**Hecho, archivo a archivo:**
+
+- `src/shared/terminal-layout.ts` (**nuevo**): el modelo. `coerceIncomingLayout` (lo que manda el
+  renderer), `coerceStoredLayout` (lo que hay en el disco), `isRestorable` y `restorablePlan`.
+- `src/main/services/terminal-layout-store.ts` (**nuevo**): una entrada por solución en
+  `userData/terminal-layouts.json`, poda por uso —no por antigüedad— y lectura con `parseJsonText`.
+- `src/shared/contracts.ts`, `src/main/preload.ts`, `src/main/ipc/register.ts`: dos canales nuevos
+  (`terminal:layout-save` y `terminal:layout-restore`) y el ajuste `restoreTerminals`.
+- `src/renderer/views/panel.ts`: `restoreTerminals()` y `saveTerminalLayout()`, enganchado a abrir,
+  cerrar y cambiar de pestaña.
+- `src/renderer/index.ts`: la reapertura cuelga de `applySolution`, que es lo que distingue abrir
+  otra solución de releer la misma.
+- `src/renderer/views/settings.ts`: grupo "Terminal" con el interruptor y su nota.
+- `src/main/testable.ts`, `src/main/main.ts`: exportación para las pruebas e inicialización.
+- Pruebas: `tests/unit/terminal-layout.test.mjs` (**nuevo**, 26) y 2 de seguridad en
+  `tests/security/hardening.test.mjs`.
+
+**Decisión registrada:** ADR-061.
+
+**Errores encontrados y solucionados:**
+
+1. *Síntoma:* al reabrir la solución aparecían **cuatro** pestañas donde se habían guardado dos, y
+   el archivo decía `["lite","lite","lite","powershell"]`. Cada reapertura añadía una asistida más.
+   *Causa raíz:* el panel arranca ya con una pestaña asistida, y la restauración abría encima las
+   guardadas. La retirada de la del arranque estaba puesta *después* y condicionada a que la
+   disposición no incluyera una asistida — que es justo el caso más normal de todos. Y como al
+   terminar se vuelve a anotar, la de más quedaba guardada: crecía una por apertura.
+   *Arreglo:* la del arranque se retira **antes** de reabrir nada y sólo vuelve si no ha entrado
+   ninguna. Se comprobó midiendo dos reaperturas seguidas: tres pestañas las dos veces y el archivo
+   idéntico. La primera medición sobre la aplicación real lo cazó; ninguna prueba unitaria lo
+   habría visto, porque el error estaba en el reparto entre el modelo y el panel, no dentro de uno.
+2. *Síntoma:* tres pruebas del almacén en rojo diciendo que dos soluciones distintas devolvían la
+   misma disposición.
+   *Causa raíz:* la trampa de siempre, y van once: **contrabarras a través del shell**. El
+   ayudante de las pruebas se escribió con un heredoc y `` `C:\repos\${name}` `` llegó al archivo
+   con un solo nivel de escape, o sea `C:` + retorno de carro + `epos` + `${name}` **literal** —el
+   `\$` deja de interpolar—. Las dos soluciones acababan en la misma clave. El error que se ve es
+   "el almacén mezcla las entradas", que no se parece en nada a la causa.
+   *Arreglo:* reescrito con la herramienta de edición y con `join()` en vez de una plantilla, más
+   una revisión de todas las rutas del archivo, que encontró otras tres con `\a` comido.
+3. *Síntoma:* `TS2367: This comparison appears to be unintentional because the types '1' and '0'
+   have no overlap` sobre un `length === 0` perfectamente alcanzable.
+   *Causa raíz:* el guardia de arriba (`length !== 1` ⇒ salir) deja el tipo de `length` fijado en el
+   literal `1` para el resto de la función, y TypeScript no sabe que los `await` de en medio
+   modifican el array.
+   *Arreglo:* el guardia compara `> 1`, que no fija un literal.
+
+**Lo que no se ha hecho, y por qué:** no se recupera el **histórico** de la sesión. Grabar la salida
+y reproducirla al abrir pinta una sesión que parece viva y no lo está: el prompt de arriba responde
+a un proceso que ya no existe. Y cambiar de solución con el IDE abierto **no** cierra las terminales
+que hubiera: dentro de una puede estar corriendo un `dotnet watch`, y matarlo para reabrir una
+pestaña vacía es un intercambio malísimo. Sólo se restaura sobre un panel intacto.
+
+**Verificado sobre la aplicación real**, con una solución Clean generada:
+
+- **Se guarda lo que hay:** abriendo una pestaña de PowerShell sobre la asistida, el archivo queda
+  con `["lite","powershell"]`, `activeIndex: 1` y el `cwd` de la solución.
+- **Se reabre lo guardado:** sembrado `["lite","powershell","cmd"]` con la tercera activa, al abrir
+  la solución el panel enseña `Terminal asistida | PowerShell | [Símbolo del sistema]` — en orden y
+  con la activa correcta.
+- **Y no crece:** segunda reapertura seguida, las mismas tres pestañas y el archivo idéntico.
+- **El interruptor manda:** con `restoreTerminals: false`, el panel abre sólo con la asistida y lo
+  guardado sigue intacto en el archivo.
+- `npx electron . --smoke-test` → `SMOKE_OK`.
+- `npm test` entero en verde: **1379 pruebas unitarias** (1353 antes), 79 de seguridad, 76 de
+  empaquetado y las tres arquitecturas compilando y pasando las suyas.
+
+**Deuda anotada, no resuelta:** al arrancar, el registro dice `Roslyn LanguageServer 5.4.0-2.26177.7
+(la fijada ya no está en el feed; la más reciente sin marcar como prueba)`. El ADR-040 dice que la
+versión se fija y se verifica a mano, y la fijada ha desaparecido del feed: hoy se está usando una
+elegida sola, que es exactamente lo que ese ADR existe para evitar. El camino de respaldo está
+haciendo su trabajo y avisando; queda como primer candidato del próximo ciclo.
