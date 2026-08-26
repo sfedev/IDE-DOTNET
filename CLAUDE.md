@@ -1029,3 +1029,9 @@ npm run fetch:toolchain -- --platform win32 --arch x64
 - **`dotnet run` sin `--launch-profile` aplica el primer perfil del archivo**, que en las plantillas
   del SDK es el de HTTP. El IDE resolvía el perfil de HTTPS, lo enseñaba, y arrancaba el otro: la
   aplicación escuchaba en un puerto distinto del que se anunciaba y todo lo demás parecía correcto.
+- **electron-builder recompila lo nativo aunque venga compilado.** No mira si el módulo trae
+  binarios: ve una dependencia nativa y lanza `@electron/rebuild` → node-gyp → **Visual Studio**.
+  En un equipo sin las Build Tools, `npm run dist:win` muere con `Could not find any Visual Studio
+  installation to use` y muere para nada, porque el `.node` que se iba a distribuir ya estaba en el
+  paquete y funcionando. Se apaga con `npmRebuild: false` en `electron-builder.yml`, y hay una
+  prueba que lo exige: es justo la línea que alguien quita porque parece que no hace nada.

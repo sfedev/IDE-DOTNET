@@ -912,6 +912,12 @@ cualquiera de esas cosas hay que salir del IDE, que es justo lo que un IDE exist
   así que valen para Electron sin `electron-rebuild`. La prueba de empaquetado que prohibía la
   dependencia se reescribe para exigir lo que de verdad se quería: ninguna dependencia **que haya
   que compilar**, y que ésta venga con binario para esta plataforma.
+- **Pero a electron-builder hay que decírselo.** *(Añadido tras el fallo de la Iteración 31.)* No
+  comprueba si el módulo trae binarios: ve una dependencia nativa y lanza `@electron/rebuild`, que
+  llama a node-gyp y exige Visual Studio. En un equipo sin las Build Tools el empaquetado muere con
+  `Could not find any Visual Studio installation to use` **aunque el `.node` que se va a distribuir
+  ya esté ahí y funcione**. Se apaga con `npmRebuild: false`, y hay una prueba que lo exige: es la
+  clase de línea que alguien quita "porque parece que no hace nada".
 - **Es opcional, y la ausencia es un valor.** Se carga con `createRequire` dentro de un `try`, la
   primera vez que hace falta. Sin binario —o con npm 11 bloqueando los scripts de instalación, que
   es el caso normal— los perfiles de PTY se ofrecen **atenuados y con el motivo escrito** y la
@@ -3541,3 +3547,59 @@ su persistencia, y a medias sería un archivo de configuración escondido.
 - `npx electron . --menu-dump` → **ningún acelerador repetido** con "Nueva terminal" dentro.
 - `npm test` entero en verde: **1318 pruebas unitarias** (1290 antes) más seguridad, empaquetado y
   las tres arquitecturas compilando y pasando las suyas.
+
+### Iteración 31 — 2026-08-25 — Auditoría de estado, y el empaquetado roto por la Fase 21
+
+**Objetivo:** auditar en qué estado quedó la v2.5.0 antes de abrir el siguiente ciclo, y decidir el
+próximo hito con datos y no con la lista de deseos.
+
+**Lo que la auditoría encontró:**
+
+1. **El empaquetado estaba roto**, y lo rompió la Fase 21. `npm run dist:win` moría con
+   `Could not find any Visual Studio installation to use`. El ADR-059 afirmaba "no hay paso de
+   rebuild", y era cierto para **cargar** node-pty en ejecución —Node-API, binarios en el paquete—
+   y falso para el empaquetador: electron-builder no comprueba si un módulo nativo trae binarios,
+   ve la dependencia y lanza `@electron/rebuild` → node-gyp → Visual Studio. La suite entera estaba
+   en verde y el producto no se podía empaquetar: ninguna prueba llegaba hasta ahí.
+2. **`devlog.mjs status` borraba el campo que decía leer.** Sin argumentos llamaba a
+   `setStatus('')` y dejaba en blanco el "Estado global" del encabezado. Es lo que lo tenía vacío
+   desde algún punto entre la v1.0.0 y hoy, y volvió a pasar en directo durante esta auditoría.
+3. **El motor de actualizaciones no tiene de dónde actualizarse.** El feed real
+   (`/repos/sfedev/IDE-DOTNET/releases`) responde 200 con **cero releases**; el único tag publicado
+   es `v2.1.0` y el workflow sube artefactos pero no crea la publicación. Ya estaba anotado como
+   deuda en la Iteración 22 y sigue igual: el camino de actualización sólo se ha ejercitado con el
+   estado simulado de `--ui=update`.
+
+**Hecho:**
+
+- `electron-builder.yml`: `npmRebuild: false`, con el motivo escrito en la cabecera y junto a la
+  clave. El empaquetado vuelve a funcionar de punta a punta.
+- `tests/package/packaging.test.mjs`: prueba que lo exige. Es la clase de línea que alguien quita
+  "porque parece que no hace nada".
+- `scripts/devlog.mjs`: `status` sin argumentos **lee**; con texto, escribe. Una cadena de espacios
+  cuenta como vacía. Un documento sin línea de estado sale en rojo en vez de fingir que la ha
+  escrito. `DEVLOG_FILE` permite apuntar a otro archivo, que es lo que hace falta para poder
+  probarlo sin escribir en la bitácora de verdad.
+- `tests/unit/devlog-script.test.mjs` (**nuevo**): 12 pruebas ejercitando el script como proceso
+  contra una copia temporal, CRLF incluido.
+- `PROJECT_DEVLOG.md`: estado global restaurado a v2.5.0 y ADR-059 corregido con la consecuencia
+  que faltaba.
+- `CLAUDE.md`: la trampa de electron-builder.
+
+**Verificado sobre artefactos reales, no sobre la configuración:**
+
+- `npm run dist:win` completo → `DotForge IDE-2.5.0-Setup-x64.exe` (120,4 MB) y
+  `DotForge IDE-2.5.0-win-x64.zip` (165,6 MB). `npm run verify:dist` sin problemas.
+- La **aplicación empaquetada** —no la de desarrollo— arranca (`SMOKE_OK`), sus perfiles de
+  terminal contestan `powershell|ok`, `cmd|ok`, `lite|ok` y `pwsh|no: pwsh.exe no está instalado`,
+  y una pestaña de PowerShell ejecuta `echo empaquetado-ok` y devuelve el prompt. Es decir:
+  `node-pty` se carga desde `app.asar.unpacked` sin recompilarse.
+- Open VSX contra el registro real: 156 resultados para "csharp"; hay una extensión de verdad
+  instalada en `userData`.
+- `update:check` contra el feed real: `up-to-date`, "Estás en la última versión (v2.5.0)".
+- `npm test` en verde de punta a punta, con 12 pruebas nuevas.
+
+**Sobre el backlog:** de los tres candidatos que se plantearon para este ciclo, dos ya estaban
+hechos y verificados (actualizaciones y Open VSX, Fase 17). El único pendiente de verdad es la
+persistencia de las pestañas de terminal. Y por delante de él hay algo que lo condiciona: **publicar
+releases**, sin lo cual el actualizador es un motor sin combustible.

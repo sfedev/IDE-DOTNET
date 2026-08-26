@@ -144,6 +144,20 @@ describe('electron-builder.yml', () => {
     assert.match(builderConfig, /files:[\s\S]*node_modules\/node-pty/);
   });
 
+  /**
+   * El empaquetado no recompila nada.
+   *
+   * Esto no es una preferencia: sin `npmRebuild: false`, electron-builder ve una dependencia
+   * nativa y lanza `@electron/rebuild` -> node-gyp -> **Visual Studio**. En un equipo sin las Build
+   * Tools el empaquetado muere con "Could not find any Visual Studio installation to use", y muere
+   * para nada: el `.node` que se va a distribuir ya está ahí, compilado por el publicador del
+   * paquete y funcionando. electron-builder no comprueba si el módulo trae binarios; hay que
+   * decírselo.
+   */
+  it('no recompila dependencias nativas al empaquetar', () => {
+    assert.match(builderConfig, /^npmRebuild:\s*false\s*$/m);
+  });
+
   it('copia las plantillas de scaffolding a resources/templates', () => {
     assert.match(builderConfig, /extraResources:/);
     assert.match(builderConfig, /from:\s*build\/templates/);

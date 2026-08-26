@@ -8,10 +8,14 @@
 #    mejor sobre archivos reales que dentro del archivo empaquetado.
 #  - Las plantillas de scaffolding van a `resources/templates`, fuera del asar, porque el
 #    generador las lee con `fs` desde `process.resourcesPath`.
-#  - `node-pty` es la única dependencia nativa, y es opcional (ADR-059). No hay paso de rebuild:
+#  - `node-pty` es la única dependencia nativa, y es opcional (ADR-059). No hace falta compilarlo:
 #    publica los binarios ya compilados dentro del paquete y son Node-API, que es ABI estable, así
 #    que valen para Electron sin recompilar. Va fuera del asar porque un `.node` no se puede cargar
 #    desde dentro del archivo empaquetado.
+#  - `npmRebuild: false` porque electron-builder **no mira si el módulo trae binarios**: ve una
+#    dependencia nativa y lanza `@electron/rebuild`, que llama a node-gyp y exige Visual Studio.
+#    Sin él, el empaquetado muere con "Could not find any Visual Studio installation to use" aunque
+#    el `.node` que se va a distribuir ya esté ahí, compilado y funcionando.
 
 appId: dev.dotforge.ide
 productName: DotForge IDE
@@ -34,6 +38,10 @@ extraResources:
     to: templates
     filter:
       - '**/*'
+
+# No se recompila ninguna dependencia nativa al empaquetar: la única que hay trae sus binarios
+# hechos y son ABI estable. Ver la nota de la cabecera y el ADR-059.
+npmRebuild: false
 
 asar: true
 asarUnpack:
