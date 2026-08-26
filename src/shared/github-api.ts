@@ -58,6 +58,14 @@ export interface HeaderOptions {
   accept?: string;
   /** Credencial a usar. Por defecto, la del entorno. `null` desactiva la autenticación. */
   token?: string | null;
+  /**
+   * Agente que se declara. Por defecto, el genérico.
+   *
+   * Lo usa el actualizador para decir **desde qué versión** se pregunta: el feed de releases es lo
+   * único que llega a saber qué versiones siguen instaladas ahí fuera, y un agente sin versión
+   * tira ese dato. No cambia a dónde puede viajar el token, que es lo que este módulo protege.
+   */
+  userAgent?: string;
 }
 
 /**
@@ -69,7 +77,7 @@ export interface HeaderOptions {
  */
 export function requestHeaders(url: string, options: HeaderOptions = {}): Record<string, string> {
   const headers: Record<string, string> = {
-    'User-Agent': USER_AGENT,
+    'User-Agent': options.userAgent ?? USER_AGENT,
     Accept: options.accept ?? GITHUB_ACCEPT,
   };
 

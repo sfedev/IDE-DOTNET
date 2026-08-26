@@ -188,7 +188,8 @@ IDE-DOTNET/
 │       │                       # confirm-dialog (modal propio, asíncrono)
 │       └── styles/             # theme.css (tokens), layout.css, components.css
 ├── resources/              # Iconos multirresolución, branding
-├── scripts/                # Build, generación de iconos, fetch de toolchain, verificación
+├── .github/workflows/      # release.yml: pruebas, artefactos y **publicación** de la release
+├── scripts/                # Build, iconos, fetch de toolchain, verificación, notas de la release
 ├── tests/                  # Suite de pruebas automatizadas
 ├── build/                  # Salida de compilación intermedia (esbuild)  [git-ignored]
 └── dist/                   # * Artefactos finales de distribución        [git-ignored]
@@ -254,6 +255,21 @@ npm run dist:win
 - `npm run prune:dist` — borra de `/dist` los artefactos de versiones anteriores. Lo ejecutan
   solos `pack`, `dist:win`, `dist:mac` y `dist:all` **antes** de empaquetar; acepta `--dry-run`.
 - `npm run clean` — borra `build/` y `dist/`; con `--all`, también el toolchain cacheado.
+
+### Publicar una versión
+
+La release de GitHub es lo único que el actualizador in-app puede leer, así que publicar **es** parte
+del empaquetado, no un trámite posterior. Lo hace la CI al ver el tag:
+
+```bash
+npm version 2.6.0 --no-git-tag-version && git commit -am "v2.6.0" && git tag v2.6.0 && git push --follow-tags
+```
+
+- `node scripts/release-notes.mjs --tag v2.6.0` — enseña las notas que se van a publicar, antes de
+  empujar nada. Acepta `--previous`, `--artifacts dist` y `--output <archivo>`.
+- El workflow se para si el tag y `package.json` no dicen la misma versión (ADR-060): sube la versión
+  **antes** de etiquetar.
+- También se puede lanzar a mano desde la pestaña Actions (`workflow_dispatch`), indicando el tag.
 
 ### Modos de diagnóstico de la aplicación
 
@@ -431,6 +447,27 @@ npx electron . --smoke-test
   que hereda sus descriptores muere con él a mitad de la instalación. Por lo mismo no se usa
   `shell.openPath`, que devuelve una promesa que nadie va a poder esperar.
 - El servicio **no importa `electron`**: `userData`, la versión y el cierre se le inyectan.
+
+### Publicación de releases (`.github/workflows/release.yml`, `scripts/release-notes.mjs`)
+
+- **Una versión que no pasa por el workflow no existe** para quien ya tiene el IDE instalado: el
+  actualizador sólo mira `/repos/sfedev/IDE-DOTNET/releases`. Los *artifacts* de un run no valen —
+  caducan a los 90 días y no se ven desde fuera—, y eso es lo que tuvo al actualizador nueve
+  versiones sin nada que ofrecer.
+- **El tag y `package.json` tienen que decir la misma versión, y la CI se para si no** (ADR-060). El
+  artefacto lleva la versión de `package.json` en el nombre y quien decide si hay actualización es
+  el tag: publicar un `v2.6.0` con binarios `2.5.0` deja una instalación pendiente que sigue siendo
+  "más nueva" que la que corre y se reinstala en cada cierre, indefinidamente.
+- **Se publica con la CLI `gh`, no con una acción de terceros.** Publicar es la operación con más
+  permisos del repositorio; el workflow declara `contents: read` y sólo el job `publish` sube a
+  `write`. Hay una prueba que recorre sus `uses:` y exige que todos sean `actions/*`.
+- **Los tres disparos convergen** (tag `v*`, `release: published`, `workflow_dispatch`) en el mismo
+  crear-o-completar más `upload --clobber`, que hace el paso idempotente.
+- **La composición del texto es pura y está probada contra su lector.** `scripts/lib/release-notes.mjs`
+  compone el cuerpo y `tests/unit/release-notes.test.mjs` lo pasa por `releaseNotesLines`, que es lo
+  que usa la tarjeta del IDE. Son dos módulos que no se importan y sólo se encuentran en producción.
+- El job que publica hace `fetch-depth: 0`: las notas salen del rango entre tags y un checkout
+  superficial las deja vacías **sin que nada falle**.
 
 ### Extensiones de Open VSX (`src/main/services/extension-installer.ts`, `src/shared/open-vsx.ts`)
 
@@ -1029,6 +1066,15 @@ npm run fetch:toolchain -- --platform win32 --arch x64
 - **`dotnet run` sin `--launch-profile` aplica el primer perfil del archivo**, que en las plantillas
   del SDK es el de HTTP. El IDE resolvía el perfil de HTTPS, lo enseñaba, y arrancaba el otro: la
   aplicación escuchaba en un puerto distinto del que se anunciaba y todo lo demás parecía correcto.
+- **Una regla estructural sólo vigila la lista que le pasas.** La prueba que exige que ningún
+  adquisidor escriba cabeceras a mano (ADR-050) llevaba dos módulos en su lista y el tercero
+  —`updater-service.ts`, que hace exactamente el mismo par de peticiones— nació después y nunca se
+  añadió. Resultado: la regla estaba probada, en verde, y el módulo que más falta le hacía consultaba
+  la API de GitHub **sin autenticar aunque hubiera token**, con 60 peticiones por hora y por IP. Al
+  escribir un módulo que se parece a otro ya vigilado, lo primero es meterlo en la lista.
+- **Un checkout de CI no trae el historial.** `actions/checkout` clona con `fetch-depth: 1`, así que
+  cualquier paso que mire `git log` o busque el tag anterior no encuentra nada — y no falla: sale
+  vacío. Unas notas de versión en blanco se publican igual de bien que unas llenas.
 - **electron-builder recompila lo nativo aunque venga compilado.** No mira si el módulo trae
   binarios: ve una dependencia nativa y lanza `@electron/rebuild` → node-gyp → **Visual Studio**.
   En un equipo sin las Build Tools, `npm run dist:win` muere con `Could not find any Visual Studio

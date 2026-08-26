@@ -4,7 +4,7 @@ Bitácora viva de desarrollo. Se actualiza **en cada iteración** del bucle de t
 
 - **Proyecto:** DotForge IDE — distribución de IDE para C# / .NET 9+ / Blazor
 - **Inicio:** 2026-08-23
-- **Estado global:** 🟢 v2.5.0 — 21 fases cerradas, 307/308 hitos. El único pendiente (F5.7, artefactos de macOS) está bloqueado por plataforma y documentado en la Fase 5.
+- **Estado global:** 🟢 v2.5.0 — 22 fases cerradas, 319/320 hitos. El único pendiente (F5.7, artefactos de macOS) está bloqueado por plataforma y documentado en la Fase 5.
 
 Leyenda: `[ ]` pendiente · `[~]` en curso · `[x]` completado y **verificado con un comando**
 
@@ -472,6 +472,31 @@ por tanto **compila** pero no **ejecuta** los proyectos generados. Se añade el 
 - [x] F21.19 Verificado sobre la aplicación real: `echo` de ida y vuelta en PowerShell, tres pestañas
       a la vez, cierre de una sola, cero procesos huérfanos al salir, y el editor recuperando el
       teclado tras las dos respuestas del aviso de cambios sin guardar
+
+### Fase 22 — Publicación de releases: darle combustible al actualizador
+- [x] F22.1 Job `publish` en `.github/workflows/release.yml`, con `contents: write` sólo en él y el
+      resto del workflow en sólo lectura (ADR-060)
+- [x] F22.2 Tres disparos que convergen: `push` de un tag `v*`, `release: published` y
+      `workflow_dispatch` con entradas `tag` y `draft`
+- [x] F22.3 El tag se resuelve por variables de entorno, no interpolado dentro del shell, y se valida
+      como SemVer antes de seguir
+- [x] F22.4 La CI se para si el tag y `package.json` no dicen la misma versión: publicarlo así deja
+      al IDE reinstalando la misma versión en cada cierre, para siempre
+- [x] F22.5 `scripts/lib/release-notes.mjs` (nuevo): composición pura del cuerpo de la release, con
+      el recorte de la lista anunciado y sin marcas que se evaporen en la tarjeta del IDE
+- [x] F22.6 `scripts/release-notes.mjs` (nuevo): tag anterior por orden de versión, rango de commits
+      y artefactos de `dist/`; sirve a mano antes de empujar el tag
+- [x] F22.7 `gh release create`/`edit` + `upload --clobber`, sin ninguna acción de terceros corriendo
+      con el permiso de escritura
+- [x] F22.8 Paso final que le pregunta a la API pública si la release aparece con artefactos:
+      publicar no es lo mismo que estar publicado
+- [x] F22.9 El actualizador entra en la lista de adquisidores: sus dos peticiones pasan por
+      `requestHeaders` y su 403 por `rateLimitHint` (ADR-050)
+- [x] F22.10 `HeaderOptions.userAgent`, para que el feed sepa desde qué versión se pregunta
+- [x] F22.11 Pruebas: 33 nuevas — 22 del modelo de notas (contrato con `releaseNotesLines`
+      incluido), 10 del contrato del workflow y 1 del alcance del agente
+- [x] F22.12 Verificado ejecutando los pasos del workflow: los cinco caminos de resolución del tag y
+      los cuatro escenarios de publicación contra un `gh` de mentira
 
 ---
 
@@ -944,6 +969,56 @@ cualquiera de esas cosas hay que salir del IDE, que es justo lo que un IDE exist
 - xterm.js **no se bundlea**, por la misma razón que Monaco: son 500 KB que se sirven mejor como
   archivo del vendor, y hay una prueba que vigila que el bundle del renderer siga siendo un orden de
   magnitud más pequeño que lo que dice no incrustar.
+
+---
+
+### ADR-060 — La release la publica la CI con `gh`, y el tag manda sobre lo que se publica
+**Fecha:** 2026-08-26
+**Contexto:** El sistema de actualizaciones existe desde la v2.1.0 y **nunca ha tenido de dónde
+actualizarse**. El workflow construía los artefactos y los dejaba como *artifacts* del run: caducan
+a los 90 días, no se ven desde fuera y no aparecen en `/repos/sfedev/IDE-DOTNET/releases`, que es lo
+único que el IDE consulta. El feed respondía 200 con cero elementos, así que `update:check` decía
+"estás en la última versión" y tenía razón: no había ninguna publicada. La auditoría de la
+Iteración 31 lo dejó anotado como el bloqueante del siguiente ciclo.
+**Opciones:**
+- (a) `softprops/action-gh-release`, que es lo que usa casi todo el mundo;
+- (b) la CLI `gh`, que viene instalada en los runners;
+- (c) `electron-updater` con su `latest.yml` y su canal de publicación;
+- (d) publicar a mano desde la web y que la CI sólo construya.
+
+**Decisión:** (b), con el paso de publicación en un job aparte.
+**Consecuencias:**
+
+- **Publicar es la operación con más permisos del repositorio**, y (a) mete una acción de terceros
+  corriendo con el token de escritura. Para que ese `uses:` significara algo habría que fijarlo por
+  SHA y volver a auditarlo en cada subida. `gh` ya está en el runner y hace exactamente lo mismo.
+  Hay una prueba que recorre los `uses:` del job de publicación y exige que todos sean `actions/*`.
+- **El permiso vive donde se usa.** El workflow declara `contents: read` y sólo el job `publish`
+  sube a `write`. Los jobs que compilan y prueban no necesitan poder escribir releases, y con el
+  permiso a nivel de workflow lo tendrían los tres.
+- **El tag y `package.json` tienen que decir la misma versión, y la CI se para si no.** Es la
+  comprobación que evita el peor fallo de todo el ciclo: el artefacto lleva la versión de
+  `package.json` incrustada en el nombre y quien decide si hay actualización es el **tag**.
+  Publicar un `v2.6.0` con binarios `2.5.0` deja al IDE ofreciendo la 2.6.0, instalando un 2.5.0 y
+  encontrándose al arrancar con una instalación pendiente que sigue siendo "más nueva" que la que
+  corre (`initialize` sólo descarta lo pendiente si **no** es posterior): se reinstalaría en cada
+  cierre, indefinidamente. No hay nada que el cliente pueda hacer contra eso, así que se corta en
+  el único sitio donde se puede.
+- **Los tres disparos convergen.** Un tag empujado, una release creada desde la web y un disparo
+  manual acaban en el mismo par crear-o-completar más `upload --clobber`, que además hace el paso
+  idempotente: relanzar el workflow reemplaza los artefactos en vez de fallar por duplicado. El
+  disparo por `release: published` no se muerde la cola porque una release creada con el
+  `GITHUB_TOKEN` por defecto no dispara workflows nuevos — es una garantía de GitHub, y conviene
+  saberla antes de cambiar ese token por uno personal.
+- **(c) sigue descartado por lo mismo que en el ADR-045:** exige artefactos firmados, y aquí no hay
+  certificado. (d) es lo que había de facto y es justo lo que ha fallado durante nueve versiones:
+  un paso manual que hay que acordarse de dar no se da.
+- **Un borrador no está publicado.** El paso que verifica el feed se salta cuando se pide borrador,
+  porque un borrador nunca aparece ahí: exigirlo haría fallar siempre la publicación en borrador, y
+  por el motivo equivocado.
+- **Publicar no es lo mismo que estar publicado.** El último paso pregunta a la API pública si la
+  release aparece con al menos un artefacto. Es la diferencia entre comprobar la configuración y
+  comprobar el resultado, que es la lección de la Iteración 31 con el empaquetado.
 
 ---
 
@@ -3603,3 +3678,103 @@ próximo hito con datos y no con la lista de deseos.
 hechos y verificados (actualizaciones y Open VSX, Fase 17). El único pendiente de verdad es la
 persistencia de las pestañas de terminal. Y por delante de él hay algo que lo condiciona: **publicar
 releases**, sin lo cual el actualizador es un motor sin combustible.
+
+---
+
+### Iteración 32 — 2026-08-26 — Publicar releases: el actualizador deja de ser un motor sin combustible
+
+**Objetivo:** cerrar lo que la auditoría de la Iteración 31 señaló como bloqueante. El sistema de
+actualizaciones in-app está terminado y probado desde la v2.1.0 —tarjeta flotante, descarga
+verificada, instalación al cerrar, promesa persistida— y en nueve versiones **no ha ofrecido una
+sola actualización a nadie**, porque no había ninguna release publicada que ofrecer. La CI construía
+los binarios y los dejaba dentro del run, donde caducan a los 90 días y el IDE no los ve.
+
+**Hecho, archivo a archivo:**
+
+- `.github/workflows/release.yml`: job `publish` nuevo, con `permissions: contents: write` sólo en
+  él y `contents: read` para el resto del workflow. Tres disparos que convergen —tag `v*`,
+  `release: published` y `workflow_dispatch` con entradas `tag` y `draft`—, resolución del tag por
+  variables de entorno (no interpolado dentro del shell), corte si el tag y `package.json` no dicen
+  la misma versión, `gh release create`/`edit` + `upload --clobber`, y un último paso que le
+  pregunta a la **API pública** si la release aparece con artefactos.
+- `scripts/lib/release-notes.mjs` (**nuevo**): composición del cuerpo Markdown de la release. Puro,
+  como `dist-artifacts.mjs`, y por el mismo motivo: decide un texto que ve el usuario.
+- `scripts/release-notes.mjs` (**nuevo**): habla con `git` y con el disco. Resuelve el tag anterior
+  por orden de versión (`--sort=-v:refname`, no por fecha), lee los artefactos de `dist/` y escribe
+  las notas. Sirve a mano para ver qué se va a publicar antes de empujar el tag.
+- `src/shared/github-api.ts`: `HeaderOptions.userAgent`.
+- `src/main/services/updater-service.ts`: sus dos peticiones pasan por `requestHeaders` y su 403 por
+  `rateLimitHint`.
+- Pruebas: `tests/unit/release-notes.test.mjs` (**nuevo**, 22), `tests/package/packaging.test.mjs`
+  (10 nuevas sobre el workflow), `tests/security/hardening.test.mjs` (el actualizador entra en la
+  lista de adquisidores), `tests/unit/github-api.test.mjs`.
+
+**Decisión registrada:** ADR-060 — la release la publica la CI con `gh`, y el tag manda.
+
+**Errores encontrados y solucionados:**
+
+1. *Síntoma:* la consulta del actualizador al feed iba **sin autenticar incluso donde había token**,
+   o sea, con 60 peticiones por hora y por IP.
+   *Causa raíz:* `updater-service.ts` escribía sus dos cabeceras a mano. Es el tercer módulo que
+   hace el mismo par de peticiones que el depurador y el servidor de lenguaje —API de GitHub para
+   preguntar, otro host para descargar—, pero nació después de que se escribiera la regla del
+   ADR-050 y de la prueba estructural que la vigila, así que nadie lo metió en la lista. La regla
+   estaba probada y el módulo que más falta le hacía quedaba fuera.
+   *Arreglo:* las dos peticiones delegan en `requestHeaders`, que adjunta la credencial al feed
+   (`api.github.com`) y **no** a la descarga del artefacto (`objects.githubusercontent.com`). El
+   actualizador entra en la lista de adquisidores de `hardening.test.mjs`, con el motivo anotado
+   ahí mismo para que la próxima incorporación no tarde otras nueve versiones.
+2. *Síntoma:* ninguno todavía, y ése es el punto. Publicar un tag `v2.6.0` con los binarios de la
+   `2.5.0` —que es lo que pasa si se etiqueta antes de subir la versión— dejaría al IDE ofreciendo
+   la 2.6.0, instalando un 2.5.0, y encontrándose al arrancar con una instalación pendiente que
+   sigue siendo posterior a la que corre. `initialize` sólo descarta lo pendiente cuando **no** es
+   más nuevo, así que se reinstalaría en cada cierre indefinidamente, y no hay nada que el cliente
+   pueda hacer contra eso.
+   *Arreglo:* la CI se para si el tag y `package.json` no coinciden, con el motivo escrito en el
+   `::error::`. Hay una prueba que exige que ese corte siga ahí.
+3. *Síntoma:* las notas podían salir vacías sin que nada fallara.
+   *Causa raíz:* `actions/checkout` hace un checkout superficial por defecto, y las notas se componen
+   del rango entre el tag anterior y éste. Sin historial, `git log` no devuelve nada y la release se
+   publica igual, sólo que muda.
+   *Arreglo:* `fetch-depth: 0` en el job que publica, con una prueba que lo exige.
+
+**Lo que no se ha hecho, y por qué:** **no se ha publicado ninguna release todavía**. Empujar un tag
+es una acción sobre el repositorio público que le corresponde decidir a quien lo mantiene, no a la
+iteración que prepara el camino. Todo lo que se puede verificar sin publicar está verificado, y
+abajo está dicho cómo. Tampoco se ha hecho la **persistencia de las pestañas de terminal**: sigue en
+pie el argumento de la Fase 21 —restaurar una terminal es, como mucho, volver a abrirla vacía en el
+mismo directorio, que no es restaurar nada—, y adelantarla por delante de lo que la desbloqueaba no
+habría cambiado ese argumento.
+
+**Verificado, y con qué:**
+
+- **Los cinco caminos de resolución del tag, ejecutando el paso de verdad** con las variables de
+  entorno de cada disparo: `push v2.5.0` → `2.5.0`, no-prelanzamiento; `release v2.6.0-rc.1` →
+  prelanzamiento marcado; `dispatch v3.0.0`; `dispatch` sin tag → `v2.5.0` leído de `package.json`;
+  y `push nightly` → salida 1 con `::error::"nightly" no es un tag SemVer`.
+- **El paso de publicación, ejecutado contra un `gh` de mentira** que registra lo que se le pide:
+  con la release inexistente hace `view` → `create --title "DotForge IDE v2.5.0" --target <sha>` →
+  `upload --clobber`; con la release ya existente, `view` → `edit --notes-file` → `upload`; con un
+  prelanzamiento en borrador añade `--prerelease --draft`; y con `dist/` vacío sale con 1 en vez de
+  publicar una release sin nada que descargar. `builder-debug.yml` no se cuela entre los artefactos,
+  y los nombres con espacios llegan enteros.
+- **El YAML se parsea** y los cinco bloques de shell pasan `bash -n`.
+- **Las notas reales de la v2.5.0**, generadas con `node scripts/release-notes.mjs --tag v2.5.0`:
+  24 cambios desde `v2.1.0`, con el enlace de comparación correcto.
+- **El contrato con la tarjeta del IDE, probado de verdad**: el cuerpo que compone la CI se pasa por
+  `releaseNotesLines` —el mismo lector que usa la tarjeta— y se comprueba que no se queda vacío, que
+  lo primero que se lee es la versión, que los cambios entran en las doce líneas que caben, que no
+  sobrevive ni una marca de Markdown y que **ninguna línea del cuerpo se evapora al limpiarla**. Son
+  dos módulos en carpetas distintas que no se importan y sólo se encuentran en producción.
+- **El actualizador contra el feed real**, sobre la aplicación en marcha:
+  `--probe="window.dotforge.updates.check(true)"` → `up-to-date`, "Estás en la última versión
+  (v2.5.0)". Sigue funcionando con las cabeceras compartidas.
+- `npx electron . --smoke-test` → `SMOKE_OK`.
+- `npm test` entero en verde: **1353 pruebas unitarias** (1330 antes), 77 de seguridad, 76 de
+  empaquetado y las tres arquitecturas compilando y pasando las suyas.
+
+**Cómo se publica la próxima versión, ahora que se puede:**
+
+```bash
+npm version 2.6.0 --no-git-tag-version && git commit -am "v2.6.0" && git tag v2.6.0 && git push --follow-tags
+```

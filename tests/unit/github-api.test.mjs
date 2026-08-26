@@ -116,6 +116,27 @@ describe('cabeceras de las peticiones', () => {
     assert.equal(headers['Accept'], 'application/octet-stream');
   });
 
+  /**
+   * El actualizador declara la versión desde la que pregunta (`DotForge-IDE/2.5.0`). Es el único
+   * dato que llega a saber qué versiones siguen instaladas ahí fuera, y con el agente genérico se
+   * perdía. Lo que no cambia es a dónde puede viajar el token, que es lo que protege este módulo.
+   */
+  it('el agente se puede fijar por petición sin tocar el alcance del token', () => {
+    const headers = requestHeaders('https://api.github.com/repos/x/y/releases', {
+      userAgent: 'DotForge-IDE/2.5.0',
+      token: TOKEN,
+    });
+    assert.equal(headers['User-Agent'], 'DotForge-IDE/2.5.0');
+    assert.equal(headers['Authorization'], `Bearer ${TOKEN}`);
+
+    const ajeno = requestHeaders('https://objects.githubusercontent.com/x.zip', {
+      userAgent: 'DotForge-IDE/2.5.0',
+      token: TOKEN,
+    });
+    assert.equal(ajeno['User-Agent'], 'DotForge-IDE/2.5.0');
+    assert.equal(ajeno['Authorization'], undefined);
+  });
+
   it('con token, la API de GitHub lleva Authorization', () => {
     const headers = requestHeaders('https://api.github.com/repos/x/y/releases/latest', { token: TOKEN });
     assert.equal(headers['Authorization'], `Bearer ${TOKEN}`);

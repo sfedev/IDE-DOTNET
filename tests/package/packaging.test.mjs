@@ -12,6 +12,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { isStaleArtifact, selectStaleArtifacts } from '../../scripts/lib/dist-artifacts.mjs';
+import { RELEASE_REPO } from '../../scripts/lib/release-notes.mjs';
+import { UPDATE_FEED } from '../../build/ui-lib.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -378,6 +380,112 @@ describe('flujo de macOS', () => {
     assert.match(activas, /windows-latest/);
     assert.match(activas, /npm run dist:win/);
     assert.match(activas, /verify-dist\.mjs --require win/);
+  });
+});
+
+/**
+ * Publicación de releases.
+ *
+ * Esto no es configuración de CI: es el **combustible del actualizador in-app**. Hasta la v2.5.0 el
+ * workflow construía los artefactos y los dejaba como "artifacts" del run —que caducan a los 90
+ * días y no se ven desde fuera—, así que el feed público respondía 200 con cero elementos y el IDE
+ * decía "estás en la última versión" para siempre. La funcionalidad entera estaba en verde y no
+ * tenía de dónde actualizarse.
+ *
+ * Se comprueba con el mismo cuidado que el flujo de macOS: separando líneas activas de comentadas,
+ * porque una expresión regular contra el archivo entero da igual de verde con el job comentado.
+ */
+describe('publicación de releases', () => {
+  const workflow = readFileSync(join(root, '.github', 'workflows', 'release.yml'), 'utf8');
+  const workflowLines = workflow.split(/\r?\n/);
+  const activas = workflowLines.filter((line) => !line.trimStart().startsWith('#')).join('\n');
+
+  it('se dispara al empujar un tag, al publicar una release y a mano', () => {
+    assert.match(activas, /^\s+tags:\n\s+- 'v\*'/m, 'falta el disparo por tag SemVer');
+    assert.match(activas, /^\s+release:\n\s+types: \[published\]/m, 'falta el disparo por release');
+    assert.match(activas, /^\s+workflow_dispatch:/m, 'falta el disparo manual');
+  });
+
+  it('hay un job que publica y depende de que los artefactos existan', () => {
+    assert.match(activas, /^\s{2}publish:/m, 'no hay job de publicación');
+    assert.match(activas, /needs: \[test, build-windows\]/, 'publica sin esperar a las pruebas ni al build');
+  });
+
+  /**
+   * Escribir en el repositorio es el permiso más caro que se concede aquí, así que el workflow
+   * arranca en sólo lectura y lo sube únicamente el job que lo necesita.
+   */
+  it('el permiso de escritura vive sólo en el job que publica', () => {
+    assert.match(activas, /^permissions:\n\s+contents: read/m, 'el workflow no arranca en sólo lectura');
+
+    const publishJob = activas.slice(activas.indexOf('  publish:'));
+    assert.match(publishJob, /permissions:\n\s+contents: write/, 'el job de publicación no puede escribir');
+  });
+
+  it('adjunta los binarios de dist, no sólo los deja en el run', () => {
+    assert.match(activas, /gh release create/, 'no se crea la release');
+    assert.match(activas, /gh release upload/, 'no se suben los artefactos');
+    assert.match(activas, /dist\/\*\.exe/, 'no se adjunta el instalador');
+    assert.match(activas, /dist\/\*\.zip/, 'no se adjunta el portable');
+  });
+
+  it('las notas de la versión se componen, no se dejan en blanco', () => {
+    assert.match(activas, /scripts\/release-notes\.mjs/, 'no se generan notas');
+    assert.match(activas, /--notes-file release-notes\.md/, 'la release se crea sin notas');
+    assert.ok(existsSync(join(root, 'scripts', 'release-notes.mjs')));
+    assert.ok(existsSync(join(root, 'scripts', 'lib', 'release-notes.mjs')));
+  });
+
+  /**
+   * Las notas salen del rango entre el tag anterior y éste. Con el checkout superficial que trae
+   * `actions/checkout` por defecto no hay historial que recorrer, y las notas saldrían vacías sin
+   * que nada fallara: la release se publicaría igual, sólo que muda.
+   */
+  it('el checkout del job que publica trae el historial completo', () => {
+    const publishJob = activas.slice(activas.indexOf('  publish:'));
+    assert.match(publishJob, /fetch-depth: 0/, 'sin historial no hay notas que componer');
+  });
+
+  /**
+   * La comprobación que evita el peor fallo posible de este workflow.
+   *
+   * El artefacto lleva la versión de `package.json` incrustada en el nombre y quien decide si hay
+   * actualización es el **tag**. Publicar un `v2.6.0` con binarios `2.5.0` deja al IDE ofreciendo
+   * la 2.6.0, instalando un 2.5.0 y encontrándose en el siguiente arranque con una instalación
+   * pendiente que sigue siendo "más nueva" que la que corre: se reinstala en cada cierre, para
+   * siempre, y nada lo detiene desde el lado del cliente.
+   */
+  it('el tag y package.json tienen que decir la misma versión', () => {
+    assert.match(activas, /package_version" != "\$TAG_VERSION/, 'falta el corte por versiones que no cuadran');
+  });
+
+  /**
+   * Publicar es la operación con más permisos del repositorio. Un `uses:` de terceros ahí dentro
+   * es una acción ajena corriendo con el token de escritura, así que se usa la CLI `gh`, que viene
+   * con el runner. Las acciones oficiales de GitHub sí se usan, y se distinguen por el prefijo.
+   */
+  it('nada de terceros corre con el permiso de escritura', () => {
+    const publishJob = activas.slice(activas.indexOf('  publish:'));
+    for (const [, action] of publishJob.matchAll(/uses:\s*(\S+)/g)) {
+      assert.match(action, /^actions\//, `acción de terceros en el job que publica: ${action}`);
+    }
+  });
+
+  /**
+   * El bucle completo: la CI publica en un repositorio y el IDE pregunta por otro. Son dos
+   * constantes en dos carpetas que no se importan entre sí, y sólo se encuentran en producción.
+   */
+  it('la CI publica exactamente donde el IDE va a mirar', () => {
+    assert.ok(
+      UPDATE_FEED.startsWith(`https://api.github.com/repos/${RELEASE_REPO}/`),
+      `el IDE consulta ${UPDATE_FEED} y la CI publica en ${RELEASE_REPO}`,
+    );
+  });
+
+  it('un borrador no se da por publicado: no lo ve el feed', () => {
+    // El paso de verificación no puede exigir que el feed devuelva algo que un borrador nunca
+    // devuelve, o publicar en borrador fallaría siempre y por el motivo equivocado.
+    assert.match(activas, /if: \$\{\{ inputs\.draft != true \}\}/, 'la verificación no exime al borrador');
   });
 });
 

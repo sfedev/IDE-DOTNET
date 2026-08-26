@@ -307,9 +307,19 @@ describe('ejecución de procesos', () => {
  * `tests/unit/github-api.test.mjs`.
  */
 describe('alcance del token de GitHub', () => {
+  /**
+   * El actualizador entró en esta lista tarde, y por eso está anotado.
+   *
+   * Es el tercer módulo que consulta `api.github.com` y descarga un artefacto de otro host —el
+   * mismo par de peticiones que el depurador y el servidor de lenguaje—, pero escribía sus dos
+   * cabeceras a mano porque nació después de que se escribiera esta regla. La consecuencia no era
+   * teórica: su consulta al feed iba sin autenticar incluso donde había token, o sea, con 60
+   * peticiones por hora y por IP.
+   */
   const acquirers = {
     'src/main/lsp/acquire.ts': readSource('src/main/lsp/acquire.ts'),
     'src/main/debug/netcoredbg.ts': readSource('src/main/debug/netcoredbg.ts'),
+    'src/main/services/updater-service.ts': readSource('src/main/services/updater-service.ts'),
   };
 
   it('los adquisidores no escriben cabeceras a mano: las pide todas al mismo sitio', () => {

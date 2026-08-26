@@ -25,6 +25,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseJsonText } from '../../shared/json-text.js';
+import { githubToken, rateLimitHint, requestHeaders } from '../../shared/github-api.js';
 
 import {
   assetFor,
@@ -77,6 +78,11 @@ function env(): UpdaterEnvironment {
 
 function updatesDir(): string {
   return join(env().userDataPath, 'updates');
+}
+
+/** Agente que declaran las peticiones del actualizador: dice desde qué versión se pregunta. */
+function userAgent(version: string): string {
+  return `DotForge-IDE/${version}`;
 }
 
 function publish(patch: Partial<UpdateState>): UpdateState {
@@ -171,12 +177,17 @@ export async function check(options: { manual?: boolean } = {}): Promise<UpdateS
     publish({ status: 'checking', message: manual ? 'Buscando actualizaciones…' : null });
 
     try {
-      const response = await fetch(current.feedUrl ?? UPDATE_FEED, {
+      const feedUrl = current.feedUrl ?? UPDATE_FEED;
+
+      // Las cabeceras se piden al módulo que decide adónde puede viajar el token, como los
+      // adquisidores del depurador y del servidor de lenguaje. Aquí importa por partida doble: el
+      // feed **es** `api.github.com` —así que la credencial, si la hay, sube el límite de 60
+      // peticiones por hora y por IP a 5 000— y la descarga del artefacto vive en otro host, donde
+      // adjuntarla sería filtrarla. Escribiendo las dos a mano, esa diferencia dependía de que
+      // nadie se despistara.
+      const response = await fetch(feedUrl, {
         signal: AbortSignal.timeout(FEED_TIMEOUT_MS),
-        headers: {
-          Accept: 'application/vnd.github+json',
-          'User-Agent': `DotForge-IDE/${current.currentVersion}`,
-        },
+        headers: requestHeaders(feedUrl, { userAgent: userAgent(current.currentVersion) }),
       });
 
       if (!response.ok) {
@@ -186,6 +197,12 @@ export async function check(options: { manual?: boolean } = {}): Promise<UpdateS
         if (response.status === 404) {
           throw new Error('el repositorio de versiones todavía no publica ninguna release');
         }
+
+        // Un 403 de esta API casi nunca es un permiso: es el límite por IP, y el mensaje que trae
+        // no lo menciona. Sin esta traducción, quien lo ve busca el problema en su red.
+        const hint = rateLimitHint(response.status, githubToken() !== null);
+        if (hint !== null) throw new Error(hint);
+
         throw new Error(`el servidor de versiones respondió ${response.status} ${response.statusText}`);
       }
 
@@ -286,12 +303,14 @@ export async function download(): Promise<UpdateState> {
   publish({ status: 'downloading', progress: 0, message: null });
 
   try {
+    // `asset.url` apunta a `objects.githubusercontent.com`, no a la API: `requestHeaders` no le
+    // adjunta ninguna credencial, y eso es exactamente lo que tiene que pasar.
     const response = await fetch(asset.url, {
       signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
-      headers: {
-        Accept: 'application/octet-stream',
-        'User-Agent': `DotForge-IDE/${current.currentVersion}`,
-      },
+      headers: requestHeaders(asset.url, {
+        accept: 'application/octet-stream',
+        userAgent: userAgent(current.currentVersion),
+      }),
     });
 
     if (!response.ok) {
