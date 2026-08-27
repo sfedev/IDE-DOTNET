@@ -19,9 +19,13 @@
  *    arranque. Una promesa que sólo vive en memoria no es una promesa.
  *  - **El instalador se lanza desprendido del proceso.** Se está cerrando el IDE: un hijo atado al
  *    padre moriría con él a mitad de la instalación.
+ *  - **El ciclo se cierra al arrancar.** Lo que se lanzó al salir no lo puede contar nadie desde
+ *    dentro —el proceso desaparece a continuación—, así que se anota el intento antes de irse y en
+ *    el arranque siguiente se compara con la versión que corre: instalada, o no. `judgePending`
+ *    dicta cuál de los dos, y el resultado viaja al renderer en `state.outcome`.
  */
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseJsonText } from '../../shared/json-text.js';
@@ -31,7 +35,7 @@ import {
   assetFor,
   emptyUpdateState,
   installPlan,
-  isNewerVersion,
+  judgePending,
   parseReleaseFeed,
   releaseNotesLines,
   selectUpdate,
@@ -55,11 +59,25 @@ export interface UpdaterEnvironment {
   feedUrl?: string;
 }
 
-/** Instalación descargada y esperando a que el IDE se cierre. */
+/**
+ * Instalación descargada y esperando a que el IDE se cierre.
+ *
+ * `attempts` es lo que convierte este archivo en la memoria del ciclo: se incrementa **al lanzar**
+ * el instalador, no al terminarlo, porque para cuando termina ya no hay proceso que lo escriba.
+ * Que en el arranque siguiente siga habiendo un registro con `attempts > 0` y una versión que
+ * todavía es más nueva significa exactamente una cosa: se lanzó y no llegó a aplicarse.
+ *
+ * `notes` y `releaseUrl` viajan con él para poder contar qué trae la versión **después** de
+ * instalarla. En ese momento el feed diría que ya no hay ninguna actualización, así que las notas
+ * de la release que se acaba de aplicar no habría de dónde sacarlas.
+ */
 interface PendingInstall {
   version: string;
   file: string;
   savedAtUtc: string;
+  attempts: number;
+  notes: string[];
+  releaseUrl: string | null;
 }
 
 let environment: UpdaterEnvironment | null = null;
@@ -102,10 +120,17 @@ export function getState(): UpdateState {
 /**
  * Arranque del servicio.
  *
- * Además de fijar el entorno, recupera lo que quedó pendiente. Dos casos:
- *  - el archivo descargado sigue siendo de una versión posterior: se rearma la promesa;
- *  - la versión que corre ya es esa o superior (la instalación se aplicó): se borra la descarga,
- *    que ocupa entre 90 y 150 MB y no sirve para nada.
+ * Además de fijar el entorno, **cierra el ciclo de la sesión anterior**. Cuatro casos, y los cuatro
+ * los dicta `judgePending` a partir de datos:
+ *
+ *  - `applied` — la versión que corre ya es la prometida: se borra la descarga (entre 90 y 150 MB
+ *    que no sirven para nada) y se publica el "✅ ¡Actualizado!" con las notas guardadas.
+ *  - `failed` — se lanzó el instalador y el IDE ha vuelto a abrirse en la versión de antes: se
+ *    avisa **a la vista**, con la descarga intacta para poder reintentarlo sin volver a bajarla, y
+ *    sin rearmar la instalación al cerrar. Reintentar en silencio lo que ya falló una vez y el
+ *    usuario pudo cancelar a propósito es insistir, no ayudar.
+ *  - `pending` — descargada y nunca lanzada: se rearma la promesa, como siempre.
+ *  - `stale` — el archivo ya no está: se borra el rastro.
  */
 export async function initialize(options: UpdaterEnvironment): Promise<UpdateState> {
   environment = options;
@@ -116,23 +141,70 @@ export async function initialize(options: UpdaterEnvironment): Promise<UpdateSta
   const record = await readPending();
   if (record === null) return state;
 
-  if (!isNewerVersion(record.version, options.currentVersion) || !existsSync(record.file)) {
+  const plan = installPlan(options.platform, record.file);
+  const verdict = judgePending(record, {
+    currentVersion: options.currentVersion,
+    fileExists: existsSync(record.file),
+    planKind: plan.kind,
+  });
+
+  if (verdict.kind === 'stale') {
     await discardPending();
     return state;
   }
 
+  if (verdict.kind === 'applied') {
+    await discardPending();
+    return publish({
+      status: 'up-to-date',
+      outcome: verdict.outcome,
+      notes: verdict.outcome.notes,
+      releaseUrl: verdict.outcome.releaseUrl,
+      message: null,
+    });
+  }
+
   pending = record;
+
+  if (verdict.kind === 'failed') {
+    return publish({
+      status: 'ready',
+      version: record.version,
+      notes: verdict.outcome.notes,
+      releaseUrl: verdict.outcome.releaseUrl,
+      downloadedPath: record.file,
+      // Ni programada ni escondida: el aviso tiene que verse, y el siguiente cierre no puede
+      // volver a lanzar solo lo que acaba de no funcionar.
+      applyOnQuit: false,
+      dismissed: false,
+      plan: plan.note,
+      planKind: plan.kind,
+      outcome: verdict.outcome,
+      message: null,
+    });
+  }
+
   return publish({
     status: 'ready',
     version: record.version,
+    notes: record.notes,
+    releaseUrl: record.releaseUrl,
     downloadedPath: record.file,
     applyOnQuit: true,
     dismissed: true,
-    plan: installPlan(options.platform, record.file).note,
+    plan: plan.note,
+    planKind: plan.kind,
     message: `La versión ${record.version} está descargada y se instalará al cerrar el IDE.`,
   });
 }
 
+/**
+ * Lee el registro pendiente.
+ *
+ * Lo escribe una versión del IDE y lo lee otra, así que todo lo que no sea `version` y `file` se
+ * completa con un valor por defecto en vez de exigirse: un `pending.json` de la v2.7.0 no tiene
+ * `attempts` ni `notes`, y descartarlo entero por eso perdería una descarga de 130 MB.
+ */
 async function readPending(): Promise<PendingInstall | null> {
   const path = join(updatesDir(), PENDING_FILE);
   if (!existsSync(path)) return null;
@@ -140,7 +212,17 @@ async function readPending(): Promise<PendingInstall | null> {
   try {
     const raw = parseJsonText<Partial<PendingInstall>>(await readFile(path, 'utf8'));
     if (typeof raw.version !== 'string' || typeof raw.file !== 'string') return null;
-    return { version: raw.version, file: raw.file, savedAtUtc: raw.savedAtUtc ?? '' };
+
+    return {
+      version: raw.version,
+      file: raw.file,
+      savedAtUtc: raw.savedAtUtc ?? '',
+      attempts: typeof raw.attempts === 'number' && Number.isFinite(raw.attempts)
+        ? Math.max(Math.trunc(raw.attempts), 0)
+        : 0,
+      notes: Array.isArray(raw.notes) ? raw.notes.filter((line): line is string => typeof line === 'string') : [],
+      releaseUrl: typeof raw.releaseUrl === 'string' ? raw.releaseUrl : null,
+    };
   } catch {
     return null;
   }
@@ -232,13 +314,15 @@ export async function check(options: { manual?: boolean } = {}): Promise<UpdateS
 
       // Ya descargada en una sesión anterior: no se vuelve a bajar, se ofrece aplicarla.
       if (pending !== null && pending.version === candidate.release.version) {
+        const plan = installPlan(current.platform, pending.file);
         return publish({
           status: 'ready',
           version: candidate.release.version,
           notes: releaseNotesLines(candidate.release.notes),
           releaseUrl: candidate.release.htmlUrl,
           checkedAtUtc,
-          plan: installPlan(current.platform, pending.file).note,
+          plan: plan.note,
+          planKind: plan.kind,
           message: null,
         });
       }
@@ -257,6 +341,7 @@ export async function check(options: { manual?: boolean } = {}): Promise<UpdateS
         releaseUrl: candidate.release.htmlUrl,
         checkedAtUtc,
         plan: null,
+        planKind: null,
         message:
           candidate.asset === null
             ? 'Esta versión no publica un instalador para tu sistema: descárgala desde la página de la release.'
@@ -346,14 +431,27 @@ export async function download(): Promise<UpdateState> {
     const file = join(updatesDir(), asset.name);
     await writeFile(file, Buffer.concat(chunks));
 
-    pending = { version, file, savedAtUtc: new Date().toISOString() };
+    // Las notas y el enlace se guardan **ahora**, con la release todavía a la vista. Después de
+    // instalarla el feed dirá que no hay ninguna actualización, y contar qué trae la versión que se
+    // acaba de aplicar no tendría de dónde salir.
+    pending = {
+      version,
+      file,
+      savedAtUtc: new Date().toISOString(),
+      attempts: 0,
+      notes: state.notes,
+      releaseUrl: state.releaseUrl,
+    };
     await writePending(pending);
+
+    const plan = installPlan(current.platform, file);
 
     return publish({
       status: 'ready',
       progress: 1,
       downloadedPath: file,
-      plan: installPlan(current.platform, file).note,
+      plan: plan.note,
+      planKind: plan.kind,
       message: null,
     });
   } catch (error) {
@@ -374,7 +472,10 @@ export async function download(): Promise<UpdateState> {
  * la próxima comprobación volverá a ofrecerla.
  */
 export function dismiss(): UpdateState {
-  const next = publish({ dismissed: true, applyOnQuit: true, message: null });
+  // `applyOnQuit` sólo se arma si hay algo que aplicar. Sin esta condición, cerrar el aviso de
+  // "✅ ¡Actualizado!" —que es una tarjeta más y se descarta igual— dejaba programada al cierre una
+  // instalación que ya no existe.
+  const next = publish({ dismissed: true, applyOnQuit: pending !== null, message: null });
 
   if (state.status === 'available' && candidateAsset !== null) {
     void download();
@@ -384,18 +485,36 @@ export function dismiss(): UpdateState {
 }
 
 /**
+ * "Enterado": el aviso de cierre de bucle se va.
+ *
+ * Tiene acción propia porque no es lo mismo que `dismiss`. `dismiss` habla de una actualización que
+ * está por venir —esconde la tarjeta y deja la instalación programada—; esto habla de una que ya
+ * pasó, y lo único que hace es borrar la noticia. Mezclarlos dejaría un "instalar al cerrar" armado
+ * cada vez que alguien cierra un mensaje de éxito.
+ */
+export function acknowledgeOutcome(): UpdateState {
+  return publish({ outcome: null });
+}
+
+/**
  * Programa la instalación al cerrar y, con `now`, cierra.
  *
- * El botón "Reiniciar y aplicar" llega por aquí con `now`. Cerrar la aplicación es lo que dispara
+ * El botón "Cerrar e instalar" llega por aquí con `now`. Cerrar la aplicación es lo que dispara
  * `before-quit`, que es donde se lanza el instalador: un único camino de instalación, se llegue
  * pulsando el botón o cerrando la ventana tres horas después.
+ *
+ * El aviso previo —lo que se va a cerrar, cuánto tarda y si la aplicación vuelve sola— lo plantea
+ * el renderer antes de llamar aquí. Este camino no pregunta: cuando llega con `now`, el usuario ya
+ * ha dicho que sí a un texto que le explicaba exactamente esto.
  */
 export async function applyOnQuit(now: boolean): Promise<UpdateState> {
   if (state.status !== 'ready' || pending === null) {
     if (state.status === 'available') await download();
   }
 
-  const next = publish({ applyOnQuit: pending !== null, dismissed: true });
+  // El aviso de un intento fallido deja de tener sentido en cuanto se reintenta: si vuelve a
+  // fallar, el arranque siguiente lo escribe otra vez y con el número de intentos actualizado.
+  const next = publish({ applyOnQuit: pending !== null, dismissed: true, outcome: null });
 
   if (now && pending !== null) env().quit();
   return next;
@@ -420,6 +539,13 @@ export function runPendingInstaller(): string | null {
   const current = env();
   const plan = installPlan(current.platform, pending.file);
 
+  // El intento se anota **antes** de lanzar nada, y por eso cuenta intentos y no fracasos: lo que
+  // pase a partir de aquí ya no lo puede escribir nadie. El instalador va desprendido y el proceso
+  // desaparece en el mismo suspiro, así que su código de salida no lo lee ni lo leerá jamás este
+  // IDE. Lo que el arranque siguiente encuentra —un registro lanzado y una versión que sigue
+  // siendo más nueva— es toda la evidencia que hay, y es suficiente.
+  recordAttemptSync();
+
   try {
     if (plan.kind === 'silent') {
       spawnDetached(plan.command, plan.args);
@@ -432,6 +558,29 @@ export function runPendingInstaller(): string | null {
   } catch (error) {
     console.error(`[updater] no se ha podido lanzar el instalador: ${(error as Error).message}`);
     return null;
+  }
+}
+
+/**
+ * Suma un intento al registro pendiente, en síncrono.
+ *
+ * Es el único `writeFileSync` del servicio y está justificado por dónde ocurre: `before-quit`, con
+ * el bucle de eventos ya de salida. La regla del ADR-051 —nada síncrono en el hilo principal—
+ * protege el repintado y el IPC de una ventana viva; aquí no queda ventana a la que hacerle esperar
+ * un milisegundo, y un `await` no llegaría a resolverse nunca.
+ *
+ * Si falla, se traga: perder la anotación del intento significa no poder avisar del fallo en el
+ * arranque siguiente, y eso es infinitamente mejor que impedir el cierre del IDE.
+ */
+function recordAttemptSync(): void {
+  if (pending === null) return;
+
+  pending = { ...pending, attempts: pending.attempts + 1 };
+
+  try {
+    writeFileSync(join(updatesDir(), PENDING_FILE), `${JSON.stringify(pending, null, 2)}\n`, 'utf8');
+  } catch (error) {
+    console.error(`[updater] no se ha podido anotar el intento: ${(error as Error).message}`);
   }
 }
 

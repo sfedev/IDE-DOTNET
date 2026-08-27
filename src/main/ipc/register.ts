@@ -1453,6 +1453,8 @@ export function registerIpcHandlers(options: IpcOptions = {}): void {
     updaterService.applyOnQuit(now === true),
   );
 
+  ipcMain.handle(IPC.updateAcknowledge, (): UpdateState => updaterService.acknowledgeOutcome());
+
   // --- Búsqueda de texto en los archivos ----------------------------------------------------------
 
   /**

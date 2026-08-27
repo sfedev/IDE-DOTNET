@@ -448,6 +448,15 @@ const UI_ACTIONS: Record<string, string> = {
   // La tarjeta de actualización con un estado de ejemplo: publicar una versión de verdad en
   // GitHub para poder mirarla no es una opción, y no mirarla nunca tampoco.
   update: 'window.__dotforgeUpdatePreview && window.__dotforgeUpdatePreview()',
+  // Los dos avisos de cierre de ciclo, que son los que menos se pueden provocar de todo el IDE:
+  // uno exige instalar una release de verdad y el otro, cancelarle el aviso de permisos a Windows.
+  'update-done': "window.__dotforgeUpdatePreview && window.__dotforgeUpdatePreview('updated')",
+  'update-failed': "window.__dotforgeUpdatePreview && window.__dotforgeUpdatePreview('failed')",
+  // El aviso previo al cierre, ya desplegado: es lo que sustituye al clic que cerraba el IDE sin
+  // avisar, y es texto — la única forma de revisarlo es leerlo.
+  'update-confirm':
+    "window.__dotforgeUpdatePreview && window.__dotforgeUpdatePreview('failed');" +
+    'setTimeout(() => [...document.querySelectorAll(".update-actions .btn.primary")][0]?.click(), 600)',
   // Cliente HTTP y visor de registro: pestañas del panel inferior.
   http: "[...document.querySelectorAll('.panel-tab')].find((tab) => tab.textContent?.includes('HTTP'))?.click()",
   logs: "[...document.querySelectorAll('.panel-tab')].find((tab) => tab.textContent?.includes('Registro'))?.click()",

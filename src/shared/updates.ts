@@ -15,6 +15,12 @@
  *  - **No todo se puede instalar en silencio.** En Windows el instalador NSIS acepta `/S`; un `.dmg`
  *    de macOS necesita que alguien arrastre la app a Aplicaciones. El modelo lo dice explícitamente
  *    (`silent` frente a `open`) en vez de fingir que los dos casos son iguales.
+ *  - **Un ciclo que empieza tiene que cerrarse.** Aplicar una actualización cierra el IDE, y lo
+ *    siguiente que ve el usuario es un arranque idéntico al de siempre: no sabe si se instaló, si
+ *    canceló el aviso de permisos de Windows o si el instalador falló. `judgePending` mira el
+ *    registro que quedó en el disco y dicta cuál de los cuatro casos se ha dado; `outcomeHeadline`
+ *    y `outcomeMessage` lo ponen en palabras. Es puro a propósito: el texto que cierra el bucle es
+ *    justo el que no se puede revisar sin publicar una release de verdad.
  */
 
 /** Feed de versiones: las releases publicadas del repositorio. Público y sin autenticación. */
@@ -388,11 +394,16 @@ export function installPlan(platform: NodeJS.Platform, file: string): InstallPla
 
   if (platform === 'win32' && lower.endsWith('.exe')) {
     // `/S` es el modo silencioso de NSIS, que es el instalador que genera electron-builder.
+    //
+    // `--force-run` es la otra mitad, y es la que hace que la promesa de la tarjeta —"se vuelve a
+    // abrir al terminar"— sea verdad: un instalador NSIS asistido (`oneClick: false`) instalado en
+    // silencio **no** relanza la aplicación por su cuenta. Es la misma pareja de banderas que
+    // manda `electron-updater` cuando instala una actualización, y NSIS ignora lo que no reconoce.
     return {
       kind: 'silent',
       command: file,
-      args: ['/S'],
-      note: 'Se instalará en silencio al cerrar el IDE.',
+      args: ['/S', '--force-run'],
+      note: 'Se instalará en silencio al cerrar el IDE y DotForge se abrirá de nuevo al terminar.',
     };
   }
 
@@ -405,6 +416,190 @@ export function installPlan(platform: NodeJS.Platform, file: string): InstallPla
   }
 
   return { kind: 'open', path: file, note: 'Se abrirá el archivo descargado al cerrar el IDE.' };
+}
+
+/** Cómo se aplica: `silent` termina solo, `open` necesita que alguien lo remate a mano. */
+export type InstallPlanKind = InstallPlan['kind'];
+
+/**
+ * Texto del botón que aplica la actualización.
+ *
+ * "Reiniciar y aplicar" prometía dos cosas que el IDE no hace: que reinicia él —lo que hace es
+ * cerrarse y dejar trabajando a un instalador— y que en cualquier plataforma acaba solo. En macOS
+ * lo único que ocurre es que se abre una imagen de disco. El botón dice ahora lo que va a pasar.
+ */
+export function applyActionLabel(kind: InstallPlanKind): string {
+  return kind === 'silent' ? 'Cerrar e instalar' : 'Abrir instalador';
+}
+
+/** Lo que se le pregunta al usuario antes de cerrarle el IDE. */
+export interface ApplyConfirmation {
+  title: string;
+  message: string;
+  detail: string;
+  confirmLabel: string;
+  cancelLabel: string;
+}
+
+/**
+ * Aviso previo al cierre.
+ *
+ * Cerrar el IDE es lo más intrusivo que hace el actualizador, y hasta ahora ocurría en el mismo
+ * gesto de pedirlo: un clic, y la ventana desaparecía. El aviso no es un trámite — dice **cuánto**
+ * dura, **quién** termina el trabajo y **si** la aplicación vuelve sola, que son las tres cosas que
+ * ya no se pueden comprobar una vez que la ventana no está.
+ */
+export function applyConfirmation(version: string, kind: InstallPlanKind): ApplyConfirmation {
+  if (kind === 'silent') {
+    return {
+      title: `Cerrar e instalar la v${version}`,
+      message: `El IDE se va a cerrar para instalar la versión ${version}.`,
+      detail:
+        'La instalación tarda unos segundos en segundo plano y DotForge se vuelve a abrir al ' +
+        'terminar. Windows puede pedirte permiso antes de empezar: si lo cancelas, el IDE se ' +
+        'reabrirá en la versión de ahora y te lo diremos.',
+      confirmLabel: applyActionLabel(kind),
+      cancelLabel: 'Ahora no',
+    };
+  }
+
+  return {
+    title: `Cerrar y abrir el instalador de la v${version}`,
+    message: `El IDE se va a cerrar y se abrirá el instalador de la versión ${version}.`,
+    detail:
+      'En este sistema la actualización no puede aplicarse sola: tendrás que completar la ' +
+      'instalación y volver a abrir DotForge tú.',
+    confirmLabel: applyActionLabel(kind),
+    cancelLabel: 'Ahora no',
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Cierre de bucle: qué pasó con la instalación que se programó al cerrar
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Resultado de la instalación programada en la sesión anterior.
+ *
+ * `just-updated` es la buena noticia; `install-failed` es la que de verdad justifica todo esto: sin
+ * ella, cancelar el aviso de permisos deja al usuario en la versión de siempre, con la tarjeta
+ * callada y sin ninguna forma de enterarse de que lo que pulsó no llegó a ocurrir.
+ */
+export type InstallOutcomeKind = 'just-updated' | 'install-failed';
+
+export interface InstallOutcome {
+  kind: InstallOutcomeKind;
+  /** Versión de la que se habla: la que se instaló, o la que no llegó a instalarse. */
+  version: string;
+  /** Cuántas veces se ha lanzado ya el instalador de esa versión. */
+  attempts: number;
+  /** Notas de la versión, para poder contar qué trae. Vacío si no se guardaron. */
+  notes: string[];
+  releaseUrl: string | null;
+}
+
+/** Lo que el actualizador dejó anotado en el disco, visto por la parte pura. */
+export interface PendingRecordView {
+  version: string;
+  attempts?: number;
+  notes?: string[];
+  releaseUrl?: string | null;
+}
+
+export interface PendingVerdictQuery {
+  currentVersion: string;
+  /** ¿Sigue estando el archivo descargado? */
+  fileExists: boolean;
+  /** Cómo se iba a aplicar. Sólo un plan silencioso puede *fallar* sin que nadie lo vea. */
+  planKind: InstallPlanKind;
+}
+
+export type PendingVerdict =
+  /** Se aplicó: la versión que corre ya es la prometida, o una posterior. */
+  | { kind: 'applied'; outcome: InstallOutcome }
+  /** Se lanzó el instalador y el IDE ha vuelto a abrirse en la versión de antes. */
+  | { kind: 'failed'; outcome: InstallOutcome }
+  /** Sigue descargada y sin aplicar: se rearma la promesa. */
+  | { kind: 'pending' }
+  /** No queda nada que hacer con ella: se borra. */
+  | { kind: 'stale' };
+
+/**
+ * Qué ha pasado con la instalación pendiente, mirando sólo datos.
+ *
+ * Tres reglas que no son evidentes:
+ *
+ *  - **"Ya no es más nueva" es la prueba de que se instaló.** No hay a quién preguntárselo: si el
+ *    IDE que corre es la versión prometida —o una posterior—, la instalación ocurrió.
+ *  - **Un plan `open` no puede declararse fallido.** En macOS, "se abrió la imagen de disco y el
+ *    usuario todavía no ha arrastrado nada" es el curso normal, no un fallo; acusar ahí al
+ *    instalador sería un aviso falso en cada arranque hasta que alguien complete el arrastre. Sólo
+ *    el camino silencioso —que prometía terminar solo— puede incumplir.
+ *  - **Las notas viajan con el veredicto sólo si son de la versión que corre.** Si por el camino se
+ *    instaló a mano una versión posterior, las notas guardadas son de otra release: contarlas como
+ *    novedades de ésta sería mentir con detalle.
+ */
+export function judgePending(record: PendingRecordView, query: PendingVerdictQuery): PendingVerdict {
+  const raw = record.attempts;
+  const attempts = typeof raw === 'number' && Number.isFinite(raw) ? Math.max(Math.trunc(raw), 0) : 0;
+  const notes = Array.isArray(record.notes) ? record.notes : [];
+  const releaseUrl = typeof record.releaseUrl === 'string' ? record.releaseUrl : null;
+
+  if (!isNewerVersion(record.version, query.currentVersion)) {
+    const sameRelease = record.version === query.currentVersion;
+    return {
+      kind: 'applied',
+      outcome: {
+        kind: 'just-updated',
+        version: sameRelease ? record.version : query.currentVersion,
+        attempts,
+        notes: sameRelease ? notes : [],
+        releaseUrl: sameRelease ? releaseUrl : null,
+      },
+    };
+  }
+
+  if (!query.fileExists) return { kind: 'stale' };
+
+  if (query.planKind === 'silent' && attempts > 0) {
+    return {
+      kind: 'failed',
+      outcome: { kind: 'install-failed', version: record.version, attempts, notes, releaseUrl },
+    };
+  }
+
+  return { kind: 'pending' };
+}
+
+/** Titular del aviso de cierre de bucle. Vive aquí para que la prueba fije el formato exacto. */
+export function outcomeHeadline(outcome: InstallOutcome): string {
+  return outcome.kind === 'just-updated'
+    ? `✅ ¡Actualizado con éxito a la v${outcome.version}!`
+    : `⚠️ La actualización a la v${outcome.version} no se completó`;
+}
+
+/**
+ * El aviso, en palabras.
+ *
+ * El caso que falla dice **qué se hizo**, **dónde ha quedado el usuario** y **qué puede hacer
+ * ahora**. Y nombra las dos causas posibles —el aviso de permisos cancelado y el instalador que no
+ * termina— en vez de elegir una: el instalador se lanza desprendido justo antes de que el proceso
+ * desaparezca, así que nadie llega a leer su código de salida. Elegir sería adivinar en voz alta.
+ */
+export function outcomeMessage(outcome: InstallOutcome, currentVersion: string): string {
+  if (outcome.kind === 'just-updated') {
+    return outcome.notes.length > 0
+      ? `Ya estás en la v${outcome.version}. Esto es lo que trae:`
+      : `Ya estás en la v${outcome.version}.`;
+  }
+
+  const tries = outcome.attempts > 1 ? ` Van ${outcome.attempts} intentos.` : '';
+
+  return (
+    `Se lanzó el instalador al cerrar y el IDE ha vuelto a abrirse en la v${currentVersion}: o se ` +
+    `canceló el aviso de permisos de Windows, o la instalación no llegó a terminar.${tries} La ` +
+    'descarga sigue guardada, así que reintentarlo no vuelve a bajar nada.'
+  );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -438,6 +633,22 @@ export interface UpdateState {
   dismissed: boolean;
   /** Qué se hará exactamente al aplicar, en palabras. */
   plan: string | null;
+  /**
+   * Y cómo, como dato.
+   *
+   * El renderer necesita saberlo para escribir el botón y el aviso previo, y la alternativa —mirar
+   * el texto de `plan`— sería decidir el comportamiento comparando una frase traducible.
+   */
+  planKind: InstallPlanKind | null;
+  /**
+   * Cierre de bucle: qué pasó con la instalación que se programó en la sesión anterior.
+   *
+   * Va aparte del `status` a propósito. La comprobación automática de los cinco segundos publica
+   * `up-to-date` justo después de arrancar, y con esto dentro del estado el "✅ ¡Actualizado!" se
+   * habría borrado solo antes de que a nadie le diera tiempo a leerlo. Vive hasta que el usuario
+   * lo cierra (`acknowledgeOutcome`), no hasta el siguiente cambio de estado.
+   */
+  outcome: InstallOutcome | null;
   message: string | null;
   releaseUrl: string | null;
   checkedAtUtc: string | null;
@@ -455,6 +666,8 @@ export function emptyUpdateState(currentVersion: string): UpdateState {
     applyOnQuit: false,
     dismissed: false,
     plan: null,
+    planKind: null,
+    outcome: null,
     message: null,
     releaseUrl: null,
     checkedAtUtc: null,

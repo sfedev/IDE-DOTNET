@@ -10,11 +10,16 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  applyActionLabel,
+  applyConfirmation,
   assetFor,
   compareVersions,
   emptyUpdateState,
   installPlan,
   isNewerVersion,
+  judgePending,
+  outcomeHeadline,
+  outcomeMessage,
   parseReleaseFeed,
   parseVersion,
   releaseNotesLines,
@@ -276,7 +281,19 @@ describe('plan de instalación', () => {
   it('en Windows el instalador NSIS se lanza en silencio', () => {
     const plan = installPlan('win32', 'C:\\Users\\x\\AppData\\updates\\Setup.exe');
     assert.equal(plan.kind, 'silent');
-    assert.deepEqual(plan.args, ['/S']);
+    assert.deepEqual(plan.args, ['/S', '--force-run']);
+  });
+
+  /**
+   * `--force-run` es lo que hace verdad la frase de la tarjeta. Un NSIS asistido
+   * (`oneClick: false`, que es lo que declara `electron-builder.yml`) instalado con `/S` a secas
+   * **no** relanza la aplicación: el usuario se quedaría con el escritorio vacío después de haber
+   * leído "y se vuelve a abrir al terminar".
+   */
+  it('el plan silencioso pide explícitamente que la aplicación vuelva a abrirse', () => {
+    const plan = installPlan('win32', 'C:\\x\\Setup.exe');
+    assert.ok(plan.args.includes('--force-run'));
+    assert.match(plan.note, /se abrirá de nuevo al terminar/);
   });
 
   /**
@@ -294,6 +311,169 @@ describe('plan de instalación', () => {
   });
 });
 
+/**
+ * Aviso previo al cierre.
+ *
+ * Es texto, y por eso se prueba: es lo único que el usuario lee **antes** de que la ventana
+ * desaparezca, y una vez desaparecida ya no hay dónde corregir la impresión que dejó.
+ */
+describe('aviso previo a aplicar la actualización', () => {
+  it('el botón dice lo que hace en cada plataforma', () => {
+    assert.equal(applyActionLabel('silent'), 'Cerrar e instalar');
+    assert.equal(applyActionLabel('open'), 'Abrir instalador');
+  });
+
+  it('el botón nunca promete un reinicio: el IDE se cierra, no se reinicia', () => {
+    for (const kind of ['silent', 'open']) {
+      assert.doesNotMatch(applyActionLabel(kind), /reinici/i);
+      assert.doesNotMatch(applyConfirmation('2.8.0', kind).title, /reinici/i);
+    }
+  });
+
+  it('el plan silencioso avisa del cierre, de la duración y de que la app vuelve sola', () => {
+    const confirmation = applyConfirmation('2.8.0', 'silent');
+    assert.match(confirmation.message, /se va a cerrar/);
+    assert.match(confirmation.message, /2\.8\.0/);
+    assert.match(confirmation.detail, /unos segundos/);
+    assert.match(confirmation.detail, /se vuelve a abrir/);
+    assert.equal(confirmation.confirmLabel, 'Cerrar e instalar');
+  });
+
+  /**
+   * En macOS no hay instalación silenciosa ni reapertura automática, y el aviso **no puede**
+   * prometer ninguna de las dos: quien lea "se vuelve a abrir al terminar" y se quede con una
+   * imagen de disco abierta dará por hecho que algo se ha roto.
+   */
+  it('el plan abierto no promete ni silencio ni reapertura', () => {
+    const confirmation = applyConfirmation('2.8.0', 'open');
+    assert.match(confirmation.detail, /tendrás que completar/i);
+    assert.doesNotMatch(confirmation.detail, /se vuelve a abrir/);
+    assert.doesNotMatch(confirmation.detail, /segundo plano/);
+    assert.equal(confirmation.confirmLabel, 'Abrir instalador');
+  });
+
+  it('cancelar se llama "ahora no", no "cancelar": la actualización sigue estando', () => {
+    assert.equal(applyConfirmation('2.8.0', 'silent').cancelLabel, 'Ahora no');
+  });
+});
+
+/**
+ * Cierre de bucle.
+ *
+ * Es la mitad del actualizador que sólo se ve en el arranque **siguiente**, y por tanto la que
+ * nadie prueba a mano: exige publicar una release, instalarla y —para el caso interesante—
+ * cancelarle el aviso de permisos a Windows. Aquí son cuatro veredictos sobre datos.
+ */
+describe('qué pasó con la instalación programada', () => {
+  const record = {
+    version: '2.8.0',
+    attempts: 1,
+    notes: ['· Publicación de proyectos', '· Ctrl+B esconde la barra lateral'],
+    releaseUrl: 'https://github.com/sfedev/IDE-DOTNET/releases/tag/v2.8.0',
+  };
+
+  const silent = { fileExists: true, planKind: 'silent' };
+
+  it('la versión que corre es la prometida: se instaló', () => {
+    const verdict = judgePending(record, { ...silent, currentVersion: '2.8.0' });
+    assert.equal(verdict.kind, 'applied');
+    assert.equal(verdict.outcome.kind, 'just-updated');
+    assert.equal(verdict.outcome.version, '2.8.0');
+    assert.deepEqual(verdict.outcome.notes, record.notes);
+  });
+
+  /**
+   * Si por el camino se instaló a mano una versión posterior, la instalación programada también
+   * quedó atrás — pero las notas guardadas son de otra release, y contarlas como novedades de la
+   * que corre sería mentir con detalle.
+   */
+  it('con una versión posterior instalada a mano, se felicita sin inventarse las novedades', () => {
+    const verdict = judgePending(record, { ...silent, currentVersion: '2.9.0' });
+    assert.equal(verdict.kind, 'applied');
+    assert.equal(verdict.outcome.version, '2.9.0');
+    assert.deepEqual(verdict.outcome.notes, []);
+    assert.equal(verdict.outcome.releaseUrl, null);
+  });
+
+  it('se lanzó el instalador y el IDE sigue en la versión de antes: no se completó', () => {
+    const verdict = judgePending(record, { ...silent, currentVersion: '2.7.0' });
+    assert.equal(verdict.kind, 'failed');
+    assert.equal(verdict.outcome.kind, 'install-failed');
+    assert.equal(verdict.outcome.version, '2.8.0');
+    assert.equal(verdict.outcome.attempts, 1);
+  });
+
+  it('descargada y nunca lanzada: se rearma la promesa, sin avisar de nada', () => {
+    const verdict = judgePending({ ...record, attempts: 0 }, { ...silent, currentVersion: '2.7.0' });
+    assert.equal(verdict.kind, 'pending');
+  });
+
+  /**
+   * En macOS, "se abrió la imagen de disco y todavía no se ha arrastrado nada" es el curso normal.
+   * Declararlo fallido pintaría un aviso rojo en cada arranque hasta que alguien complete el
+   * arrastre — y el usuario que decidió no completarlo lo vería para siempre.
+   */
+  it('un plan que se completa a mano nunca se declara fallido', () => {
+    const verdict = judgePending(record, { fileExists: true, planKind: 'open', currentVersion: '2.7.0' });
+    assert.equal(verdict.kind, 'pending');
+  });
+
+  it('sin el archivo descargado no queda nada que hacer', () => {
+    const verdict = judgePending(record, { fileExists: false, planKind: 'silent', currentVersion: '2.7.0' });
+    assert.equal(verdict.kind, 'stale');
+  });
+
+  /**
+   * El `pending.json` lo escribe una versión del IDE y lo lee otra: el de la v2.7.0 no tiene
+   * `attempts` ni `notes`. Tratarlo como un intento fallido pintaría un aviso de fallo a todo el
+   * que actualice desde una versión anterior a ésta.
+   */
+  it('un registro escrito por una versión anterior no cuenta como intento', () => {
+    const verdict = judgePending({ version: '2.8.0' }, { ...silent, currentVersion: '2.7.0' });
+    assert.equal(verdict.kind, 'pending');
+  });
+
+  it('un número de intentos absurdo no se propaga', () => {
+    const outcome = judgePending({ version: '2.8.0', attempts: -3 }, { ...silent, currentVersion: '2.8.0' });
+    assert.equal(outcome.outcome.attempts, 0);
+  });
+});
+
+describe('el aviso de cierre de bucle, en palabras', () => {
+  const applied = { kind: 'just-updated', version: '2.8.0', attempts: 1, notes: ['· Algo'], releaseUrl: null };
+  const failed = { kind: 'install-failed', version: '2.8.0', attempts: 1, notes: [], releaseUrl: null };
+
+  it('el éxito lleva la marca y la versión', () => {
+    assert.equal(outcomeHeadline(applied), '✅ ¡Actualizado con éxito a la v2.8.0!');
+  });
+
+  it('el fallo dice que no se completó, no que haya fallado el IDE', () => {
+    assert.equal(outcomeHeadline(failed), '⚠️ La actualización a la v2.8.0 no se completó');
+  });
+
+  it('con novedades, el texto las presenta; sin ellas, no las promete', () => {
+    assert.match(outcomeMessage(applied, '2.8.0'), /Esto es lo que trae/);
+    assert.doesNotMatch(outcomeMessage({ ...applied, notes: [] }, '2.8.0'), /Esto es lo que trae/);
+  });
+
+  /**
+   * El instalador se lanza desprendido justo antes de que el proceso desaparezca: su código de
+   * salida no lo lee nadie. Elegir una de las dos causas sería adivinar delante del usuario.
+   */
+  it('el fallo nombra las dos causas posibles y dónde ha quedado el usuario', () => {
+    const message = outcomeMessage(failed, '2.7.0');
+    assert.match(message, /v2\.7\.0/);
+    assert.match(message, /permisos de Windows/);
+    assert.match(message, /no llegó a terminar/);
+    assert.match(message, /sigue guardada/);
+  });
+
+  it('a partir del segundo intento, se dice cuántos van', () => {
+    assert.match(outcomeMessage({ ...failed, attempts: 3 }, '2.7.0'), /Van 3 intentos/);
+    assert.doesNotMatch(outcomeMessage(failed, '2.7.0'), /intentos\./);
+  });
+});
+
 describe('estado inicial y presentación', () => {
   it('arranca sin nada que ofrecer', () => {
     const state = emptyUpdateState('2.1.0');
@@ -301,6 +481,8 @@ describe('estado inicial y presentación', () => {
     assert.equal(state.version, null);
     assert.equal(state.applyOnQuit, false);
     assert.equal(state.dismissed, false);
+    assert.equal(state.planKind, null);
+    assert.equal(state.outcome, null);
   });
 
   it('el titular lleva el cohete y la versión', () => {

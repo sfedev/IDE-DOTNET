@@ -370,3 +370,12 @@ export {
 } from '../shared/dotnet-publish.js';
 export type { PublishOptions } from '../shared/dotnet-publish.js';
 
+
+/**
+ * Actualizador in-app (Fase 27).
+ *
+ * Tampoco importa `electron` —`userData`, la versión que corre y el cierre se le inyectan en
+ * `initialize`—, y eso es lo que permite probar en Node pelado la mitad que de otro modo exigiría
+ * publicar una release de verdad: qué hace al arrancar con un `pending.json` en el disco.
+ */
+export * as updaterService from './services/updater-service.js';

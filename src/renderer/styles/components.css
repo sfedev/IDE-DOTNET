@@ -4817,6 +4817,13 @@ select.input {
   pointer-events: auto;
 }
 
+/* Una actualización que no llegó a aplicarse no es una novedad: la franja deja de ser el acento
+   —que aquí significa "algo bueno te espera"— y pasa a ser la de aviso. Es el único cambio de
+   color de la tarjeta, porque el mensaje ya dice lo demás. */
+.update-card.update-failed {
+  border-left-color: var(--warning);
+}
+
 .update-head {
   display: flex;
   align-items: flex-start;

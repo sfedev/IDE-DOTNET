@@ -263,6 +263,7 @@ const api: DotForgeApi = {
     download: () => ipcRenderer.invoke(IPC.updateDownload) as Promise<UpdateState>,
     dismiss: () => ipcRenderer.invoke(IPC.updateDismiss) as Promise<UpdateState>,
     applyOnQuit: (now) => ipcRenderer.invoke(IPC.updateApplyOnQuit, now ?? false) as Promise<UpdateState>,
+    acknowledge: () => ipcRenderer.invoke(IPC.updateAcknowledge) as Promise<UpdateState>,
   },
 
   search: {

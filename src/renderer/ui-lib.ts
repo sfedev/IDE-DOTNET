@@ -387,11 +387,16 @@ export type { AuditReport, VulnerablePackage, VulnerabilitySeverity } from '../s
  * respuestas reales y sin red.
  */
 export {
+  applyActionLabel,
+  applyConfirmation,
   assetFor,
   compareVersions,
   emptyUpdateState,
   installPlan,
   isNewerVersion,
+  judgePending,
+  outcomeHeadline,
+  outcomeMessage,
   parseReleaseFeed,
   parseVersion,
   releaseNotesLines,
@@ -400,7 +405,18 @@ export {
   updateHeadline,
   UPDATE_FEED,
 } from '../shared/updates.js';
-export type { InstallPlan, ReleaseAsset, ReleaseInfo, SemanticVersion, UpdateState } from '../shared/updates.js';
+export type {
+  ApplyConfirmation,
+  InstallOutcome,
+  InstallOutcomeKind,
+  InstallPlan,
+  InstallPlanKind,
+  PendingVerdict,
+  ReleaseAsset,
+  ReleaseInfo,
+  SemanticVersion,
+  UpdateState,
+} from '../shared/updates.js';
 
 export {
   downloadUrl,

@@ -144,7 +144,11 @@ export type { SemanticTokensLegend } from './semantic-tokens.js';
 // Fase 17: actualizaciones automáticas y extensiones de Open VSX. Sus modelos son puros y viven
 // en su propio archivo; su superficie IPC es parte del contrato.
 export type {
+  ApplyConfirmation,
+  InstallOutcome,
+  InstallOutcomeKind,
   InstallPlan,
+  InstallPlanKind,
   ReleaseAsset,
   ReleaseInfo,
   SemanticVersion,
@@ -907,6 +911,7 @@ export const IPC = {
   updateDownload: 'update:download',
   updateDismiss: 'update:dismiss',
   updateApplyOnQuit: 'update:apply-on-quit',
+  updateAcknowledge: 'update:acknowledge',
 
   searchInFiles: 'search:in-files',
   searchCancel: 'search:cancel',
@@ -1319,6 +1324,12 @@ export interface DotForgeApi {
     dismiss(): Promise<UpdateState>;
     /** Programa la instalación al cerrar; con `now`, cierra el IDE para aplicarla ya. */
     applyOnQuit(now?: boolean): Promise<UpdateState>;
+    /**
+     * Cierra el aviso de cierre de bucle (`state.outcome`): el "✅ ¡Actualizado!" del arranque, o
+     * el de la instalación que no llegó a aplicarse. No es `dismiss`: aquél habla de una
+     * actualización que viene y deja programada su instalación; éste sólo borra una noticia.
+     */
+    acknowledge(): Promise<UpdateState>;
   };
 
   /**
