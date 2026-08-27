@@ -26,6 +26,9 @@ import type {
   DotnetTaskExit,
   DotnetTaskOutput,
   DotnetTaskRequest,
+  PublishOptions,
+  PublishRequest,
+  PublishStarted,
   DotnetTaskStarted,
   ConnectionStringFileInfo,
   EfDbContext,
@@ -181,6 +184,9 @@ const api: DotForgeApi = {
     runTask: (request: DotnetTaskRequest) => ipcRenderer.invoke(IPC.dotnetRunTask, request) as Promise<DotnetTaskStarted>,
     cancelTask: (taskId) => ipcRenderer.invoke(IPC.dotnetCancelTask, taskId) as Promise<void>,
     listTasks: () => ipcRenderer.invoke(IPC.dotnetListTasks) as Promise<DotnetTaskStarted[]>,
+    publish: (request: PublishRequest) => ipcRenderer.invoke(IPC.dotnetPublish, request) as Promise<PublishStarted>,
+    publishOptions: (projectPath) =>
+      ipcRenderer.invoke(IPC.dotnetPublishOptions, projectPath) as Promise<PublishOptions>,
   },
 
   terminal: {

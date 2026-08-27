@@ -59,6 +59,15 @@ export type {
 import type { GitDiffRequest, GitRepositoryStatus } from './git.js';
 export type { DotnetVerbosity } from './dotnet-verbosity.js';
 
+// La publicación tiene su propio módulo de modelo (banderas que dependen del RID, saneado de la
+// ruta de salida), pero sus opciones cruzan el IPC: se reexportan para importar de un único sitio.
+export type {
+  PublishConfiguration,
+  PublishMode,
+  PublishOptions,
+} from './dotnet-publish.js';
+import type { PublishOptions } from './dotnet-publish.js';
+
 // El gestor de EF Core y el cliente HTTP tienen su propio módulo de modelo (parseo de la salida
 // de `dotnet ef`, esquema deducido de las migraciones, formato `.http`), pero su superficie IPC
 // es parte del contrato: se reexporta para importar de un único sitio.
@@ -299,7 +308,16 @@ export interface BuildDiagnostic {
   project: string | null;
 }
 
-export type DotnetTaskKind = 'build' | 'rebuild' | 'clean' | 'restore' | 'test' | 'run' | 'watch' | 'format';
+export type DotnetTaskKind =
+  | 'build'
+  | 'rebuild'
+  | 'clean'
+  | 'restore'
+  | 'test'
+  | 'run'
+  | 'watch'
+  | 'format'
+  | 'publish';
 
 export interface DotnetTaskRequest {
   kind: DotnetTaskKind;
@@ -344,6 +362,37 @@ export interface DotnetTaskExit {
   diagnostics: BuildDiagnostic[];
   /** URL detectada en la salida de `dotnet run`/`watch`, si la hay. */
   applicationUrl: string | null;
+}
+
+/**
+ * Petición de publicación.
+ *
+ * Sólo cruzan el proyecto y las opciones: los argumentos los compone el proceso principal con
+ * `publishArgs`, que es puro y está probado. El renderer no manda una línea de comandos, ni
+ * siquiera troceada — es la misma regla que con el prompt del asistente (ADR-016) y con la
+ * verbosidad: quien decide lo que se ejecuta es quien puede validarlo.
+ */
+export interface PublishRequest {
+  /** Ruta absoluta del `.csproj`. */
+  projectPath: string;
+  options: PublishOptions;
+  /** Nombre legible para el resumen del panel. Si falta, se usa el del archivo. */
+  projectName?: string;
+}
+
+/**
+ * Publicación en marcha.
+ *
+ * Trae la carpeta ya resuelta, y eso es deliberado: el mensaje de MSBuild que la anuncia está
+ * traducido al idioma del sistema (ADR-028), así que se compone aquí con las mismas reglas con las
+ * que el SDK la compone, en vez de rastrearla en la salida.
+ */
+export interface PublishStarted {
+  task: DotnetTaskStarted;
+  /** Carpeta que va a contener el resultado. Null si no se ha podido deducir. */
+  outputPath: string | null;
+  /** Opciones realmente aplicadas, ya saneadas. Es lo que se guarda como "la última vez". */
+  options: PublishOptions;
 }
 
 export interface NuGetSearchResult {
@@ -777,6 +826,8 @@ export const IPC = {
   dotnetRunTask: 'dotnet:run-task',
   dotnetCancelTask: 'dotnet:cancel-task',
   dotnetListTasks: 'dotnet:list-tasks',
+  dotnetPublish: 'dotnet:publish',
+  dotnetPublishOptions: 'dotnet:publish-options',
 
   terminalRun: 'terminal:run',
   terminalAllowed: 'terminal:allowed',
@@ -1080,6 +1131,21 @@ export interface DotForgeApi {
     runTask(request: DotnetTaskRequest): Promise<DotnetTaskStarted>;
     cancelTask(taskId: string): Promise<void>;
     listTasks(): Promise<DotnetTaskStarted[]>;
+    /**
+     * Publica un proyecto (`dotnet publish`).
+     *
+     * Va por el canal de tareas como cualquier compilación —puede tardar minutos y su salida
+     * pertenece al panel inferior—, pero tiene canal propio porque sus argumentos los compone el
+     * proceso principal a partir de opciones validadas, no de un `extraArgs` del renderer.
+     */
+    publish(request: PublishRequest): Promise<PublishStarted>;
+    /**
+     * Últimas opciones con las que se publicó ese proyecto, ya saneadas.
+     *
+     * Sin nada guardado devuelve las de fábrica con el marco de destino del proyecto ya puesto:
+     * abrir el diálogo y tener que elegirlo todo cada vez es lo que hace que nadie lo use.
+     */
+    publishOptions(projectPath: string): Promise<PublishOptions>;
   };
   terminal: {
     /**

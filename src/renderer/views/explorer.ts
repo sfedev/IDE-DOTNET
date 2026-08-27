@@ -26,6 +26,8 @@ export interface ExplorerHost {
   openFile(path: string): void;
   revealInFolder(path: string): void;
   runProjectTask(kind: 'build' | 'run' | 'watch' | 'test', projectPath: string): void;
+  /** Abre el diálogo de publicación de un proyecto ejecutable. */
+  publishProject(project: ProjectInfo): void;
   showPackagesFor(project: ProjectInfo): void;
   refresh(): void;
   /** Acciones del asistente sobre un archivo concreto del árbol. */
@@ -694,6 +696,12 @@ export class ExplorerView {
         : []),
       ...(project.kind === 'tests'
         ? ([{ icon: 'flask', label: 'Ejecutar pruebas', run: () => this.host.runProjectTask('test', project.path) }] as const)
+        : []),
+      // Publicar sólo se ofrece donde produce algo ejecutable. Una biblioteca de clases se puede
+      // publicar —el SDK lo admite— pero lo que sale no se arranca, y ofrecerlo ahí convierte la
+      // entrada en ruido en las cinco de siete proyectos de una solución Clean Architecture.
+      ...(runnable && project.kind !== 'tests'
+        ? ([{ icon: 'package', label: 'Publicar…', run: () => this.host.publishProject(project) }] as const)
         : []),
       'separator',
       { icon: 'package', label: 'Gestionar paquetes NuGet', run: () => this.host.showPackagesFor(project) },

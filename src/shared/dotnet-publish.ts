@@ -307,7 +307,7 @@ export function publishOutputPath(projectDirectory: string, options: PublishOpti
 
 /** Resumen de una línea para la salida del panel: qué se está publicando y cómo. */
 export function describePublish(options: PublishOptions): string {
-  const parts = [options.configuration];
+  const parts: string[] = [options.configuration];
   if (options.framework.trim() !== '') parts.push(options.framework.trim());
 
   const runtime = effectiveRuntime(options);

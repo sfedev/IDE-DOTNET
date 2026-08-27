@@ -137,9 +137,23 @@ const SEVERITY_ICON: Record<BuildDiagnostic['severity'], IconName> = {
   info: 'info',
 };
 
+/**
+ * Acción al final de una línea de salida.
+ *
+ * Existe para una sola cosa y es deliberado: al terminar una publicación, "publicado en
+ * C:\salida\api" obliga a copiar la ruta y buscarla a mano. El botón la abre. No es un enlace
+ * dentro del texto —la salida es texto plano y no se parsea— sino un control aparte al final de la
+ * línea, que es lo que permite que el buffer siga siendo texto.
+ */
+interface LineAction {
+  label: string;
+  run(): void;
+}
+
 interface Line {
   text: string;
   kind: LineKind;
+  action?: LineAction;
 }
 
 type ChannelStatus = 'idle' | 'running' | 'ok' | 'failed';
@@ -452,6 +466,23 @@ export class PanelView {
   }
 
   /**
+   * Una línea con un botón al final, en el canal de una tarea concreta.
+   *
+   * `taskId` decide el canal por el mismo motivo que en `append`: el resumen de una publicación
+   * tiene que quedar debajo de su propia salida, no en el canal de compilación, que puede estar
+   * enseñando otra cosa.
+   */
+  appendAction(
+    text: string,
+    kind: 'ok' | 'error' | 'command',
+    action: { label: string; run(): void } | null,
+    taskId?: string,
+  ): void {
+    const channelId = (taskId ? this.taskChannel.get(taskId) : null) ?? this.activeChannel;
+    this.push(channelId, text, kind, action ?? undefined);
+  }
+
+  /**
    * Salida de una tarea. `taskId` decide el canal: sin él —mensajes del propio IDE— va al canal
    * de compilación, que es el que se ve por defecto.
    */
@@ -498,9 +529,9 @@ export class PanelView {
     return 'plain';
   }
 
-  private push(channelId: string, text: string, kind: LineKind): void {
+  private push(channelId: string, text: string, kind: LineKind, action?: LineAction): void {
     const channel = this.channel(channelId);
-    const line: Line = { text, kind };
+    const line: Line = { text, kind, ...(action ? { action } : {}) };
 
     channel.lines.push(line);
     if (channel.lines.length > MAX_OUTPUT_LINES) {
@@ -515,7 +546,7 @@ export class PanelView {
 
     // Camino rápido: añadir sólo el nodo nuevo al log que ya está en pantalla.
     if (this.isVisibleChannel(channelId) && this.logElement) {
-      this.logElement.appendChild(el('div', { className: LINE_CLASS[kind], text }));
+      this.logElement.appendChild(this.buildOutputLine(line));
       this.logElement.scrollTop = this.logElement.scrollHeight;
     }
   }
@@ -911,7 +942,7 @@ export class PanelView {
 
     const pre = el('pre', { className: 'output', style: { flex: '1', margin: '0', overflow: 'auto' } });
     for (const line of channel.lines) {
-      pre.appendChild(el('div', { className: LINE_CLASS[line.kind], text: line.text }));
+      pre.appendChild(this.buildOutputLine(line));
     }
 
     container.appendChild(pre);
@@ -923,6 +954,29 @@ export class PanelView {
     }, 0);
 
     return container;
+  }
+
+  /**
+   * Una línea de salida, con su botón si lo lleva.
+   *
+   * Se construye igual en el repintado completo y en el camino rápido de `push`: si fueran dos
+   * constructores, una línea con acción aparecería con botón al llegar y sin él al repintar, que es
+   * de esos fallos que sólo se ven cambiando de pestaña.
+   */
+  private buildOutputLine(line: Line): HTMLElement {
+    const row = el('div', { className: LINE_CLASS[line.kind], text: line.text });
+    if (!line.action) return row;
+
+    const action = line.action;
+    row.appendChild(
+      el('button', {
+        className: 'output-action',
+        text: action.label,
+        on: { click: () => action.run() },
+      }),
+    );
+
+    return row;
   }
 
   private renderProblems(): HTMLElement {

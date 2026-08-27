@@ -21,6 +21,8 @@ import type {
   DebugState,
   DotnetTaskKind,
   DotnetTaskRequest,
+  PublishRequest,
+  PublishStarted,
   GitCommandResult,
   GitFileDiff,
   LspState,
@@ -35,6 +37,13 @@ import type {
   TerminalSessionInfo,
 } from '../../shared/contracts.js';
 import type { GitDiffRequest } from '../../shared/git.js';
+import type { PublishOptions } from '../../shared/dotnet-publish.js';
+import {
+  coercePublishOptions,
+  DEFAULT_PUBLISH_OPTIONS,
+  isValidFramework,
+  publishOutputPath,
+} from '../../shared/dotnet-publish.js';
 import type { EfOperation, EfOperationOptions } from '../../shared/efcore.js';
 import type { ComposeAction, ContainerAction } from '../../shared/compose.js';
 import { composeArgs, containerArgs, isComposeFile } from '../../shared/compose.js';
@@ -83,6 +92,7 @@ import { AiRequestError, coerceChatRequest } from '../services/ai/validate.js';
 import * as commandRunner from '../services/command-runner.js';
 import * as terminalSession from '../services/terminal-session.js';
 import * as terminalLayoutStore from '../services/terminal-layout-store.js';
+import * as publishProfiles from '../services/publish-profile-store.js';
 import * as ptyService from '../services/terminal-pty-service.js';
 import { installApplicationMenu } from '../menu.js';
 import * as dockerService from '../services/docker-service.js';
@@ -142,6 +152,15 @@ function requireString(value: unknown, name: string): string {
 const TASK_KINDS: ReadonlySet<string> = new Set<DotnetTaskKind>([
   'build', 'rebuild', 'clean', 'restore', 'test', 'run', 'watch', 'format',
 ]);
+
+/**
+ * `publish` no está en `TASK_KINDS`, y no es un olvido.
+ *
+ * Publicar tiene canal propio (`dotnet:publish`) porque sus argumentos no son "el verbo más el
+ * objetivo": salen de `publishArgs` a partir de opciones validadas. Dejarlo entrar por
+ * `dotnet:run-task` permitiría llegar a `dotnet publish` con un `extraArgs` cualquiera desde el
+ * renderer, que es exactamente lo que este canal evita.
+ */
 
 /**
  * Perfil de `launchSettings.json` con el que arrancar un proyecto.
@@ -928,6 +947,77 @@ export function registerIpcHandlers(options: IpcOptions = {}): void {
   });
 
   ipcMain.handle(IPC.dotnetListTasks, () => dotnetService.listTasks());
+
+  /**
+   * Marco de destino con el que abrir el diálogo de publicación.
+   *
+   * Se toma del proyecto ya cargado, que es quien conoce sus `TargetFrameworks` —incluidos los que
+   * hereda de `Directory.Build.props`—. Con varios declarados se propone el primero: publicar exige
+   * elegir uno, y no elegir ninguno es lo que hace que `-o` acabe apuntando a una carpeta que no
+   * existe.
+   */
+  function defaultFrameworkFor(projectPath: string): string {
+    const project = currentSolution?.projects.find((entry) => entry.path === projectPath);
+    const framework = project?.targetFrameworks[0] ?? '';
+    return isValidFramework(framework) ? framework : '';
+  }
+
+  ipcMain.handle(IPC.dotnetPublishOptions, async (_event, projectPath: unknown): Promise<PublishOptions> => {
+    const target = assertInsideWorkspace(requireString(projectPath, 'projectPath'));
+    const stored = await publishProfiles.load(target);
+    if (stored !== null) return stored;
+
+    // Sin nada guardado, los valores de fábrica **con el marco del proyecto ya puesto**: tener que
+    // elegirlo todo cada vez es lo que hace que un diálogo así no se use.
+    return coercePublishOptions({ ...DEFAULT_PUBLISH_OPTIONS, framework: defaultFrameworkFor(target) });
+  });
+
+  /**
+   * Publica un proyecto.
+   *
+   * Tres validaciones, y las tres tienen a quién culpar:
+   *  - el proyecto se comprueba contra el workspace, como cualquier ruta que llegue del renderer;
+   *  - las opciones pasan enteras por `coercePublishOptions`, que además apaga las banderas que el
+   *    modo resultante no admite;
+   *  - la carpeta de salida, **si se ha indicado una**, se comprueba también: es donde `dotnet` va
+   *    a escribir, y una ruta relativa se resuelve desde el directorio del proyecto, no desde el
+   *    directorio de trabajo del proceso principal.
+   */
+  ipcMain.handle(IPC.dotnetPublish, async (_event, request: unknown): Promise<PublishStarted> => {
+    if (typeof request !== 'object' || request === null) throw new Error('petición de publicación inválida');
+
+    const publish = request as PublishRequest;
+    const target = assertInsideWorkspace(requireString(publish.projectPath, 'projectPath'));
+    const projectDirectory = dirname(target);
+
+    const options = coercePublishOptions({
+      // El marco del proyecto entra como respaldo: sin él no se puede componer la carpeta que se
+      // ofrece abrir al terminar, y la publicación se quedaría sin el "· Abrir carpeta".
+      framework: defaultFrameworkFor(target),
+      ...(publish.options as unknown as Record<string, unknown> | undefined),
+    });
+
+    // Una salida fuera del workspace se rechaza aquí y no dentro del modelo: el modelo es puro y no
+    // sabe dónde está abierto nada. `assertInsideWorkspace` normaliza además la ruta relativa.
+    if (options.outputDir !== '') {
+      assertInsideWorkspace(join(projectDirectory, options.outputDir));
+    }
+
+    const outputPath = publishOutputPath(projectDirectory, options);
+
+    // Se anota **al lanzar**, no al terminar: si la publicación falla, lo que se quiere la próxima
+    // vez es el diálogo tal y como se dejó, para corregir una opción y volver a intentarlo.
+    await publishProfiles.save(target, options);
+
+    const task = dotnetService.publishProject(
+      target,
+      options,
+      taskCallbacks,
+      settingsService.current().dotnetVerbosity,
+    );
+
+    return { task, outputPath, options };
+  });
 
   // --- Terminal integrada -----------------------------------------------------------------------
   ipcMain.handle(IPC.terminalAllowed, (): string[] => [...commandRunner.ALLOWED_COMMANDS].sort());

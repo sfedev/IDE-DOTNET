@@ -5316,3 +5316,163 @@ select.input {
   width: 100%;
   height: 100%;
 }
+
+/* =============================================================================================
+ * Publicación (`dotnet publish`)
+ * ========================================================================================== */
+
+.publish-dialog {
+  width: min(620px, 94vw);
+}
+
+/*
+  La ruta del proyecto en la cabecera: puede ser larga y no tiene por qué caber. Se parte donde
+  haga falta en vez de desbordar el cuadro — misma regla que en el aviso de cambios sin guardar.
+*/
+.publish-head-text {
+  min-width: 0;
+}
+
+.publish-project-path {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs) !important;
+  color: var(--text-faint) !important;
+}
+
+.publish-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 20px;
+}
+
+.publish-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 28px;
+}
+
+.publish-label {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  flex-shrink: 0;
+}
+
+.publish-row .settings-select,
+.publish-row .settings-input {
+  flex: 1;
+  min-width: 0;
+  max-width: 62%;
+}
+
+.publish-static {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.publish-hint {
+  margin: -6px 0 0;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.publish-flags {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0 2px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.publish-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  cursor: pointer;
+}
+
+/*
+  Una casilla que no se puede marcar se atenúa y dice por qué (`.publish-note`), no desaparece:
+  misma regla que con el asistente apagado y con Docker parado.
+*/
+.publish-check.disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.publish-check-label {
+  display: block;
+  color: var(--text);
+  font-size: var(--text-sm);
+}
+
+.publish-check-hint {
+  display: block;
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  line-height: var(--leading-tight);
+}
+
+.publish-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  background: var(--info-soft);
+  color: var(--info);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.publish-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.publish-summary-line {
+  color: var(--text-strong);
+  font-size: var(--text-sm);
+}
+
+.publish-summary-path {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+/*
+  Botón al final de una línea de salida ("Abrir carpeta").
+  Es un control aparte y no un enlace dentro del texto: la salida del panel es texto plano y no se
+  parsea, así que la acción viaja con la línea en vez de deducirse de ella.
+*/
+.output-action {
+  margin-left: 10px;
+  padding: 1px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-xs);
+  vertical-align: baseline;
+}
+
+.output-action:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}

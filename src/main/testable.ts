@@ -349,3 +349,24 @@ export * as searchService from './services/search-service.js';
  * fuera de la extensión no se lee.
  */
 export * as extensionContributions from './services/extension-contributions.js';
+
+/**
+ * Últimas opciones de publicación de cada proyecto (Fase 25).
+ *
+ * El almacén no importa `electron` —la ruta de `userData` se le inyecta— así que las pruebas pueden
+ * comprobar lo que de verdad importa: que lo leído del disco se sanea igual que lo que llega del
+ * renderer, porque este archivo lo escribe una versión del IDE y lo lee otra, y su contenido acaba
+ * siendo argumentos de `dotnet`.
+ */
+export * as publishProfiles from './services/publish-profile-store.js';
+export { MAX_REMEMBERED_PROJECTS } from './services/publish-profile-store.js';
+
+export {
+  coercePublishOptions,
+  DEFAULT_PUBLISH_OPTIONS,
+  publishArgs,
+  publishOutputPath,
+  sanitizeOutputDir,
+} from '../shared/dotnet-publish.js';
+export type { PublishOptions } from '../shared/dotnet-publish.js';
+

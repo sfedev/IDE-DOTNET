@@ -29,6 +29,7 @@ import * as processRegistry from './services/process-registry.js';
 import * as settingsService from './services/settings-service.js';
 import * as startupService from './services/startup-service.js';
 import * as terminalLayoutStore from './services/terminal-layout-store.js';
+import * as publishProfiles from './services/publish-profile-store.js';
 import { setIdeVersion } from './lsp/acquire.js';
 import * as updaterService from './services/updater-service.js';
 import * as extensionInstaller from './services/extension-installer.js';
@@ -546,6 +547,19 @@ const UI_ACTIONS: Record<string, string> = {
     "  editor.trigger('keyboard', 'type', { text: '// sucio' });" +
     "  setTimeout(() => document.querySelector('.tab.active .tab-close')?.click(), 600);" +
     '}, 2000)',
+  /**
+   * Fase 25: el diálogo de publicación, abierto por el mismo camino que lo abriría una persona.
+   *
+   * Botón derecho sobre el primer proyecto del árbol y "Publicar…". Es lo único que comprueba la
+   * cadena entera: que la entrada sólo aparece en un proyecto ejecutable, que el proceso principal
+   * contesta con las últimas opciones y que el cuadro se pinta con ellas. Llamar al diálogo desde
+   * fuera se saltaría las tres cosas.
+   */
+  publish:
+    "document.querySelector('.tree-row.is-project')" +
+    "?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 220, clientY: 200 }));" +
+    'setTimeout(() => [...document.querySelectorAll(".context-item")]' +
+    ".find((item) => item.textContent?.includes('Publicar'))?.click(), 700)",
   nesting:
     "[...document.querySelectorAll('.tree-row')]" +
     ".find((row) => row.textContent?.includes('appsettings.json'))" +
@@ -711,6 +725,7 @@ app.whenReady().then(async () => {
   settingsService.initialize(app.getPath('userData'));
   startupService.initialize(app.getPath('userData'));
   terminalLayoutStore.initialize(app.getPath('userData'));
+  publishProfiles.initialize(app.getPath('userData'));
   // Los vetos de cuarentena de Roslyn se fechan con la versión del IDE que los dicta, y caducan al
   // actualizar: dicen "esto no arrancó con este cliente", y el cliente cambia (ADR-063).
   setIdeVersion(app.getVersion());

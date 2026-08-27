@@ -693,6 +693,78 @@ describe('búsqueda en los archivos', () => {
 });
 
 /**
+ * Publicación (Fase 25, ADR-064).
+ *
+ * `dotnet publish` es el primer verbo del SDK que el IDE lanza con banderas que el usuario elige,
+ * y eso es una superficie nueva: hay un modo de escribir la línea de comandos del proceso hijo
+ * desde un formulario. La frontera es la misma que en el resto del IDE — el renderer manda datos,
+ * el proceso principal compone argumentos — y estas pruebas son las que impiden que se relaje "un
+ * momento" para salir del paso.
+ */
+describe('publicación', () => {
+  const register = readSource('src/main/ipc/register.ts');
+  const service = readSource('src/main/services/dotnet-service.ts');
+
+  /** El cuerpo del handler, para no dar por buena una coincidencia de otro sitio del archivo. */
+  const handler = register.slice(
+    register.indexOf('ipcMain.handle(IPC.dotnetPublish,'),
+    register.indexOf('// --- Terminal integrada'),
+  );
+
+  it('el handler existe y valida el proyecto contra el workspace', () => {
+    assert.ok(handler.length > 0, 'no se ha encontrado el handler de publicación');
+    assert.match(handler, /assertInsideWorkspace\(requireString\(publish\.projectPath/);
+  });
+
+  it('la carpeta de salida también se comprueba: es donde dotnet va a escribir', () => {
+    assert.match(handler, /assertInsideWorkspace\(join\(projectDirectory, options\.outputDir\)\)/);
+  });
+
+  it('todo lo que llega del renderer pasa por el saneado', () => {
+    assert.match(handler, /coercePublishOptions\(/);
+  });
+
+  /**
+   * El renderer no escribe línea de comandos, ni troceada.
+   *
+   * `publish` fuera de `TASK_KINDS` es lo que lo garantiza: dentro, `dotnet:run-task` aceptaría un
+   * `extraArgs` cualquiera detrás del verbo `publish`.
+   */
+  it('publicar no entra por el canal genérico de tareas', () => {
+    const kinds = register.slice(
+      register.indexOf('const TASK_KINDS'),
+      register.indexOf('`publish` no está en `TASK_KINDS`'),
+    );
+
+    assert.ok(kinds.length > 0, 'no se ha encontrado la lista de tipos de tarea');
+    assert.doesNotMatch(kinds, /'publish'/);
+  });
+
+  it('los argumentos los compone el modelo puro, no quien llama', () => {
+    assert.match(service, /publishArgs\(projectPath, options\)/);
+    assert.doesNotMatch(handler, /extraArgs/);
+  });
+
+  it('se lanza con array de argumentos y sin shell, como todo lo demás', () => {
+    const publish = service.slice(service.indexOf('export function publishProject'));
+    assert.doesNotMatch(publish, /shell:\s*true/);
+    assert.match(publish, /spawnDotnet\(/);
+  });
+
+  /**
+   * Lo guardado en `publish-profiles.json` acaba siendo argumentos de `dotnet`.
+   *
+   * Ese archivo lo escribe una versión del IDE y lo lee otra, y se puede editar a mano: se sanea al
+   * leer con la misma función que lo que llega del renderer, que es la regla del ADR-061.
+   */
+  it('lo guardado en disco se sanea al leerlo', () => {
+    const store = readSource('src/main/services/publish-profile-store.ts');
+    assert.match(store, /coercePublishOptions\(value\)/);
+    assert.match(store, /parseJsonText/);
+  });
+});
+
+/**
  * Pseudoterminales (Fase 21, ADR-059).
  *
  * Aquí la frontera se mueve a conciencia y por eso hay que vigilarla por escrito: dentro de una

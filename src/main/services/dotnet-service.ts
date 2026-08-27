@@ -15,6 +15,8 @@ import type {
   DotnetTaskRequest,
   DotnetTaskStarted,
 } from '../../shared/contracts.js';
+import type { PublishOptions } from '../../shared/dotnet-publish.js';
+import { describePublish, publishArgs } from '../../shared/dotnet-publish.js';
 import type { DotnetVerbosity } from '../../shared/dotnet-verbosity.js';
 import {
   DEFAULT_DOTNET_VERBOSITY,
@@ -40,6 +42,8 @@ const TASK_ARGS: Record<DotnetTaskKind, string[]> = {
   run: ['run', '--project'],
   watch: ['watch', '--project'],
   format: ['format'],
+  // La publicación compone sus argumentos aparte (`publishArgs`), así que aquí sólo está el verbo.
+  publish: ['publish'],
 };
 
 /** Tareas que no terminan solas: la UI debe ofrecer un botón de parada. */
@@ -105,74 +109,110 @@ function workingDirectory(target: string): string {
   return extname(target) === '' ? target : dirname(target);
 }
 
-export function runTask(
-  request: DotnetTaskRequest,
-  callbacks: DotnetTaskCallbacks,
-  verbosity: DotnetVerbosity = DEFAULT_DOTNET_VERBOSITY,
-): DotnetTaskStarted {
+/**
+ * Entorno común de toda invocación de `dotnet`.
+ *
+ * Está en un solo sitio porque cada variable arregla un síntoma concreto y olvidar una en un
+ * camino nuevo se nota tarde: sin `DOTNET_CLI_UI_LANGUAGE` el parser de diagnósticos deja de
+ * reconocer los errores en una máquina en español, y sin apagar los colores ANSI los códigos de
+ * escape se cuelan dentro de los mensajes.
+ */
+function dotnetEnvironment(extra: Record<string, string>): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    DOTNET_NOLOGO: '1',
+    DOTNET_CLI_TELEMETRY_OPTOUT: '1',
+    // Fuerza salida sin colores ANSI: los códigos de escape ensucian el parseo de diagnósticos.
+    DOTNET_SYSTEM_CONSOLE_ALLOW_ANSI_COLOR_REDIRECTION: '0',
+    // El parser de diagnósticos entiende inglés y español, pero en inglés es más fiable.
+    DOTNET_CLI_UI_LANGUAGE: 'en',
+    ...extra,
+  };
+}
+
+interface SpawnRequest {
+  kind: DotnetTaskKind;
+  target: string;
+  args: string[];
+  cwd: string;
+  env: Record<string, string>;
+  callbacks: DotnetTaskCallbacks;
+  label?: string | undefined;
+  /** Cuánta salida se conserva para parsear diagnósticos al terminar. */
+  bufferBytes?: number;
+  /** true para buscar en la salida la URL en la que escucha la aplicación. Sólo `run` y `watch`. */
+  detectUrl?: boolean;
+}
+
+/**
+ * Lanza `dotnet` y cablea su ciclo de vida al canal de tareas.
+ *
+ * Lo comparten `runTask`, la instalación de paquetes y la publicación. Antes eran tres bloques
+ * casi iguales, y "casi" es el problema: el aviso de "no se ha podido ejecutar dotnet" sólo estaba
+ * en uno de los tres, así que un SDK ausente dejaba una instalación de paquete colgada sin decir
+ * nada. Todo lo que se lanza pasa por aquí.
+ */
+function spawnDotnet(request: SpawnRequest): DotnetTaskStarted {
   const taskId = randomUUID();
-  const args = buildArgs(request, verbosity);
-  const cwd = workingDirectory(request.target);
 
   const started: DotnetTaskStarted = {
     taskId,
     kind: request.kind,
-    command: `dotnet ${args.join(' ')}`,
+    command: `dotnet ${request.args.join(' ')}`,
     target: request.target,
     // La etiqueta la pone quien lanza la tarea: aquí no se sabe si esto es "la API" o "la UI".
     ...(request.label ? { label: request.label } : {}),
   };
 
-  const child = spawn('dotnet', args, {
-    cwd,
-    env: {
-      ...process.env,
-      DOTNET_NOLOGO: '1',
-      DOTNET_CLI_TELEMETRY_OPTOUT: '1',
-      // Fuerza salida sin colores ANSI: los códigos de escape ensucian el parseo de diagnósticos.
-      DOTNET_SYSTEM_CONSOLE_ALLOW_ANSI_COLOR_REDIRECTION: '0',
-      // El parser de diagnósticos entiende inglés y español, pero en inglés es más fiable.
-      DOTNET_CLI_UI_LANGUAGE: 'en',
-      // Verbosidad alta: registro de la aplicación, errores detallados de ASP.NET Core y, en
-      // `diagnostic`, la traza de resolución de ensamblados del host.
-      ...verbosityEnvironment(verbosity),
-    },
+  const child = spawn('dotnet', request.args, {
+    cwd: request.cwd,
+    env: dotnetEnvironment(request.env),
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });
 
   registry.track(taskId, started.command, child);
-  callbacks.onStarted(started);
+  request.callbacks.onStarted(started);
 
   const startedAt = Date.now();
+  const limit = request.bufferBytes ?? 512 * 1024;
   let buffered = '';
+  let finished = false;
 
   const forward = (stream: 'stdout' | 'stderr') => (chunk: Buffer) => {
     const text = chunk.toString('utf8');
     // El buffer se acota: una tarea `watch` de horas no puede crecer sin límite en memoria.
-    buffered = (buffered + text).slice(-512 * 1024);
-    callbacks.onOutput({ taskId, stream, chunk: text });
+    buffered = (buffered + text).slice(-limit);
+    request.callbacks.onOutput({ taskId, stream, chunk: text });
   };
 
   child.stdout.on('data', forward('stdout'));
   child.stderr.on('data', forward('stderr'));
 
+  // El pestillo no es defensivo por costumbre: un `error` de spawn puede llegar acompañado de un
+  // `close`, y dos avisos de final para la misma tarea dejan al panel con un canal cerrado dos
+  // veces y un paso de la instalación en varios proyectos avanzando de dos en dos.
   const finish = (code: number | null): void => {
-    callbacks.onExit({
+    if (finished) return;
+    finished = true;
+
+    request.callbacks.onExit({
       taskId,
       code,
       durationMs: Date.now() - startedAt,
       diagnostics: parseMsBuildDiagnostics(buffered),
-      applicationUrl: detectApplicationUrl(buffered),
+      applicationUrl: request.detectUrl === true ? detectApplicationUrl(buffered) : null,
     });
   };
 
   child.on('error', (error) => {
-    callbacks.onOutput({
+    request.callbacks.onOutput({
       taskId,
       stream: 'stderr',
       chunk:
-        `No se ha podido ejecutar "dotnet". Comprueba que el SDK de .NET está instalado y en el PATH.\n${error.message}\n`,
+        `No se ha podido ejecutar "dotnet". Comprueba que el SDK de .NET está instalado y en el PATH.
+${error.message}
+`,
     });
     finish(-1);
   });
@@ -180,6 +220,25 @@ export function runTask(
   child.on('close', (code) => finish(code));
 
   return started;
+}
+
+export function runTask(
+  request: DotnetTaskRequest,
+  callbacks: DotnetTaskCallbacks,
+  verbosity: DotnetVerbosity = DEFAULT_DOTNET_VERBOSITY,
+): DotnetTaskStarted {
+  return spawnDotnet({
+    kind: request.kind,
+    target: request.target,
+    args: buildArgs(request, verbosity),
+    cwd: workingDirectory(request.target),
+    // Verbosidad alta: registro de la aplicación, errores detallados de ASP.NET Core y, en
+    // `diagnostic`, la traza de resolución de ensamblados del host.
+    env: verbosityEnvironment(verbosity),
+    callbacks,
+    label: request.label,
+    detectUrl: true,
+  });
 }
 
 export function cancelTask(taskId: string): boolean {
@@ -203,50 +262,58 @@ export function runPackageCommand(
   version: string | undefined,
   callbacks: DotnetTaskCallbacks,
 ): DotnetTaskStarted {
-  const taskId = randomUUID();
   const args =
     action === 'add'
       ? ['add', projectPath, 'package', packageId, ...(version ? ['--version', version] : [])]
       : ['remove', projectPath, 'package', packageId];
 
-  const started: DotnetTaskStarted = {
-    taskId,
+  return spawnDotnet({
     kind: 'restore',
-    command: `dotnet ${args.join(' ')}`,
     target: projectPath,
-  };
-
-  const child = spawn('dotnet', args, {
+    args,
     cwd: dirname(projectPath),
-    env: { ...process.env, DOTNET_NOLOGO: '1', DOTNET_CLI_TELEMETRY_OPTOUT: '1', DOTNET_CLI_UI_LANGUAGE: 'en' },
-    stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: true,
+    env: {},
+    callbacks,
+    bufferBytes: 256 * 1024,
+  });
+}
+
+/**
+ * Publica un proyecto.
+ *
+ * Reutiliza el canal de tareas por el mismo motivo que `database update`: puede tardar minutos y
+ * su salida pertenece al panel inferior, con su punto de progreso y su botón de cancelar. Lo que
+ * **no** reutiliza es `runTask`: los argumentos de una publicación no son "el verbo más el
+ * objetivo", los compone `publishArgs` a partir de opciones ya validadas, y colarlos por
+ * `extraArgs` volvería a poner al renderer a escribir línea de comandos.
+ *
+ * La verbosidad entra por el mismo sitio que en todo lo demás: `publish` está en la lista de
+ * verbos que aceptan `--verbosity`, así que el plan la coloca detrás del objetivo.
+ */
+export function publishProject(
+  projectPath: string,
+  options: PublishOptions,
+  callbacks: DotnetTaskCallbacks,
+  verbosity: DotnetVerbosity = DEFAULT_DOTNET_VERBOSITY,
+): DotnetTaskStarted {
+  const plan = verbosityPlan('publish', verbosity);
+  const args = ['publish', ...plan.leading, ...publishArgs(projectPath, options), ...plan.trailing];
+
+  const started = spawnDotnet({
+    kind: 'publish',
+    target: projectPath,
+    args,
+    cwd: dirname(projectPath),
+    // El entorno de la verbosidad no pinta en una publicación —no hay aplicación arrancando— pero
+    // `MSBUILDTERMINALLOGGER=off` sí: con el logger de terminal, subir el nivel no enseña nada más.
+    env: verbosityEnvironment(verbosity),
+    callbacks,
   });
 
-  registry.track(taskId, started.command, child);
-  callbacks.onStarted(started);
-
-  const startedAt = Date.now();
-  let buffered = '';
-
-  const forward = (stream: 'stdout' | 'stderr') => (chunk: Buffer) => {
-    const text = chunk.toString('utf8');
-    buffered = (buffered + text).slice(-256 * 1024);
-    callbacks.onOutput({ taskId, stream, chunk: text });
-  };
-
-  child.stdout.on('data', forward('stdout'));
-  child.stderr.on('data', forward('stderr'));
-
-  child.on('close', (code) => {
-    callbacks.onExit({
-      taskId,
-      code,
-      durationMs: Date.now() - startedAt,
-      diagnostics: parseMsBuildDiagnostics(buffered),
-      applicationUrl: null,
-    });
-  });
+  // Una línea que diga qué se está publicando, antes de los cien renglones de MSBuild. El comando
+  // completo ya está en la cabecera del canal; esto es la versión que se lee de un vistazo.
+  callbacks.onOutput({ taskId: started.taskId, stream: 'stdout', chunk: `Publicando: ${describePublish(options)}
+` });
 
   return started;
 }

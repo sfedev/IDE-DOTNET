@@ -21,6 +21,7 @@ import type {
   SolutionInfo,
 } from '../shared/contracts.js';
 import { chromeThemeFor, isExtensionTheme } from '../shared/vsix-contributions.js';
+import { summarizePublish } from '../shared/dotnet-publish.js';
 import type { AiContext, AiProviderId, AiStatus, AiTask } from '../shared/ai.js';
 import { buildHttpFile, findEndpoints, httpFileNameFor, requestFor } from '../shared/api-endpoints.js';
 import { isHttpFile, parseHttpFile } from '../shared/http-file.js';
@@ -66,6 +67,7 @@ import { WizardView } from './views/wizard.js';
 import { ExtensionsView } from './views/extensions.js';
 import { UpdateCard } from './views/update-card.js';
 import { askDialog, type DialogChoice } from './views/confirm-dialog.js';
+import { askPublishOptions } from './views/publish-dialog.js';
 import { ConfirmationLock } from './editor-state.js';
 
 type SidebarView =
@@ -95,6 +97,15 @@ class DotForgeApp {
   private sidebarView: SidebarView = 'explorer';
   private lspProviders: MonacoApi.IDisposable | null = null;
   private git: GitStatus | null = null;
+
+  /**
+   * Publicaciones en marcha, por `taskId`.
+   *
+   * Se guarda el nombre y la carpeta resuelta porque cuando llegue el final de la tarea ya no hay
+   * de dónde sacarlos: la salida de MSBuild que anuncia la carpeta está traducida al idioma del
+   * sistema (ADR-028), así que no se puede leer de ahí.
+   */
+  private readonly publishing = new Map<string, { projectName: string; outputPath: string | null }>();
 
   /** Avisos del linter de arquitectura. Viven aquí porque no los produce ninguna tarea. */
   private architectureIssues: BuildDiagnostic[] = [];
@@ -171,6 +182,7 @@ class DotForgeApp {
     openFile: (path) => void this.openFile(path),
     revealInFolder: (path) => void window.dotforge.app.showItemInFolder(path),
     runProjectTask: (kind, projectPath) => void this.runTask(kind, projectPath),
+    publishProject: (project) => void this.publishProject(project),
     showPackagesFor: (project) => this.showNuGet(project),
     refresh: () => void this.openFolderDialog(),
     askAi: (action, path) => void this.askAiAboutFile(action, path),
@@ -677,6 +689,87 @@ class DotForgeApp {
     } catch (error) {
       this.notify(`No se ha podido lanzar la tarea: ${this.messageOf(error)}`, 'error');
     }
+  }
+
+  /**
+   * Publica un proyecto.
+   *
+   * Se guarda antes, como en cualquier compilación: publicar lo que hay en disco y no lo que hay en
+   * pantalla es la variante lenta del "pero si ya lo he arreglado".
+   *
+   * Las opciones y la carpeta de destino las devuelve el proceso principal ya resueltas: el
+   * renderer no compone argumentos ni deduce rutas de salida, sólo recuerda cuál era la tarea para
+   * poder decir dónde ha quedado cuando termine.
+   */
+  private async publishProject(project: ProjectInfo): Promise<void> {
+    let initial;
+    try {
+      initial = await window.dotforge.dotnet.publishOptions(project.path);
+    } catch (error) {
+      this.notify(`No se han podido leer las opciones de publicación: ${this.messageOf(error)}`, 'error');
+      return;
+    }
+
+    const options = await askPublishOptions({
+      projectName: project.name,
+      projectPath: project.path,
+      frameworks: project.targetFrameworks,
+      initial,
+    });
+
+    if (options === null) return;
+
+    await this.editor.saveAll();
+    this.panel.show('output');
+
+    try {
+      const started = await window.dotforge.dotnet.publish({
+        projectPath: project.path,
+        projectName: project.name,
+        options,
+      });
+
+      // Se anota para poder cerrar el aviso cuando llegue el final **de esta** tarea. Emparejar por
+      // `taskId` y no por "la que esté corriendo" es la misma regla que en la instalación de
+      // paquetes: al panel le llegan todas las tareas del IDE.
+      this.publishing.set(started.task.taskId, {
+        projectName: project.name,
+        outputPath: started.outputPath,
+      });
+    } catch (error) {
+      this.notify(`No se ha podido publicar ${project.name}: ${this.messageOf(error)}`, 'error');
+    }
+  }
+
+  /**
+   * Cierra una publicación terminada.
+   *
+   * El resumen va al canal de **esa** tarea, con el botón de abrir la carpeta al final de la línea:
+   * "publicado en C:\salida\api" obliga a copiar la ruta y buscarla a mano, y lo siguiente que
+   * quiere quien acaba de publicar es abrirla.
+   */
+  private notePublishExit(taskId: string, code: number | null): void {
+    const pending = this.publishing.get(taskId);
+    if (!pending) return;
+
+    this.publishing.delete(taskId);
+
+    const summary = summarizePublish(pending.projectName, pending.outputPath, code);
+    const prefix = summary.level === 'ok' ? '✓' : '✖';
+
+    this.panel.appendAction(
+      `${prefix} ${summary.message}`,
+      summary.level,
+      summary.folder === null
+        ? null
+        : {
+            label: 'Abrir carpeta',
+            run: () => void window.dotforge.app.showItemInFolder(summary.folder as string),
+          },
+      taskId,
+    );
+
+    if (summary.level === 'error') this.panel.show('output');
   }
 
   /** Pone o quita un breakpoint y lo sincroniza con la sesión si hay una activa. */
@@ -2914,6 +3007,7 @@ class DotForgeApp {
       this.efcoreView.noteTaskExit(exit.taskId, exit.code);
       this.containersView.noteTaskExit(exit.taskId, exit.code);
       void this.testsView.noteTaskExit(exit.taskId);
+      this.notePublishExit(exit.taskId, exit.code);
       this.noteTunnelExit(exit.taskId);
       this.applyBuildMarkers(exit.diagnostics);
       this.renderStatus();
