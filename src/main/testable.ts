@@ -339,3 +339,13 @@ export type {
 } from '../shared/file-search.js';
 
 export * as searchService from './services/search-service.js';
+
+/**
+ * Consumo declarativo de las extensiones instaladas (Fase 24).
+ *
+ * El servicio lee el disco y no importa `electron`, así que las pruebas pueden montar una
+ * extensión de verdad en un directorio temporal —con su `package.json`, su tema y sus fragmentos—
+ * y comprobar lo que de verdad importa: que un `include` se resuelve y que una ruta que apunta
+ * fuera de la extensión no se lee.
+ */
+export * as extensionContributions from './services/extension-contributions.js';

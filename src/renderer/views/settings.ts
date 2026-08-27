@@ -11,7 +11,8 @@
 import type { AiProbeResult, AiProviderId, AiSettings, AiStatus } from '../../shared/ai.js';
 import { AI_PROVIDERS, providerInfo } from '../../shared/ai.js';
 import { DEFAULT_ACTIVITY_ORDER, isDefaultActivityOrder } from '../../shared/activity-bar.js';
-import type { AppSettings, UpdateState } from '../../shared/contracts.js';
+import type { AppSettings, ExtensionContributions, UpdateState } from '../../shared/contracts.js';
+import { isExtensionTheme } from '../../shared/vsix-contributions.js';
 import type { DotnetVerbosity } from '../../shared/dotnet-verbosity.js';
 import { DOTNET_VERBOSITY_INFO, verbosityInfo } from '../../shared/dotnet-verbosity.js';
 import { byId, clear, el } from '../dom.js';
@@ -34,6 +35,9 @@ export interface SettingsHost {
 export class SettingsView {
   private settings: AppSettings | null = null;
   private visible = false;
+
+  /** Temas de las extensiones instaladas, ordenados por etiqueta. Vacío si no hay ninguna. */
+  private extensionThemes: ExtensionContributions['themes'] = [];
 
   /** Resultado de la última comprobación de conexión, con el proveedor al que corresponde. */
   private probeResult: { provider: AiProviderId; result: AiProbeResult } | null = null;
@@ -68,15 +72,7 @@ export class SettingsView {
 
     body.append(
       this.group('Apariencia', [
-        this.segmentedRow<AppSettings['theme']>(
-          'Tema',
-          [
-            ['dotforge-dark', 'Oscuro', 'moon'],
-            ['dotforge-light', 'Claro', 'sun'],
-          ],
-          settings.theme,
-          (value) => this.host.apply({ theme: value }),
-        ),
+        ...this.themeRows(settings.theme),
         this.stepperRow('Tamaño de fuente', settings.fontSize, 9, 28, (value) =>
           this.host.apply({ fontSize: value }),
         ),
@@ -247,6 +243,58 @@ export class SettingsView {
     });
 
     return el('div', { className: 'settings-row settings-row-stacked' }, el('span', { text: label }), input);
+  }
+
+  /**
+   * Tema del editor.
+   *
+   * Con extensiones de temas instaladas ya no son dos opciones: un solo paquete de Open VSX aporta
+   * diez o quince. Se conserva el control segmentado para los dos propios —es un clic, y es lo que
+   * usa casi todo el mundo— y los de extensión van en un desplegable aparte, con la letra pequeña
+   * de qué reviste un tema de extensión y qué no.
+   */
+  private themeRows(current: string): HTMLElement[] {
+    const rows: HTMLElement[] = [
+      this.segmentedRow<string>(
+        'Tema',
+        [
+          ['dotforge-dark', 'Oscuro', 'moon'],
+          ['dotforge-light', 'Claro', 'sun'],
+        ],
+        isExtensionTheme(current) ? '' : current,
+        (value) => this.host.apply({ theme: value }),
+      ),
+    ];
+
+    if (this.extensionThemes.length === 0) return rows;
+
+    rows.push(
+      this.selectRow(
+        'Tema de una extensión',
+        [
+          ['', 'Ninguno — usar el tema de DotForge'],
+          ...this.extensionThemes.map(
+            (theme): [string, string] => [theme.id, `${theme.label} · ${theme.extensionId}`],
+          ),
+        ],
+        isExtensionTheme(current) ? current : '',
+        (value) => this.host.apply({ theme: value === '' ? 'dotforge-dark' : value }),
+      ),
+      el('p', {
+        className: 'settings-note',
+        text:
+          'Un tema de extensión colorea el editor. El resto de la ventana sigue con el tema claro u ' +
+          'oscuro de DotForge, el que más se le parezca: los temas de VS Code no describen esta interfaz.',
+      }),
+    );
+
+    return rows;
+  }
+
+  /** Temas que aportan las extensiones instaladas. Los recarga el shell al instalar o desinstalar. */
+  setExtensionThemes(themes: ExtensionContributions['themes']): void {
+    this.extensionThemes = [...themes].sort((a, b) => a.label.localeCompare(b.label));
+    if (this.visible) this.render();
   }
 
   private selectRow(

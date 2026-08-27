@@ -22,7 +22,7 @@ import { didChange, didClose, didOpen, didSave } from '../lsp-bridge.js';
 import { iconForFile } from '../file-icons.js';
 import { icon } from '../icons.js';
 import { installTagAutoClose } from '../languages/razor.js';
-import { DARK_THEME, getMonaco, LIGHT_THEME } from '../monaco-setup.js';
+import { DARK_THEME, editorThemeFor, getMonaco } from '../monaco-setup.js';
 import { confirmDialog } from './confirm-dialog.js';
 
 export interface OpenTab {
@@ -113,7 +113,7 @@ export class EditorView {
     this.editor = monaco.editor.create(byId('editor-host'), {
       value: '',
       language: 'plaintext',
-      theme: settings.theme === 'dotforge-light' ? LIGHT_THEME : DARK_THEME,
+      theme: editorThemeFor(settings.theme),
       automaticLayout: true,
       fontFamily: settings.fontFamily,
       fontSize: settings.fontSize,
@@ -217,13 +217,20 @@ export class EditorView {
 
   applySettings(settings: AppSettings): void {
     this.settings = settings;
+
+    // El tema **no** va en `updateOptions`: en Monaco el tema es global y esa opción se ignora en
+    // silencio (sólo se lee al crear el editor). El conmutador claro/oscuro funcionaba de rebote,
+    // porque `defineThemes` redefine el tema activo a partir de los tokens CSS ya cambiados y el
+    // editor se repintaba conservando el nombre. En cuanto hay un tema de extensión —que es otro
+    // nombre, no otra definición del mismo— eso deja de bastar.
+    getMonaco().editor.setTheme(editorThemeFor(settings.theme));
+
     this.editor?.updateOptions({
       fontFamily: settings.fontFamily,
       fontSize: settings.fontSize,
       tabSize: settings.tabSize,
       wordWrap: settings.wordWrap ? 'on' : 'off',
       minimap: { enabled: settings.minimap },
-      theme: settings.theme === 'dotforge-light' ? LIGHT_THEME : DARK_THEME,
     });
 
     this.diffEditor?.updateOptions({
@@ -699,7 +706,7 @@ export class EditorView {
       fontSize: settings?.fontSize,
       minimap: { enabled: false },
       scrollBeyondLastLine: false,
-      theme: settings?.theme === 'dotforge-light' ? LIGHT_THEME : DARK_THEME,
+      theme: editorThemeFor(settings?.theme ?? DARK_THEME),
     });
 
     return this.diffEditor;

@@ -75,6 +75,7 @@ import type {
   SearchProgress,
   SearchSummary,
   InstalledExtension,
+  ExtensionContributions,
 } from '../shared/contracts.js';
 import { IPC, IPC_EVENTS } from '../shared/contracts.js';
 import type { GitDiffRequest, GitRepositoryStatus } from '../shared/git.js';
@@ -270,6 +271,7 @@ const api: DotForgeApi = {
       ipcRenderer.invoke(IPC.extensionsInstall, extension) as Promise<InstalledExtension>,
     uninstall: (id: string) => ipcRenderer.invoke(IPC.extensionsUninstall, id) as Promise<boolean>,
     openFolder: () => ipcRenderer.invoke(IPC.extensionsOpenFolder) as Promise<void>,
+    contributions: () => ipcRenderer.invoke(IPC.extensionsContributions) as Promise<ExtensionContributions>,
   },
 
   ai: {

@@ -437,3 +437,33 @@ export {
   VSIX_ROOT,
 } from '../shared/vsix.js';
 export type { ContributionSummary, InstalledExtension, VsixManifest } from '../shared/vsix.js';
+
+/**
+ * Contribuciones declarativas de las extensiones: temas y fragmentos.
+ *
+ * Es un modelo puro y lo consumen los dos lados —el proceso principal lee los archivos y convierte,
+ * el renderer decide el aspecto del IDE y filtra los identificadores—, así que se exporta desde
+ * aquí para poder probar la conversión con temas reales sin tocar el disco.
+ */
+export {
+  chromeThemeFor,
+  convertTheme,
+  EXTENSION_THEME_PREFIX,
+  isExtensionTheme,
+  monacoBaseFor,
+  monacoThemeName,
+  normalizeColor,
+  normalizeColorWithHash,
+  parseContributedSnippets,
+  parseContributedThemes,
+  parseSnippetFile,
+  themeId,
+} from '../shared/vsix-contributions.js';
+export type {
+  CodeSnippet,
+  ContributedSnippetFile,
+  ContributedTheme,
+  MonacoThemeData,
+  MonacoTokenRule,
+  VsCodeThemeDocument,
+} from '../shared/vsix-contributions.js';

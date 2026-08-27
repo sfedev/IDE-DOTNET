@@ -7,6 +7,9 @@
  */
 import type * as MonacoApi from 'monaco-editor';
 
+import type { ExtensionContributions } from '../shared/contracts.js';
+import { isExtensionTheme, monacoThemeName } from '../shared/vsix-contributions.js';
+
 import { registerRazorLanguage } from './languages/razor.js';
 
 /**
@@ -151,6 +154,56 @@ export const LIGHT_THEME = 'dotforge-light';
 export function defineThemes(monaco: typeof MonacoApi): void {
   monaco.editor.defineTheme(DARK_THEME, buildTheme('vs-dark'));
   monaco.editor.defineTheme(LIGHT_THEME, buildTheme('vs'));
+}
+
+/**
+ * Registra en Monaco los temas que aportan las extensiones instaladas.
+ *
+ * Uno malo no puede llevarse a los demás por delante: `defineTheme` **lanza** ante un color que no
+ * entiende, y con veinte temas de un paquete el primero que fallara dejaría los diecinueve
+ * siguientes sin registrar. La conversión ya normaliza los colores, así que llegar aquí con uno
+ * inválido significa que hay un caso que no se contempló — y eso se anota, no se propaga.
+ */
+export function defineExtensionThemes(
+  monaco: typeof MonacoApi,
+  themes: readonly ExtensionContributions['themes'][number][],
+): string[] {
+  const failed: string[] = [];
+  registeredThemes.clear();
+
+  for (const theme of themes) {
+    try {
+      // Con el nombre saneado, no con el identificador: Monaco lanza `Illegal theme name!` ante
+      // los dos puntos, los puntos y los espacios que lleva un `ext:acme.temas:Noche`.
+      monaco.editor.defineTheme(monacoThemeName(theme.id), theme.data as MonacoApi.editor.IStandaloneThemeData);
+      registeredThemes.add(theme.id);
+    } catch (error) {
+      failed.push(`${theme.label}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  return failed;
+}
+
+/** Temas de extensión que Monaco ha aceptado. Los que fallaron no están, y eso es lo que importa. */
+const registeredThemes = new Set<string>();
+
+export function isThemeRegistered(id: string): boolean {
+  return registeredThemes.has(id);
+}
+
+/**
+ * Qué tema de Monaco corresponde al ajuste.
+ *
+ * Vive aquí y no repartido por el editor porque se necesita en tres sitios, y las tres veces se
+ * escribía a mano el mismo ternario contra `'dotforge-light'`: con temas de extensión por medio,
+ * ese ternario devuelve el tema oscuro para todo lo que no sea el claro propio.
+ */
+export function editorThemeFor(theme: string): string {
+  // Un tema de una extensión que ya no está —desinstalada, o que falló al registrarse— cae al
+  // oscuro. Dárselo a Monaco tal cual deja el editor sin colorear y sin decir por qué.
+  if (isExtensionTheme(theme)) return registeredThemes.has(theme) ? monacoThemeName(theme) : DARK_THEME;
+  return theme === LIGHT_THEME ? LIGHT_THEME : DARK_THEME;
 }
 
 /** Carga Monaco una sola vez y lo deja configurado con lenguajes y temas de DotForge. */

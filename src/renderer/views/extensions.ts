@@ -33,6 +33,13 @@ import { confirmDialog } from './confirm-dialog.js';
 export interface ExtensionsHost {
   notify(message: string, level: 'info' | 'ok' | 'warn' | 'error'): void;
   openUrl(url: string): void;
+  /**
+   * Relee lo que aportan las instaladas: temas y fragmentos.
+   *
+   * Se llama tras instalar y tras desinstalar. Sin esto, un tema recién instalado no aparece en el
+   * desplegable hasta reiniciar el IDE — y uno recién desinstalado sigue apareciendo, que es peor.
+   */
+  reloadContributions(): Promise<void>;
 }
 
 export class ExtensionsView {
@@ -136,6 +143,7 @@ export class ExtensionsView {
       const installed = await window.dotforge.extensions.install(extension);
       this.host.notify(`Extensión ${installed.displayName} ${installed.version} instalada.`, 'ok');
       await this.loadInstalled();
+      await this.host.reloadContributions();
     } catch (error) {
       this.host.notify(`No se ha podido instalar ${extension.id}: ${this.messageOf(error)}`, 'error');
     } finally {
@@ -162,6 +170,7 @@ export class ExtensionsView {
       await window.dotforge.extensions.uninstall(extension.id);
       this.host.notify(`Extensión ${extension.displayName} desinstalada.`, 'ok');
       await this.loadInstalled();
+      await this.host.reloadContributions();
     } catch (error) {
       this.host.notify(`No se ha podido desinstalar ${extension.id}: ${this.messageOf(error)}`, 'error');
     } finally {

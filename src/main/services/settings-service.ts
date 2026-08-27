@@ -20,6 +20,14 @@ let cached: AppSettings = { ...DEFAULT_SETTINGS };
 
 const MAX_RECENT = 10;
 
+/**
+ * Forma admisible del identificador de tema.
+ *
+ * Acaba siendo el valor de `data-theme` en el documento y el nombre de un tema de Monaco, así que
+ * se acota a lo que puede serlo: los dos propios o un `ext:` con la forma que genera `themeId`.
+ */
+const ALLOWED_THEME = /^(dotforge-dark|dotforge-light|ext:[^\s]+:.+)$/;
+
 export function initialize(userDataPath: string): void {
   settingsPath = join(userDataPath, 'settings.json');
 }
@@ -30,7 +38,10 @@ function coerce(raw: unknown): AppSettings {
 
   const source = raw as Record<string, unknown>;
 
-  if (source['theme'] === 'dotforge-dark' || source['theme'] === 'dotforge-light') {
+  // Un tema de extensión (`ext:…`) se acepta tal cual: aquí no se sabe qué extensiones hay
+  // instaladas, y comprobarlo obligaría a leer el disco en cada lectura de preferencias. Quien lo
+  // aplica sí lo sabe, y cae al oscuro si el tema ya no existe.
+  if (typeof source['theme'] === 'string' && ALLOWED_THEME.test(source['theme'])) {
     settings.theme = source['theme'];
   }
   if (typeof source['fontSize'] === 'number' && source['fontSize'] >= 8 && source['fontSize'] <= 32) {

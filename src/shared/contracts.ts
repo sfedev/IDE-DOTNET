@@ -138,6 +138,33 @@ export type {
 } from './updates.js';
 export type { MarketplaceExtension, SearchQuery, SearchResult } from './open-vsx.js';
 export type { ContributionSummary, InstalledExtension, VsixManifest } from './vsix.js';
+export type {
+  CodeSnippet,
+  ContributedSnippetFile,
+  ContributedTheme,
+  MonacoThemeData,
+  MonacoTokenRule,
+} from './vsix-contributions.js';
+import type { CodeSnippet, ContributedTheme, MonacoThemeData } from './vsix-contributions.js';
+
+/**
+ * Temas y fragmentos de las extensiones instaladas, listos para dárselos a Monaco.
+ *
+ * La conversión la hace el proceso principal: implica leer varios archivos por tema —un tema puede
+ * incluir a otro— y el renderer no toca el disco.
+ */
+export interface ExtensionContributions {
+  themes: Array<{
+    id: string;
+    label: string;
+    extensionId: string;
+    uiTheme: ContributedTheme['uiTheme'];
+    data: MonacoThemeData;
+  }>;
+  snippets: CodeSnippet[];
+  /** Lo que no se ha podido cargar, con su motivo. Se enseña; no se traga. */
+  problems: string[];
+}
 
 // Fase 20: búsqueda de texto en el contenido de los archivos. El modelo es puro; su superficie
 // IPC es parte del contrato. Los nombres llevan `Search…` de prefijo y no chocan con los de Open
@@ -607,7 +634,15 @@ export interface AppInfo {
 }
 
 export interface AppSettings {
-  theme: 'dotforge-dark' | 'dotforge-light';
+  /**
+   * Tema activo: uno de los dos propios (`dotforge-dark`, `dotforge-light`) o el de una extensión
+   * instalada (`ext:<publisher>.<name>:<etiqueta>`).
+   *
+   * Es una cadena y no una unión cerrada porque el valor puede venir de una extensión que se
+   * instaló después de compilar el IDE. Lo que no se reconoce al arrancar —porque la extensión ya
+   * no está— cae al tema oscuro en vez de dejar el editor sin colores.
+   */
+  theme: string;
   fontSize: number;
   fontFamily: string;
   tabSize: number;
@@ -804,6 +839,7 @@ export const IPC = {
   extensionsInstall: 'extensions:install',
   extensionsUninstall: 'extensions:uninstall',
   extensionsOpenFolder: 'extensions:open-folder',
+  extensionsContributions: 'extensions:contributions',
 
   aiStatus: 'ai:status',
   aiSetKey: 'ai:set-key',
@@ -1220,6 +1256,14 @@ export interface DotForgeApi {
     uninstall(id: string): Promise<boolean>;
     /** Abre la carpeta de extensiones en el explorador del sistema. */
     openFolder(): Promise<void>;
+    /**
+     * Lo que aportan de verdad las instaladas: temas de color y fragmentos, ya leídos y
+     * convertidos al formato de Monaco.
+     *
+     * Se pide al arrancar y después de instalar o desinstalar. Va como consulta y no como evento
+     * porque el renderer tarda en estar listo —carga Monaco— y un evento emitido antes se perdería.
+     */
+    contributions(): Promise<ExtensionContributions>;
   };
 
   ai: {

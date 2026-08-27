@@ -31,6 +31,7 @@ import type {
   TerminalProfileInfo,
   TerminalRunResult,
   TerminalLayoutRestore,
+  ExtensionContributions,
   TerminalSessionInfo,
 } from '../../shared/contracts.js';
 import type { GitDiffRequest } from '../../shared/git.js';
@@ -100,6 +101,7 @@ import * as updaterService from '../services/updater-service.js';
 import * as openVsxService from '../services/open-vsx-service.js';
 import * as searchService from '../services/search-service.js';
 import * as extensionInstaller from '../services/extension-installer.js';
+import * as extensionContributions from '../services/extension-contributions.js';
 import * as settingsService from '../services/settings-service.js';
 import * as startupService from '../services/startup-service.js';
 import { loadSolution } from '../services/solution-service.js';
@@ -1453,6 +1455,15 @@ export function registerIpcHandlers(options: IpcOptions = {}): void {
     await mkdir(directory, { recursive: true });
     await shell.openPath(directory);
   });
+
+  /**
+   * Lo que aportan las extensiones instaladas: temas y fragmentos, ya convertidos.
+   *
+   * No recibe nada del renderer, así que no hay nada que validar: la carpeta la pone el instalador
+   * y las rutas de dentro se validan contra ella (`insideExtension`), porque salen de un JSON
+   * escrito por un tercero y acaban en un `readFile`.
+   */
+  ipcMain.handle(IPC.extensionsContributions, (): Promise<ExtensionContributions> => extensionContributions.load());
 
   // --- Asistente de IA ---------------------------------------------------------------------------
   ipcMain.handle(IPC.aiStatus, (): AiStatus => aiService.status(settingsService.current().ai));

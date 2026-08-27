@@ -9,6 +9,8 @@ import type * as MonacoApi from 'monaco-editor';
 import type {
   AppInfo,
   AppSettings,
+  CodeSnippet,
+  ExtensionContributions,
   BuildDiagnostic,
   DotnetTaskKind,
   GitFileDiff,
@@ -18,6 +20,7 @@ import type {
   ProjectInfo,
   SolutionInfo,
 } from '../shared/contracts.js';
+import { chromeThemeFor, isExtensionTheme } from '../shared/vsix-contributions.js';
 import type { AiContext, AiProviderId, AiStatus, AiTask } from '../shared/ai.js';
 import { buildHttpFile, findEndpoints, httpFileNameFor, requestFor } from '../shared/api-endpoints.js';
 import { isHttpFile, parseHttpFile } from '../shared/http-file.js';
@@ -38,7 +41,7 @@ import { byId, clear, el } from './dom.js';
 import { installIconGallery } from './icon-gallery.js';
 import { icon, type IconName } from './icons.js';
 import { applyPublishDiagnostics, reopenAll } from './lsp-bridge.js';
-import { defineThemes, getMonaco, loadMonaco } from './monaco-setup.js';
+import { defineExtensionThemes, defineThemes, getMonaco, loadMonaco } from './monaco-setup.js';
 import { HTTP_LANGUAGE_ID, registerHttpLanguage } from './languages/http.js';
 import { AiChatView } from './views/ai-chat.js';
 import { InlineAssistant } from './views/ai-inline.js';
@@ -80,6 +83,10 @@ type SidebarView =
 class DotForgeApp {
   private info: AppInfo | null = null;
   private settings: AppSettings | null = null;
+  /** Temas que aportan las extensiones instaladas. Vacío si no hay ninguna. */
+  private extensionThemes: ExtensionContributions['themes'] = [];
+  /** Bajas de los proveedores de fragmentos, para poder rehacerlos al instalar o desinstalar. */
+  private snippetProviders: Array<() => void> = [];
   /** Herramienta que se está arrastrando en la barra de actividad. */
   private draggedTool: string | null = null;
   private solution: SolutionInfo | null = null;
@@ -268,6 +275,7 @@ class DotForgeApp {
   private readonly extensionsView = new ExtensionsView({
     notify: (message, level) => this.notify(message, level),
     openUrl: (url) => void window.dotforge.app.openExternal(url),
+    reloadContributions: () => this.loadExtensionContributions(),
   });
 
   /** Tarjeta flotante de actualización. No ocupa sitio en la interfaz hasta que hay algo que decir. */
@@ -347,6 +355,10 @@ class DotForgeApp {
     byId('brand-mark').appendChild(icon('code', { size: 15, strokeWidth: 2.1 }));
 
     await loadMonaco();
+    // Antes de montar el editor: si el tema activo lo aporta una extensión, tiene que estar
+    // registrado en Monaco cuando el editor le pida el suyo, o arrancaría en oscuro y cambiaría de
+    // color un instante después.
+    await this.loadExtensionContributions();
     this.editor.mount(this.settings);
     this.attachLspProviders();
     this.registerEditorAiActions();
@@ -854,9 +866,104 @@ class DotForgeApp {
   // UI
   // -------------------------------------------------------------------------------------------
 
+  /**
+   * Temas y fragmentos de las extensiones instaladas.
+   *
+   * Es lo que el ADR-048 prometía y no hacía: hasta ahora se instalaba el `.vsix`, se leía su
+   * manifiesto para poder decir en la ficha qué aportaba, y no se consumía nada.
+   *
+   * Se vuelve a llamar después de instalar o desinstalar: un tema recién instalado tiene que
+   * aparecer en el desplegable sin reiniciar.
+   */
+  private async loadExtensionContributions(): Promise<void> {
+    let contributions;
+    try {
+      contributions = await window.dotforge.extensions.contributions();
+    } catch {
+      // Sin extensiones el IDE funciona exactamente igual que antes: no es un error que valga la
+      // pena enseñar al arrancar.
+      return;
+    }
+
+    this.extensionThemes = contributions.themes;
+
+    const failed = defineExtensionThemes(getMonaco(), contributions.themes);
+    this.registerExtensionSnippets(contributions.snippets);
+    this.settingsView.setExtensionThemes(contributions.themes);
+
+    // Lo que no se ha podido cargar se dice. Un tema que se instala y no aparece, sin explicación,
+    // es justo la percepción de "gestor roto" que el ADR-048 quería evitar.
+    for (const problem of [...contributions.problems, ...failed]) this.notify(problem, 'warn');
+  }
+
+  /**
+   * Registra los fragmentos como proveedor de autocompletado, uno por lenguaje.
+   *
+   * Se agrupan por lenguaje en vez de registrar un proveedor por archivo: Monaco consulta a todos
+   * los proveedores del lenguaje en cada pulsación, y veinte proveedores devolviendo tres
+   * fragmentos cada uno es trabajo por nada.
+   *
+   * La sintaxis de los fragmentos no se traduce: la de VS Code y la de Monaco son la misma, porque
+   * Monaco es de donde salió.
+   */
+  private registerExtensionSnippets(snippets: readonly CodeSnippet[]): void {
+    for (const dispose of this.snippetProviders) dispose();
+    this.snippetProviders = [];
+
+    const monaco = getMonaco();
+    const byLanguage = new Map<string, CodeSnippet[]>();
+    for (const snippet of snippets) {
+      const list = byLanguage.get(snippet.language) ?? [];
+      list.push(snippet);
+      byLanguage.set(snippet.language, list);
+    }
+
+    for (const [language, list] of byLanguage) {
+      const provider = monaco.languages.registerCompletionItemProvider(language, {
+        provideCompletionItems: (model, position) => {
+          const word = model.getWordUntilPosition(position);
+          const range = {
+            startLineNumber: position.lineNumber,
+            endLineNumber: position.lineNumber,
+            startColumn: word.startColumn,
+            endColumn: word.endColumn,
+          };
+
+          return {
+            suggestions: list.map((snippet) => ({
+              label: snippet.prefix,
+              kind: monaco.languages.CompletionItemKind.Snippet,
+              insertText: snippet.body,
+              insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+              documentation: snippet.description,
+              // De dónde sale: con tres extensiones de fragmentos instaladas, saber cuál lo aporta
+              // es la diferencia entre elegir y adivinar.
+              detail: snippet.extensionId,
+              range,
+            })),
+          };
+        },
+      });
+
+      this.snippetProviders.push(() => provider.dispose());
+    }
+  }
+
+  /**
+   * Aspecto del IDE.
+   *
+   * Un tema de extensión describe el **editor**, no la ventana: no sabe nada de la barra de
+   * actividad, del panel ni del explorador, que se pintan con los tokens de `theme.css`. Se elige
+   * el tema propio que menos desentone según lo que el propio tema declare (`uiTheme`), y el ajuste
+   * lo dice con esas palabras en vez de fingir que la extensión reviste la ventana entera.
+   */
   private applyTheme(theme: AppSettings['theme']): void {
-    byId('app').dataset['theme'] = theme;
-    document.documentElement.dataset['theme'] = theme;
+    const chrome = isExtensionTheme(theme)
+      ? chromeThemeFor(this.extensionThemes.find((entry: ExtensionContributions['themes'][number]) => entry.id === theme)?.uiTheme ?? 'vs-dark')
+      : theme;
+
+    byId('app').dataset['theme'] = chrome;
+    document.documentElement.dataset['theme'] = chrome;
   }
 
   private async toggleTheme(): Promise<void> {
