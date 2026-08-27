@@ -14,6 +14,13 @@ Su módulo estrella es el **Scaffolding Wizard**: un generador de arquitecturas 
 que produce soluciones .NET **compilables y ejecutables** siguiendo Clean Architecture,
 Arquitectura Hexagonal (Ports & Adapters) o Domain-Driven Design + CQRS.
 
+Desde la v2.7.0 el IDE **publica un proyecto** (`dotnet publish` desde el menú contextual, con su
+diálogo de destinos y modos, la salida en el panel y un botón para abrir la carpeta del resultado),
+la **barra lateral se esconde** con `Ctrl+B` para dejarle la ventana al código, y las **pestañas
+dicen de qué proyecto son**: una franja de color por proyecto y la tira colocable arriba, a la
+izquierda o a la derecha. Y una **ruta de archivo en un diálogo ya se lee entera** en vez de quedar
+cortada por el borde del cuadro.
+
 Desde la v2.6.0 **Claude Code se abre dentro del IDE** (`Ctrl+Shift+C`): no como extensión —eso
 exigiría un host de webviews— sino como un intérprete más del catálogo de la terminal, sobre la
 solución abierta. Las extensiones instaladas **por fin aportan algo**: sus temas de color y sus
@@ -138,7 +145,9 @@ IDE-DOTNET/
 │   │   ├── updates.ts          # * Actualizaciones: SemVer, feed de releases y artefactos (puro)
 │   │   ├── open-vsx.ts         # * Registro de extensiones: URLs, respuestas y hosts (puro)
 │   │   ├── vsix.ts             # * Formato .vsix: manifiesto, carpeta y contribuciones (puro)
-│   │   └── dotnet-verbosity.ts # * Nivel de salida de la CLI -> argumentos y variables (puro)
+│   │   ├── dotnet-verbosity.ts # * Nivel de salida de la CLI -> argumentos y variables (puro)
+│   │   ├── dotnet-publish.ts   # * Publicar: banderas que dependen del RID y ruta de salida (puro)
+│   │   └── editor-tabs.ts      # * Pestañas: proyecto de un archivo, color y posición (puro)
 │   ├── scaffold/           # * MODULO ESTRELLA: generador de arquitecturas (Node puro)
 │   │   ├── engine.ts           # Micro motor de plantillas {{token}}
 │   │   ├── generator.ts        # Motor de render + escritura en disco
@@ -155,6 +164,7 @@ IDE-DOTNET/
 │   │   ├── services/terminal-session.ts  # Directorio de trabajo de la terminal (resuelve y valida)
 │   │   ├── services/terminal-pty-service.ts # Sesiones de pseudoterminal (node-pty, opcional)
 │   │   ├── services/terminal-layout-store.ts # Pestañas recordadas, una entrada por solución
+│   │   ├── services/publish-profile-store.ts # Últimas opciones de publicación, una por proyecto
 │   │   ├── services/extension-contributions.ts # Temas y fragmentos leídos de userData/extensions
 │   │   ├── services/           # Solución, NuGet, tareas dotnet, terminal, rutas, ZIP, settings,
 │   │   │                       # git-service.ts (estado y operaciones de control de fuentes),
@@ -197,6 +207,7 @@ IDE-DOTNET/
 │       │                       # tests (explorador de pruebas), metrics (monitor de rendimiento),
 │       │                       # extensions (panel de Open VSX), update-card (tarjeta flotante),
 │       │                       # search (buscar en los archivos),
+│       │                       # publish-dialog (destinos y modos de `dotnet publish`),
 │       │                       # confirm-dialog (modal propio, asíncrono)
 │       └── styles/             # theme.css (tokens), layout.css, components.css
 ├── resources/              # Iconos multirresolución, branding
@@ -286,6 +297,24 @@ npm version 2.7.0 --no-git-tag-version && git commit -am "v2.7.0" && git tag -a 
   **antes** de etiquetar.
 - También se puede lanzar a mano desde la pestaña Actions (`workflow_dispatch`), indicando el tag.
 
+### Publicar un proyecto
+
+Desde el IDE: botón derecho sobre un proyecto ejecutable del explorador → **Publicar…**. El diálogo
+compone el comando; el equivalente en terminal de lo que lanza es:
+
+```bash
+dotnet publish App.csproj -c Release -f net9.0 --runtime win-x64 --self-contained true -p:PublishSingleFile=true
+```
+
+- **`-p:PublishSingleFile=true` y `-p:PublishReadyToRun=true` no hacen nada sin `--runtime`.** El SDK
+  no siempre lo denuncia: publica un directorio normal y quien esperaba un `.exe` único se queda
+  mirando doscientos archivos. El diálogo atenúa las casillas y `publishArgs` las descarta aunque
+  lleguen encendidas desde las preferencias guardadas.
+- **`--self-contained` se emite también en `false`** cuando hay RID: dejarlo implícito hace que dos
+  máquinas produzcan artefactos distintos con el mismo comando escrito.
+- Las últimas opciones de cada proyecto se recuerdan en `userData/publish-profiles.json`, no en el
+  repositorio (ADR-064).
+
 ### Modos de diagnóstico de la aplicación
 
 Existen para que "la app arranca" y "la gramática funciona" sean aserciones, no suposiciones:
@@ -305,14 +334,18 @@ npx electron . --smoke-test
   `nesting`, `startup`, `startup-dialog`, `terminal-suggest`, `git`, `git-diff`, `startup-play`,
   `startup-run-mode`, `ai-toggle`, `efcore`, `http`, `logs`, `startup-logs`, `containers`,
   `tests`, `tests-run`, `metrics`, `audit`, `extensions`, `update`, `search`, `unsaved`,
-  `terminal-pty`, `claude`). `search`
+  `terminal-pty`, `claude`, `publish`, `publish-run`, `sidebar`, `tabs`). `search`
   además **escribe** en la caja: el panel de búsqueda no enseña nada hasta que hay una consulta, así
   que abrirlo y ya no revisa nada. `update` pinta la tarjeta de
   actualización con un estado de ejemplo: publicar una versión de verdad para poder mirarla no es
   una opción, y no mirarla nunca tampoco. `unsaved` abre un archivo, **escribe en él con el propio
   Monaco** (`trigger('type')`, que respeta `readOnly`) y pulsa el aspa de la pestaña: deja el aviso
   de cambios sin guardar en pantalla para poder contestarlo desde `--probe=` y comprobar que el
-  editor recupera el teclado.
+  editor recupera el teclado. `publish` abre el diálogo de publicación **recorriendo los proyectos**
+  hasta dar con uno cuyo menú lo ofrezca —en una solución Clean los primeros son bibliotecas, y que
+  el menú no se lo ofrezca es parte de lo que se comprueba—, y `publish-run` encadena el botón y
+  publica de verdad: es lo único que enseña la mitad que no está en el diálogo (la tarea, el resumen
+  y su botón "Abrir carpeta"). Necesita `--wait=` de sobra, porque `dotnet publish` tarda.
 - `--ui-wait=<ms>` — cuánto se espera antes de **pulsar** la acción de `--ui=`. Los 3,2 s por
   defecto no bastan si se arranca con una solución abierta: la interfaz todavía está cargando
   Monaco y el control que hay que pulsar aún no existe.
@@ -526,6 +559,40 @@ npx electron . --smoke-test
 - **Una expresión regular a medias no es un error**: viaja como `error` dentro del resumen, igual
   que un fallo de red en el cliente HTTP, y la vista lo enseña en pequeño sin vaciar nada.
 
+### Publicación (`src/shared/dotnet-publish.ts`, `src/main/services/publish-profile-store.ts`)
+
+- **Publicar tiene canal propio y no entra por `dotnet:run-task`** (ADR-064). Sus argumentos no son
+  "el verbo más el objetivo": los compone `publishArgs` a partir de opciones ya validadas, y meter
+  `publish` en `TASK_KINDS` permitiría llegar a `dotnet publish <lo que sea>` con un `extraArgs`.
+  Hay un comentario en `register.ts` diciéndolo y una prueba estructural que lo vigila.
+- **Las banderas que dependen del RID se comprueban dos veces**: la interfaz atenúa la casilla y el
+  constructor de argumentos la descarta otra vez. Lo que llega puede venir de
+  `publish-profiles.json`, escrito por otra versión del IDE.
+- **La carpeta del resultado se compone, no se rastrea.** El `-> ruta` de MSBuild está traducido
+  (ADR-028): `publishOutputPath` la reproduce con las mismas reglas que el SDK, y devuelve `null` sin
+  marco de destino en vez de inventarse una.
+- La ruta de salida se sanea (`sanitizeOutputDir`) **y** se comprueba contra el workspace: es donde
+  `dotnet` va a escribir, y una ruta relativa se resuelve desde el directorio del proyecto.
+- Se anota con qué opciones se publicó **al lanzar**, no al terminar: si falla, lo que se quiere la
+  próxima vez es el diálogo tal y como se dejó.
+
+### Pestañas del editor (`src/shared/editor-tabs.ts`)
+
+- **El proyecto de un archivo es el del prefijo de directorio más largo, comparado por segmentos**
+  (ADR-065). `src/Acme.Api` es prefijo *textual* de `src/Acme.ApiTests/Program.cs`, que es otro
+  proyecto; y un proyecto dentro de la carpeta de otro se lleva sus archivos. Se compara en
+  minúsculas: en Windows la misma carpeta llega escrita de dos formas según venga del explorador o
+  del `.sln`.
+- **El color se asigna y se guarda por nombre de proyecto**, nunca se deriva de la posición en la
+  solución: si se derivara, crear un proyecto de pruebas recolorearía todos los demás. Se ocupa el
+  hueco libre **más bajo**, no el siguiente de un contador.
+- **Ocho colores y ninguno más**, cada uno un token de `theme.css` en los dos temas. El renderer
+  aplica una clase (`tab-project-3`), nunca un color calculado.
+- **La posición de la tira se resuelve entera en CSS**, con clases y áreas de rejilla: mover el nodo
+  en el DOM destruiría el contenedor de Monaco. Y las clases se alternan sueltas en vez de reescribir
+  `className`, porque sobre `.main` también vive `panel-collapsed`.
+- **Un archivo que no está en ningún proyecto no lleva marca**: inventarle un color diría que sí.
+
 ### Terminal integrada (`src/main/services/terminal-session.ts`, `src/shared/terminal-cwd.ts`)
 
 - **La frontera es qué se ejecuta, no desde dónde** (ADR-055). El usuario navega con `cd` a donde
@@ -644,6 +711,13 @@ npx electron . --smoke-test
   son estructurales: que no haya archivo abierto y que se esté enseñando una comparación (ADR-021).
 - **El autoguardado guarda la pestaña que cambió**, no la activa: el temporizador salta un segundo
   después y para entonces se puede haber cambiado de pestaña.
+- **`editor.layout()` a mano cuando cambia la rejilla que envuelve al contenedor**, no el contenedor:
+  esconder la barra lateral (`Ctrl+B`) o mover la tira de pestañas. `automaticLayout` observa el
+  contenedor y se entera un fotograma tarde, y hasta entonces Monaco pinta con el ancho viejo — se ve
+  como una franja en blanco a la derecha del código.
+- **La barra lateral se esconde; la de actividad, nunca.** Con las dos fuera, volver a enseñar la
+  lateral exigiría recordar el atajo. Pulsar una herramienta con la lateral escondida la trae de
+  vuelta.
 
 ### Toolchain y extensiones: nada síncrono en el hilo principal
 
@@ -1175,6 +1249,20 @@ npm run fetch:toolchain -- --platform win32 --arch x64
 - **Un checkout de CI no trae el historial.** `actions/checkout` clona con `fetch-depth: 1`, así que
   cualquier paso que mire `git log` o busque el tag anterior no encuentra nada — y no falla: sale
   vacío. Unas notas de versión en blanco se publican igual de bien que unas llenas.
+- **Un elemento flexible no encoge por debajo de su contenido mínimo, y una ruta de Windows no tiene
+  contenido mínimo.** `min-width` vale `auto` por defecto en un ítem de flexbox, y `C:\Users\…\Foo.cs`
+  no ofrece ni un punto por donde partirse: la columna de texto se niega a encoger y el párrafo se
+  sale del contenedor. Con `overflow: hidden` encima —lo normal en un diálogo con esquinas
+  redondeadas— el texto se corta y no hay forma de leer el resto. Medido en el aviso de cambios sin
+  guardar: 415 px fuera del cuadro. Hacen falta las tres cosas: `min-width: 0` en la columna,
+  `overflow-wrap: anywhere` en el texto (no `break-all`, que parte también lo que sí se podía partir
+  bien) y un alto máximo con desplazamiento, o una ruta anidada de verdad empuja los botones fuera de
+  la pantalla y el diálogo deja de poder contestarse.
+- **Un modo de diagnóstico que no dice nada es indistinguible de la funcionalidad rota que
+  comprueba.** Los scripts de `--ui=` se componen concatenando cadenas, y una que termina en `})()`
+  seguida de otra que empieza por `setTimeout` produce `})()setTimeout(…)`: error de sintaxis,
+  `executeJavaScript` no ejecuta nada y el modo termina en silencio. Costó cuatro intentos de
+  diagnóstico buscando el fallo en `dotnet publish`, que funcionaba.
 - **electron-builder recompila lo nativo aunque venga compilado.** No mira si el módulo trae
   binarios: ve una dependencia nativa y lanza `@electron/rebuild` → node-gyp → **Visual Studio**.
   En un equipo sin las Build Tools, `npm run dist:win` muere con `Could not find any Visual Studio

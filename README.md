@@ -42,6 +42,11 @@ VSX** para buscar, instalar y desinstalar `.vsix` desde el registro abierto.
 La v2.5.0 convierte el panel inferior en una terminal de verdad: **varias pestañas y un selector de
 intérprete** —PowerShell, el símbolo del sistema o la terminal asistida de siempre—, con colores,
 `Ctrl+C` y autocompletado nativo.
+La v2.7.0 cierra el ciclo de "escribir, compilar, ejecutar" con el paso que faltaba: **publicar**.
+Botón derecho sobre un proyecto, eliges destino y modo, y el IDE deja la carpeta lista con un botón
+para abrirla. Y ordena la ventana: la **barra lateral se esconde** con `Ctrl+B`, y las **pestañas
+dicen de qué proyecto son** —una franja de color por proyecto y la tira colocable a un lado—, que es
+lo que hace navegable una solución con cinco `Program.cs` abiertos.
 
 ![DotForge IDE con una solución DDD abierta](docs/screenshot-workspace.png)
 
@@ -51,6 +56,7 @@ intérprete** —PowerShell, el símbolo del sistema o la terminal asistida de s
 
 - [Características](#características)
 - [Buscar en los archivos](#buscar-en-los-archivos)
+- [Publicar un proyecto](#publicar-un-proyecto)
 - [Control de código fuente](#control-de-código-fuente)
 - [Asistente de IA](#asistente-de-ia)
 - [Base de datos y Entity Framework Core](#base-de-datos-y-entity-framework-core)
@@ -107,10 +113,36 @@ intérprete** —PowerShell, el símbolo del sistema o la terminal asistida de s
 - Auto-cierre de etiquetas que respeta las void (`<br>`) y las autocerradas (`<Foo />`).
 - 13 snippets de Blazor (`@page`, `@code`, `EditForm`, `@bind`, `[Parameter]`, …).
 - Pestañas con estado de scroll y cursor por archivo, y aviso de cambios sin guardar.
+- **Las pestañas dicen de qué proyecto son.** Una solución de siete proyectos abre cinco
+  `Program.cs` y cinco `appsettings.json`: cada pestaña lleva una franja del color de su proyecto,
+  el tooltip lo nombra y, si lo prefieres, va escrito en la propia pestaña. El color se guarda, así
+  que crear un proyecto nuevo no recolorea los demás.
+- **La tira de pestañas se coloca donde quieras**: arriba, a la izquierda o a la derecha. Con veinte
+  archivos abiertos, en vertical caben los nombres enteros.
+- **`Ctrl+B` esconde la barra lateral** y le deja la ventana al código. La barra de actividad se
+  queda: pulsar cualquiera de sus iconos trae la lateral de vuelta.
 - El editor nunca se queda mudo: su estado de escritura se recalcula al abrir, al cambiar de pestaña
   y al terminar cualquier operación en segundo plano, incluso si esa operación ha fallado.
 
 ![Editor con un componente Blazor generado](docs/screenshot-editor.png)
+
+### Publicar un proyecto
+
+Botón derecho sobre un proyecto ejecutable del explorador → **Publicar…**.
+
+- **Configuración** (Release o Debug) y **marco de destino**, tomado del `.csproj` — con varios
+  declarados, se elige.
+- **Tres modos de despliegue**: dependiente del framework (portable), dependiente del framework para
+  un destino concreto, y autocontenido (lleva el runtime dentro).
+- **Archivo único**, **ReadyToRun** y **recortar**. Las tres necesitan un destino, así que en el modo
+  portable aparecen atenuadas **con el motivo escrito al lado** en vez de dejarse marcar y no hacer
+  nada: `-p:PublishSingleFile=true` sin `--runtime` publica un directorio normal, y el SDK no
+  siempre lo denuncia.
+- **Carpeta de salida** opcional. Sin ella la elige el SDK, y el diálogo dice cuál va a ser antes de
+  pulsar.
+- La salida va al panel inferior como la de cualquier compilación, y al terminar se escribe
+  `✓ Acme.Api publicado en …` con un botón **Abrir carpeta**.
+- Las opciones de cada proyecto se recuerdan, así que la segunda vez es un clic.
 
 ### Buscar en los archivos
 
@@ -705,6 +737,7 @@ En macOS, `Ctrl` es `Cmd`.
 | Guardar / Guardar todo | `Ctrl+S` / `Ctrl+Alt+S` |
 | Paleta de comandos | `Ctrl+Shift+P` |
 | Explorador de soluciones | `Ctrl+Shift+E` |
+| **Mostrar u ocultar la barra lateral** | `Ctrl+B` |
 | **Control de código fuente** | `Ctrl+Shift+G` |
 | Confirmar el commit (con el foco en el mensaje) | `Ctrl+Enter` |
 | Paquetes NuGet | `Ctrl+Shift+U` |

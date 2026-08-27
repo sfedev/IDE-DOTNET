@@ -4,7 +4,7 @@ Bitácora viva de desarrollo. Se actualiza **en cada iteración** del bucle de t
 
 - **Proyecto:** DotForge IDE — distribución de IDE para C# / .NET 9+ / Blazor
 - **Inicio:** 2026-08-23
-- **Estado global:** 🟢 v2.6.0 — 24 fases cerradas, 347/348 hitos. El único pendiente (F5.7, artefactos de macOS) está bloqueado por plataforma y documentado en la Fase 5.
+- **Estado global:** 🟢 v2.7.0 — 26 fases cerradas, 373/374 hitos. El único pendiente (F5.7, artefactos de macOS) está bloqueado por plataforma y documentado en la Fase 5.
 
 Leyenda: `[ ]` pendiente · `[~]` en curso · `[x]` completado y **verificado con un comando**
 
@@ -551,6 +551,60 @@ por tanto **compila** pero no **ejecuta** los proyectos generados. Se añade el 
       excepción .NET no controlada en vez de cerrarlo
 - [x] F24.19 Prueba de contrato del ADR-040: la versión fijada es una constante literal y la
       selección es determinista, no se resuelve al vuelo
+
+
+### Fase 25 — Publicación de proyectos (`dotnet publish`)
+- [x] F25.1 `src/shared/dotnet-publish.ts` (nuevo): modelo puro de las opciones a los argumentos,
+      con las banderas que dependen del RID y el saneado de la ruta de salida (ADR-064)
+- [x] F25.2 `PublishSingleFile`, `PublishReadyToRun` y `PublishTrimmed` **sólo** con `--runtime`;
+      el recorte además exige autocontenido. Se descartan aunque lleguen encendidas: las
+      preferencias guardadas pueden traerlas con un modo que ya no las admite
+- [x] F25.3 `publishOutputPath` reproduce la carpeta que compone el SDK en vez de rastrearla en la
+      salida: el mensaje de MSBuild que la anuncia está traducido (ADR-028)
+- [x] F25.4 `publishProject` en `dotnet-service.ts`, por el canal de tareas: punto de progreso,
+      salida en el panel inferior y botón de cancelar, como cualquier `dotnet build`
+- [x] F25.5 Canal propio `dotnet:publish`, **fuera** de `TASK_KINDS`: dentro, `dotnet:run-task`
+      aceptaría un `extraArgs` cualquiera detrás del verbo `publish`
+- [x] F25.6 `src/main/services/publish-profile-store.ts` (nuevo): últimas opciones por proyecto en
+      `userData/publish-profiles.json`, saneadas al leer con la misma función que lo del renderer
+- [x] F25.7 `src/renderer/views/publish-dialog.ts` (nuevo): modal propio con las casillas atenuadas
+      **y el motivo escrito al lado** cuando el modo no las admite (ADR-023)
+- [x] F25.8 "Publicar…" en el menú contextual, sólo en proyectos que producen algo ejecutable
+- [x] F25.9 Resumen en el panel al terminar, con `[Abrir carpeta]` al final de la línea; la línea
+      con acción se empareja **por `taskId`**, nunca "la que esté corriendo"
+- [x] F25.10 Los tres bloques de `spawn` casi iguales de `dotnet-service.ts` pasan a ser uno: el
+      aviso de "no se ha podido ejecutar dotnet" sólo estaba en uno de los tres
+- [x] F25.11 Modos de diagnóstico `--ui=publish` y `--ui=publish-run`
+- [x] F25.12 Pruebas: 48 del modelo, 13 del almacén y 7 estructurales de seguridad
+- [x] F25.13 Verificado sobre la aplicación real: `dotnet publish` de un Blazor en 5,8 s, artefactos
+      en el disco, resumen con la ruta y el botón, y las opciones anotadas en `userData`
+
+### Fase 26 — Barra lateral, pestañas y rutas que no caben
+- [x] F26.1 `workbench.action.toggleSidebar` con `Ctrl+B`, en el menú **Ver > Barra lateral**, en la
+      paleta y con un botón atenuado en la cabecera de la propia barra
+- [x] F26.2 El identificador propio es `view.toggle-sidebar` y el de VS Code se acepta como alias:
+      `Command` gana un campo `aliases` y `runCommandById` mira los dos
+- [x] F26.3 `sidebarVisible` persistido; pulsar una herramienta con la barra escondida la trae de
+      vuelta, y la barra de **actividad** no se esconde nunca (ADR-065)
+- [x] F26.4 `EditorView.layout()` a mano: lo que cambia es la rejilla que envuelve al contenedor, no
+      el contenedor, así que el `ResizeObserver` de Monaco llega un fotograma tarde
+- [x] F26.5 `src/shared/editor-tabs.ts` (nuevo): a qué proyecto pertenece un archivo (prefijo de
+      directorio más largo, por segmentos) y qué color le toca (ADR-065)
+- [x] F26.6 El color se guarda por nombre de proyecto y no se deriva de la posición en la solución:
+      derivarlo haría que crear un proyecto de pruebas recoloreara todos los demás
+- [x] F26.7 Ocho tokens `--tab-project-N` en los dos temas; el renderer aplica la clase, nunca un
+      color calculado
+- [x] F26.8 `workbench.editor.tabPosition` (arriba, izquierda, derecha), resuelto entero en CSS con
+      áreas de rejilla: mover un nodo en el DOM destruiría el contenedor de Monaco
+- [x] F26.9 Con la tira a un lado, el canto exterior lleva el color del proyecto y el interior el
+      acento de pestaña activa: puestos en el mismo borde, uno tapa al otro
+- [x] F26.10 La ruta del aviso de cambios sin guardar deja de salirse del cuadro: `min-width: 0` en
+      la columna, `overflow-wrap: anywhere`, alto máximo con desplazamiento y `title` entero
+- [x] F26.11 Modos de diagnóstico `--ui=sidebar` y `--ui=tabs`
+- [x] F26.12 Pruebas: 33 del modelo de pestañas
+- [x] F26.13 Verificado sobre la aplicación real: tira a la izquierda con Monaco ocupando su área
+      exacta (900/900 px), la marca pintando `#d78fbe`, la barra escondida dejando 1184/1184 px, y
+      una ruta de 480 caracteres dentro del cuadro con su desplazamiento propio
 
 ---
 
@@ -1176,6 +1230,112 @@ funcionaba y una promesa sobre lo que sí.
   (ADR-047).
 - (a) sigue sobre la mesa y ahora se sabe lo que cuesta: el host y el modelo de objetos son trabajo
   mecánico; el webview es una decisión de seguridad que merece su propio ADR el día que se tome.
+
+---
+
+
+### ADR-064 — Publicar tiene canal propio, y las banderas que dependen del RID no se emiten sin él
+**Fecha:** 2026-08-27
+**Contexto:** `dotnet publish` es el primer verbo del SDK que el IDE lanza con **opciones que elige
+el usuario en un formulario**. Eso abre dos frentes a la vez: una superficie nueva por la que se
+compone la línea de comandos de un proceso hijo, y un conjunto de banderas que dependen unas de
+otras de una forma que el propio SDK no siempre denuncia.
+
+`-p:PublishSingleFile=true` sin `-r` no produce un archivo único: según la versión del SDK se
+ignora o falla, y en el mejor caso se publica un directorio normal. Quien había marcado la casilla
+se queda mirando una carpeta con doscientos archivos, sin ningún error que lo explique.
+**Opciones:**
+- (a) hacer `publish` un `DotnetTaskKind` más y mandar las banderas en `extraArgs`;
+- (b) canal propio con las opciones como **datos**, y los argumentos compuestos en el proceso
+  principal por una función pura.
+
+**Decisión:** (b).
+**Consecuencias:**
+
+- **(a) habría dejado un camino por el que el renderer escribe línea de comandos.** `dotnet:run-task`
+  ya acepta `extraArgs` para lo que lo necesita, y con `publish` dentro de `TASK_KINDS` cualquiera
+  con el renderer comprometido llegaría a `dotnet publish <lo que sea>`. `publish` está fuera de esa
+  lista **a propósito**, con un comentario diciendo por qué y una prueba estructural que lo vigila.
+- **Las tres banderas que dependen del RID se comprueban dos veces**: la interfaz atenúa la casilla
+  con `supportsSingleFile` / `supportsReadyToRun` / `supportsTrimming`, y `publishArgs` las descarta
+  otra vez. No es redundancia: lo que llega puede venir de `publish-profiles.json`, escrito por otra
+  versión del IDE, y una bandera que se emite y no hace nada es peor que no ofrecerla.
+- **`--self-contained` se emite siempre que haya RID, también en `false`.** Desde .NET 6 un `-r` sin
+  la bandera avisa de que el valor por defecto cambió; dejarlo implícito es lo que hace que dos
+  máquinas produzcan artefactos distintos con el mismo comando escrito.
+- **Una casilla atenuada dice por qué**, y distingue "elige un destino" de "este modo no lo admite".
+  Es la regla del ADR-023 y del ADR-033: atenuar y explicar, no esconder.
+- **La carpeta del resultado se compone, no se rastrea.** El `-> ruta` de MSBuild está traducido al
+  idioma del sistema (ADR-028), así que `publishOutputPath` reproduce la ruta con las mismas reglas
+  que el SDK. Sin marco de destino devuelve `null` y no se ofrece abrir nada: enseñar una carpeta
+  que no existe es peor que no enseñar ninguna.
+- **La ruta de salida se sanea antes de ser un argumento**, y se comprueba contra el workspace si la
+  hay. El saneado no es por inyección —todo viaja como array (ADR-004)— sino porque `-o out/` y
+  `-o  out` producen una carpeta que luego no coincide con la que se enseña al terminar.
+- **Las opciones se recuerdan por proyecto en `userData`, no en el repositorio.** Publicar en
+  `D:\entregas\cliente` es una decisión de esta máquina; un `.pubxml` versionado diría lo contrario
+  (ADR-015). Se anota **al lanzar**, no al terminar: si la publicación falla, lo que se quiere la
+  próxima vez es el diálogo tal y como se dejó, para corregir una opción y reintentar.
+- **Efecto lateral que valió la pena:** los tres bloques de `spawn` casi idénticos de
+  `dotnet-service.ts` pasan a ser uno. El aviso de "no se ha podido ejecutar dotnet" sólo estaba en
+  uno de los tres, así que un SDK ausente dejaba una instalación de paquete colgada sin decir nada.
+
+---
+
+### ADR-065 — La tira de pestañas se mueve y se colorea por proyecto, y el color no cambia solo
+**Fecha:** 2026-08-27
+**Contexto:** En una solución Clean Architecture de siete proyectos, tener abiertos cinco
+`Program.cs` y cinco `appsettings.json` es lo normal, no un caso raro. En ese momento la tira de
+pestañas deja de decir nada: el nombre del archivo es ambiguo y el que desambigua —el proyecto— no
+está escrito en ninguna parte. Y con veinte pestañas abiertas la tira horizontal empieza a
+desplazarse, que es cuando una tira vertical con nombres completos gana.
+**Opciones:**
+- (a) escribir el nombre del proyecto en cada pestaña;
+- (b) un color por proyecto, derivado del nombre con una función hash;
+- (c) un color por proyecto **asignado y guardado**, con el nombre como opción.
+
+**Decisión:** (c), y la posición de la tira como ajuste de tres valores.
+**Consecuencias:**
+
+- **(a) sola no basta:** duplica el ancho de cada pestaña justo cuando el problema es que no caben,
+  y en la tira horizontal el nombre se recorta antes que el del archivo. Se conserva como opción, y
+  el tooltip lo dice siempre.
+- **(b) reparte mal.** Un hash sobre el nombre da colisiones dentro de la misma solución —
+  `Acme.Api` y `Acme.Application` pueden caer en el mismo tono— y ahí el código de colores deja de
+  significar nada precisamente donde más falta hace.
+- **El color no puede depender de la posición en la solución.** Si dependiera, crear un proyecto de
+  pruebas recolorearía todos los demás y el código de colores que uno tenía memorizado cambiaría de
+  golpe. Se asigna el hueco libre **más bajo** y se guarda por nombre; un proyecto que ya lo tenía
+  conserva el suyo.
+- **Ocho colores, no más.** Tienen que distinguirse de reojo en una franja de 2 px; con catorce
+  tonos dejan de hacerlo, y dos proyectos compartiendo color siguen diciendo más que ninguno.
+  Cada uno es un token de `theme.css` en los dos temas: el renderer aplica una clase, nunca un color
+  calculado.
+- **El proyecto de un archivo se decide por el prefijo de directorio más largo y por segmentos.**
+  `src/Acme.Api` es prefijo **textual** de `src/Acme.ApiTests/Program.cs`, que es otro proyecto; y
+  un proyecto dentro de la carpeta de otro (`src/Acme.Api/Extras`) se lleva sus archivos. Además se
+  compara en minúsculas: en Windows la misma carpeta llega escrita de dos formas según venga del
+  explorador o del `.sln`.
+- **Un archivo que no está en ningún proyecto no lleva marca.** Un `README.md` de la raíz no
+  pertenece a nada, e inventarle un color diría que sí.
+- **La posición se resuelve entera en CSS**, con clases y áreas de rejilla. Mover el nodo de la tira
+  en el DOM destruiría el contenedor de Monaco y obligaría a recrear el editor; y las clases se
+  alternan sueltas en vez de reescribir `className`, porque sobre `.main` también vive
+  `panel-collapsed`, que lo pone el panel inferior.
+- **Con la tira a un lado, cada canto dice una cosa**: el exterior lleva el color del proyecto y el
+  interior el acento de "pestaña activa". Puestos en el mismo borde, uno tapa al otro y la pestaña
+  activa parece no tener proyecto.
+- **La barra lateral se esconde; la de actividad, nunca.** Con las dos fuera, volver a enseñar la
+  lateral exigiría recordar el atajo, y una interfaz de la que no se puede salir mirando no es una
+  interfaz. Pulsar una herramienta con la lateral escondida la trae de vuelta.
+- **`editor.layout()` a mano.** `automaticLayout` observa el **contenedor**, y lo que cambia aquí es
+  la rejilla que lo envuelve: la notificación llega al fotograma siguiente y hasta entonces Monaco
+  pinta con el ancho viejo, que se ve como una franja en blanco a la derecha del código. Medido:
+  con la barra escondida, el área y el editor coinciden en 1184 px.
+- **Los identificadores de comando siguen la convención del IDE (`view.toggle-sidebar`) y aceptan el
+  de VS Code como alias.** Quien busca cómo ocultar la barra lateral escribe
+  `workbench.action.toggleSidebar`; cambiar la convención entera por eso habría sido peor que
+  aceptar los dos nombres.
 
 ---
 
@@ -4270,3 +4430,106 @@ por versión, el caso que la justificaba deja de existir.
 prueba de humo pasa y `node scripts/release-notes.mjs --tag v2.6.0` compone las notas. Publicar es
 un `git tag v2.6.0 && git push --follow-tags`, y el workflow se para si el tag y `package.json` no
 coincidieran.
+
+---
+
+### Iteración 36 — 2026-08-27 — Fases 25 y 26: publicar, esconder la barra y ordenar las pestañas
+**Objetivo:** cerrar las cuatro cosas que faltaban para que el IDE sirva de punta a punta con una
+solución de verdad abierta: **publicar** un proyecto sin salir a una terminal, **esconder** la barra
+lateral para leer código, **distinguir** las pestañas de siete proyectos que abren cinco
+`Program.cs`, y que una **ruta de archivo** en un diálogo se pueda leer entera.
+
+**Hecho:**
+
+*Fase 25 — publicación.*
+- `src/shared/dotnet-publish.ts`: modelo puro. Opciones → argumentos, con las tres banderas que
+  dependen del RID (`PublishSingleFile`, `PublishReadyToRun`, `PublishTrimmed`), el saneado de la
+  ruta de salida y la composición de la carpeta del resultado.
+- `publishProject` en `dotnet-service.ts`, por el canal de tareas, y canal IPC propio
+  `dotnet:publish` **fuera** de `TASK_KINDS` (ADR-064).
+- `publish-profile-store.ts`: últimas opciones por proyecto en `userData/publish-profiles.json`.
+- `publish-dialog.ts`: modal propio con las casillas atenuadas y el motivo escrito al lado.
+- "Publicar…" en el menú contextual de los proyectos ejecutables, y resumen en el panel con
+  `[Abrir carpeta]` al final de la línea.
+
+*Fase 26 — barra lateral, pestañas y modales.*
+- `Ctrl+B`, menú **Ver > Barra lateral**, comando en la paleta con el alias
+  `workbench.action.toggleSidebar`, botón atenuado en la cabecera y estado persistido.
+- `src/shared/editor-tabs.ts`: proyecto de un archivo (prefijo de directorio más largo, por
+  segmentos, insensible a mayúsculas) y color asignado y guardado por nombre.
+- `workbench.editor.tabPosition` con tres valores, resuelto entero en CSS con áreas de rejilla.
+- La ruta del aviso de cambios sin guardar deja de salirse del cuadro.
+
+**Decisiones registradas:** ADR-064 y ADR-065.
+
+> **Nota de numeración:** el encargo pedía ADR-063 y ADR-064. El 063 ya estaba ocupado por la
+> caducidad de las cuarentenas de Roslyn (iteración 35, el mismo día), así que estos dos son el 064
+> y el 065. Renumerar habría dejado en el aire las referencias que ya apuntan al 063 desde
+> `CLAUDE.md` y desde el código.
+
+**Errores encontrados y solucionados:**
+
+1. *Síntoma:* en el aviso de cambios sin guardar, la ruta del archivo aparecía cortada por el borde
+   del cuadro, sin forma de leer el resto.
+   *Causa raíz:* un elemento flexible arranca con `min-width: auto` —"no encojas por debajo de tu
+   contenido mínimo"— y el contenido mínimo de una ruta de Windows es la ruta entera: no tiene ni un
+   solo punto por donde partirla. La columna de texto de la cabecera se negaba a encoger y el
+   `overflow: hidden` del diálogo hacía el resto.
+   *Cómo se midió:* con una ruta real de 153 caracteres, el párrafo llegaba a `x=1358` y el cuadro
+   terminaba en `x=943`. 415 píxeles fuera.
+   *Arreglo:* `min-width: 0` en la columna, `overflow-wrap: anywhere` en la ruta —no `break-all`,
+   que parte también lo que sí se podía partir bien—, alto máximo con desplazamiento propio y
+   `title` con la ruta absoluta. Sin el alto máximo, una ruta anidada de verdad empuja los botones
+   fuera de la pantalla en una ventana baja y el diálogo pasa a no poder contestarse.
+2. *Síntoma:* `--ui=publish-run` no hacía absolutamente nada. Ni diálogo, ni tarea, ni error. El
+   modo `--ui=publish` funcionaba, así que el fallo parecía estar en la publicación.
+   *Causa raíz:* el script del modo se compone concatenando, `UI_PUBLISH_SCRIPT` termina en `})()` y
+   la concatenación producía `})()setTimeout(…)`. Error de sintaxis: `executeJavaScript` no ejecuta
+   nada y el modo termina en silencio.
+   *Arreglo:* el `;` que faltaba, y un comentario diciendo por qué está ahí. La regla general queda
+   anotada: **un modo de diagnóstico que no dice nada es indistinguible de la funcionalidad rota que
+   pretende comprobar.**
+3. *Síntoma:* ninguno visible todavía, y por eso se arregló ahora. `dotnet-service.ts` tenía tres
+   bloques de `spawn` casi idénticos, y el aviso de "no se ha podido ejecutar dotnet" sólo estaba en
+   uno de los tres: un SDK ausente dejaba una instalación de paquete colgada sin decir nada.
+   *Arreglo:* un único `spawnDotnet` por el que pasa todo lo que se lanza, con pestillo en el
+   `finish` — un `error` de spawn puede venir acompañado de un `close`, y dos avisos de final para la
+   misma tarea harían avanzar de dos en dos un paso de la instalación en varios proyectos.
+
+**Lo que no se ha hecho, y por qué:**
+- **No hay selector de color por proyecto en Ajustes.** El color se asigna solo por el hueco libre
+  más bajo y se guarda; una interfaz para cambiarlo a mano es un formulario más para una decisión
+  que nadie toma dos veces. Lo guardado es editable en `settings.json` si alguien quiere.
+- **No hay arrastre para reordenar pestañas.** Es otra cosa —el orden, no el agrupamiento— y no
+  estaba en el encargo.
+- **`publish` no acepta `--no-build` ni `--no-restore`.** Son las banderas que convierten "publicar"
+  en "publicar algo que a lo mejor no es lo que hay en el disco", y desde un botón eso no se ofrece.
+
+**Verificado sobre la aplicación real:**
+
+- **Publicación completa**: `--ui=publish-run` sobre una solución Clean generada con el wizard. El
+  diálogo se abre sobre `Acme.Shop.Blazor` **saltándose las tres bibliotecas** —cuyo menú no ofrece
+  la entrada, que es lo correcto—, con `net9.0` leído del `.csproj` y las tres casillas atenuadas
+  con su motivo. `dotnet publish` termina en 5,8 s, los artefactos están en
+  `bin/Release/net9.0/publish` (`Acme.Shop.Blazor.exe` incluido), el panel escribe
+  `✓ Acme.Shop.Blazor publicado en …` con su botón **Abrir carpeta**, y las opciones quedan anotadas
+  en `userData/publish-profiles.json`.
+- **Tira de pestañas a la izquierda** (`--ui=tabs`): `tabs vertical position-left` sobre el
+  contenedor y `main tabs-left` sobre la rejilla; el editor mide **900 px en un área de 900 px** —sin
+  franja en blanco— y la marca de proyecto pinta `rgb(215, 143, 190)`, que es `--tab-project-4`.
+- **Colores repartidos por el orden del `.sln`**: `Acme.Shop.Domain: 0`, `Application: 1`,
+  `Infrastructure: 2`, `Blazor: 3`, `WebApi: 4`, `UnitTests: 5` en `settings.json`.
+- **Barra lateral escondida** (`--ui=sidebar`): `body sidebar-collapsed`, la barra a 0 px y el editor
+  ocupando **1184 px en un área de 1184 px**.
+- **Ruta en el modal**: con una ruta fabricada de 480 caracteres, el párrafo se queda en `x=922`
+  dentro de un cuadro que acaba en `x=943`, se recorta a 83 px con 171 px de contenido desplazable, y
+  los botones siguen a 502 px en una ventana de 754.
+- `npx electron . --smoke-test` → `SMOKE_OK`.
+- `npm test` entero en verde: **1567 pruebas unitarias** (1467 antes), 88 de seguridad (81 antes), 76
+  de empaquetado y las tres arquitecturas compilando y pasando las suyas.
+
+**Estado de la v2.7.0:** lista para etiquetar. `package.json` dice 2.7.0, la suite está en verde y la
+prueba de humo pasa. Publicar es
+`git tag -a v2.7.0 -m "DotForge IDE 2.7.0" && git push --follow-tags`; el tag **tiene que ser
+anotado** o el push sale en verde y no se publica nada, y el workflow se para si el tag y
+`package.json` no coincidieran (ADR-060).
