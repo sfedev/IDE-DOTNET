@@ -14,6 +14,12 @@ Su módulo estrella es el **Scaffolding Wizard**: un generador de arquitecturas 
 que produce soluciones .NET **compilables y ejecutables** siguiendo Clean Architecture,
 Arquitectura Hexagonal (Ports & Adapters) o Domain-Driven Design + CQRS.
 
+El **actualizador in-app deja de ser mudo** en los dos extremos del gesto: antes de cerrarse
+pregunta, diciendo cuánto tarda la instalación, quién la termina y si la aplicación vuelve sola —el
+botón dice "Cerrar e instalar", no "Reiniciar y aplicar", porque el IDE no reinicia—, y en el
+arranque siguiente cuenta lo que pasó: "✅ ¡Actualizado con éxito!" con las novedades de la versión,
+o el aviso de que la instalación no llegó a completarse, con el botón para reintentarla.
+
 Desde la v2.7.0 el IDE **publica un proyecto** (`dotnet publish` desde el menú contextual, con su
 diálogo de destinos y modos, la salida en el panel y un botón para abrir la carpeta del resultado),
 la **barra lateral se esconde** con `Ctrl+B` para dejarle la ventana al código, y las **pestañas
@@ -333,12 +339,17 @@ npx electron . --smoke-test
   un usuario (`wizard`, `settings`, `nuget`, `debug`, `ai`, `terminal`, `palette`, `light`,
   `nesting`, `startup`, `startup-dialog`, `terminal-suggest`, `git`, `git-diff`, `startup-play`,
   `startup-run-mode`, `ai-toggle`, `efcore`, `http`, `logs`, `startup-logs`, `containers`,
-  `tests`, `tests-run`, `metrics`, `audit`, `extensions`, `update`, `search`, `unsaved`,
+  `tests`, `tests-run`, `metrics`, `audit`, `extensions`, `update`, `update-done`, `update-failed`,
+  `update-confirm`, `search`, `unsaved`,
   `terminal-pty`, `claude`, `publish`, `publish-run`, `sidebar`, `tabs`). `search`
   además **escribe** en la caja: el panel de búsqueda no enseña nada hasta que hay una consulta, así
   que abrirlo y ya no revisa nada. `update` pinta la tarjeta de
   actualización con un estado de ejemplo: publicar una versión de verdad para poder mirarla no es
-  una opción, y no mirarla nunca tampoco. `unsaved` abre un archivo, **escribe en él con el propio
+  una opción, y no mirarla nunca tampoco. `update-done` y `update-failed` pintan los dos avisos de
+  **cierre de ciclo**, que son lo que menos se puede provocar de todo el IDE —uno exige instalar una
+  release de verdad y el otro, cancelarle a Windows el aviso de permisos—, y `update-confirm`
+  encadena el clic para dejar el aviso previo al cierre desplegado y poder leerlo. `unsaved` abre un
+  archivo, **escribe en él con el propio
   Monaco** (`trigger('type')`, que respeta `readOnly`) y pulsa el aspa de la pestaña: deja el aviso
   de cambios sin guardar en pantalla para poder contestarlo desde `--probe=` y comprobar que el
   editor recupera el teclado. `publish` abre el diálogo de publicación **recorriendo los proyectos**
@@ -488,9 +499,29 @@ npx electron . --smoke-test
 - **El artefacto se elige por plataforma y arquitectura.** El `.zip` lo publican las tres
   plataformas y sólo se distinguen por el `-win-` / `-mac-` del nombre, así que las marcas de las
   *otras* plataformas se comprueban siempre, no sólo cuando la extensión es ambigua.
-- **El único camino de instalación es `before-quit`** (ADR-046). "Reiniciar y aplicar" cierra el IDE
-  para llegar ahí; "Descartar" esconde la tarjeta, sigue descargando y deja la instalación
-  programada. Lo pendiente se persiste: una promesa que sólo vive en memoria no es una promesa.
+- **El único camino de instalación es el cierre** (ADR-046), y concretamente **`will-quit`**, no
+  `before-quit`: éste se emite al *empezar* a cerrar y el aviso de cambios sin guardar todavía puede
+  cancelar la salida — con el instalador ya lanzado sobre una aplicación que se queda abierta.
+  "Cerrar e instalar" cierra el IDE para llegar ahí; "Descartar" esconde la tarjeta, sigue
+  descargando y deja la instalación programada. Lo pendiente se persiste: una promesa que sólo vive
+  en memoria no es una promesa.
+- **El ciclo se cierra al arrancar** (ADR-066). Lo que se lanzó al salir no lo puede contar nadie
+  desde dentro, así que el intento se anota en `pending.json` **al lanzar** y el arranque siguiente
+  compara: si la versión que corre es la prometida, se instaló; si sigue siendo la de antes y el
+  registro dice que se lanzó, no. `judgePending` dicta los cuatro veredictos y es puro.
+- **El aviso del resultado vive en `state.outcome`, no en `state.status`.** La comprobación
+  automática de los cinco segundos publica `up-to-date` nada más arrancar y se habría llevado el
+  "✅ ¡Actualizado!" por delante. Se cierra con `acknowledgeOutcome`, que es acción propia: cerrar
+  una noticia no es posponer una actualización.
+- **Antes de cerrar se pregunta, con un texto por plan.** Lo compone `applyConfirmation` a partir de
+  `planKind` —un dato del estado, no la frase de `plan`— y dice cuánto tarda, quién termina el
+  trabajo y si la aplicación vuelve sola. El botón dice lo que hace ("Cerrar e instalar" / "Abrir
+  instalador") y **nunca promete un reinicio**: el IDE no reinicia, se cierra y deja trabajando a
+  otro.
+- **Un plan que se completa a mano no puede declararse fallido.** En macOS, "se abrió el `.dmg` y
+  todavía no se ha arrastrado nada" es el curso normal; sólo el camino silencioso —que prometía
+  terminar solo— puede incumplir. Y lo que falló **no se reintenta solo**: pudo cancelarse a
+  propósito.
 - El instalador se lanza `detached` y con `stdio: 'ignore'`: el padre está desapareciendo, y un hijo
   que hereda sus descriptores muere con él a mitad de la instalación. Por lo mismo no se usa
   `shell.openPath`, que devuelve una promesa que nadie va a poder esperar.
@@ -1263,6 +1294,18 @@ npm run fetch:toolchain -- --platform win32 --arch x64
   seguida de otra que empieza por `setTimeout` produce `})()setTimeout(…)`: error de sintaxis,
   `executeJavaScript` no ejecuta nada y el modo termina en silencio. Costó cuatro intentos de
   diagnóstico buscando el fallo en `dotnet publish`, que funcionaba.
+- **`before-quit` anuncia una intención; `will-quit`, un hecho.** El primero se emite al *empezar* a
+  cerrar y el cierre todavía se puede cancelar después: el aviso de cambios sin guardar del renderer
+  para el `beforeunload`, pregunta, y con "Seguir editando" anula la salida. Cualquier cosa
+  irreversible colgada de `before-quit` ya ha ocurrido para entonces. Le pasaba al instalador de la
+  actualización: con un archivo sin guardar, se lanzaba y se ponía a reemplazar los archivos de una
+  aplicación que se quedaba abierta, justo después de anunciar que el IDE se iba a cerrar. No deja
+  ningún error: deja una instalación a medias sobre un proceso vivo.
+- **Un NSIS asistido instalado con `/S` no relanza la aplicación.** `oneClick: false` —lo que
+  declara `electron-builder.yml`— instala en silencio y termina: quien acaba de leer "y se vuelve a
+  abrir al terminar" se queda con el escritorio vacío. Hay que pedirlo con `--force-run`, que es la
+  misma pareja de banderas que manda `electron-updater`. La regla general: **cuando una frase de la
+  interfaz depende de una bandera, la bandera es parte de la frase.**
 - **electron-builder recompila lo nativo aunque venga compilado.** No mira si el módulo trae
   binarios: ve una dependencia nativa y lanza `@electron/rebuild` → node-gyp → **Visual Studio**.
   En un equipo sin las Build Tools, `npm run dist:win` muere con `Could not find any Visual Studio

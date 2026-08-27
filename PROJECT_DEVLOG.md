@@ -4,7 +4,7 @@ Bitácora viva de desarrollo. Se actualiza **en cada iteración** del bucle de t
 
 - **Proyecto:** DotForge IDE — distribución de IDE para C# / .NET 9+ / Blazor
 - **Inicio:** 2026-08-23
-- **Estado global:** 🟢 v2.7.0 — 26 fases cerradas, 373/374 hitos. El único pendiente (F5.7, artefactos de macOS) está bloqueado por plataforma y documentado en la Fase 5.
+- **Estado global:** 🟢 v2.7.0 — 27 fases cerradas, 387/388 hitos. El único pendiente (F5.7, artefactos de macOS) está bloqueado por plataforma y documentado en la Fase 5.
 
 Leyenda: `[ ]` pendiente · `[~]` en curso · `[x]` completado y **verificado con un comando**
 
@@ -605,6 +605,35 @@ por tanto **compila** pero no **ejecuta** los proyectos generados. Se añade el 
 - [x] F26.13 Verificado sobre la aplicación real: tira a la izquierda con Monaco ocupando su área
       exacta (900/900 px), la marca pintando `#d78fbe`, la barra escondida dejando 1184/1184 px, y
       una ruta de 480 caracteres dentro del cuadro con su desplazamiento propio
+
+### Fase 27 — El actualizador in-app deja de ser mudo en los dos extremos
+- [x] F27.1 Aviso previo al cierre: `applyConfirmation` (puro) compone qué se va a cerrar, cuánto
+      tarda, quién termina el trabajo y si la aplicación vuelve sola, con un texto por plan
+- [x] F27.2 El botón dice lo que hace: `applyActionLabel` da "Cerrar e instalar" o "Abrir
+      instalador", y ninguno promete un reinicio que el IDE no hace (ADR-066)
+- [x] F27.3 `planKind` en `UpdateState`: el renderer decide con un dato, no comparando la frase de
+      `plan`, que es texto de presentación
+- [x] F27.4 `/S` pasa a llevar `--force-run`: un NSIS asistido instalado en silencio no relanza la
+      aplicación por su cuenta, y la tarjeta lo prometía
+- [x] F27.5 `judgePending` (puro): los cuatro veredictos sobre el registro pendiente —aplicado, no
+      completado, pendiente y caduco— a partir de la versión que corre y del intento anotado
+- [x] F27.6 `attempts` en `pending.json`, anotado **al lanzar** el instalador: para cuando termina
+      ya no hay proceso que pueda escribir nada
+- [x] F27.7 Las notas y el enlace de la release viajan con el registro: después de instalarla, el
+      feed ya no las tiene
+- [x] F27.8 `state.outcome` con `outcomeHeadline` / `outcomeMessage`: el "✅ ¡Actualizado con éxito
+      a la vX!" con las novedades, y el "⚠️ La actualización a la vX no se completó" con las dos
+      causas posibles y el botón para reintentar (ADR-066)
+- [x] F27.9 Fuera del `status` a propósito: la comprobación automática de los cinco segundos
+      publica `up-to-date` y se habría llevado el aviso por delante
+- [x] F27.10 `update:acknowledge` con acción propia: cerrar una noticia no es posponer una
+      actualización, y `dismiss` armaba `applyOnQuit` a ciegas
+- [x] F27.11 El instalador se lanza en `will-quit` y no en `before-quit`: ese cierre todavía se
+      puede cancelar, y el aviso de cambios sin guardar lo cancela
+- [x] F27.12 Modos de diagnóstico `--ui=update-done`, `--ui=update-failed` y `--ui=update-confirm`
+- [x] F27.13 Pruebas: 30 nuevas (18 del modelo puro, 12 del ciclo de vida del servicio con un
+      `pending.json` de verdad en el disco, una de ellas estructural sobre el evento de cierre)
+- [x] F27.14 Verificado sobre la aplicación real: los tres estados pintados y medidos con `--probe=`
 
 ---
 
@@ -1336,6 +1365,68 @@ desplazarse, que es cuando una tira vertical con nombres completos gana.
   de VS Code como alias.** Quien busca cómo ocultar la barra lateral escribe
   `workbench.action.toggleSidebar`; cambiar la convención entera por eso habría sido peor que
   aceptar los dos nombres.
+
+---
+
+### ADR-066 — El actualizador avisa antes de cerrar y, al volver, dice si se instaló
+**Fecha:** 2026-08-27
+**Contexto:** El actualizador in-app funcionaba y era mudo en los dos extremos del gesto más
+intrusivo que hace el IDE. Al **entrar**: un botón que decía "Reiniciar y aplicar" cerraba la
+ventana en el mismo clic, sin decir cuánto tardaba la instalación, quién la terminaba ni si la
+aplicación volvía sola — y en macOS ni siquiera reiniciaba nada, sólo abría una imagen de disco. Al
+**salir**: la sesión siguiente arrancaba idéntica se hubiera instalado o no. Cancelar el aviso de
+permisos de Windows —un clic de más en un cuadro que aparece cuando ya nadie mira— dejaba al
+usuario en la versión de siempre, con la tarjeta callada y sin ninguna forma de enterarse de que lo
+que pidió no ocurrió.
+**Opciones:**
+- (a) dejarlo como estaba y explicar mejor el texto de la tarjeta;
+- (b) leer el resultado del instalador y contarlo;
+- (c) preguntar antes de cerrar, y **deducir** el resultado en el arranque siguiente comparando la
+  versión que corre con la que se prometió.
+
+**Decisión:** (c).
+**Consecuencias:**
+
+- **(b) no se puede.** El instalador se lanza `detached`, con `stdio: 'ignore'` y a un suspiro de
+  que el proceso padre desaparezca: su código de salida no lo lee este IDE ni lo leerá nunca. Esa
+  es la restricción del ADR-046, y es la buena — un padre que espera al instalador es un padre que
+  bloquea el archivo que el instalador va a reemplazar.
+- **La evidencia es la versión que corre.** Si es la prometida (o posterior), la instalación
+  ocurrió. Si sigue siendo la de antes y el registro dice que el instalador se lanzó, no ocurrió.
+  No hay tercer caso, y no hace falta preguntarle a nadie.
+- **El intento se anota al lanzar, no al terminar.** Es el único momento en el que queda alguien
+  para escribirlo. Por eso el campo se llama `attempts` y no `failures`: cuenta lo que se sabe.
+- **Es el único `writeFileSync` del servicio, y está en `will-quit`.** La regla del ADR-051 —nada
+  síncrono en el hilo principal— protege el repintado y el IPC de una ventana viva; ahí no queda
+  ventana a la que hacer esperar un milisegundo, y un `await` no llegaría a resolverse.
+- **El aviso vive en `state.outcome`, no en `state.status`.** La comprobación automática de los
+  cinco segundos publica `up-to-date` nada más arrancar: metido en el estado, el "✅ ¡Actualizado!"
+  se habría borrado solo antes de que a nadie le diera tiempo a leerlo. Sale con
+  `acknowledgeOutcome`, que es una acción propia — cerrar una noticia no es posponer una
+  actualización, y `dismiss` armaba `applyOnQuit` a ciegas.
+- **Un plan que se completa a mano no puede declararse fallido.** En macOS, "se abrió el `.dmg` y
+  todavía no se ha arrastrado nada" es el curso normal: acusar ahí al instalador pintaría un aviso
+  en cada arranque hasta que alguien complete el arrastre, y al que decidió no completarlo, para
+  siempre. Sólo el camino silencioso —que prometía terminar solo— puede incumplir.
+- **Lo que falló no se reintenta solo.** Se conserva la descarga y se ofrece el botón, pero
+  `applyOnQuit` queda desarmado: pudo cancelarse a propósito, y volver a lanzar en cada cierre lo
+  que el usuario acaba de rechazar es insistir, no ayudar.
+- **El aviso previo tiene un texto por plan, no uno genérico.** Un instalador silencioso y un `.dmg`
+  prometen cosas distintas, y lo decide `planKind` —un dato del estado— en vez de una comparación
+  sobre la frase de `plan`, que es texto de presentación. Y el botón dice lo que hace: "Cerrar e
+  instalar" o "Abrir instalador". Ninguno de los dos promete un reinicio, porque el IDE no
+  reinicia: se cierra y deja trabajando a otro.
+- **`/S` pasa a llevar `--force-run`.** Un NSIS asistido (`oneClick: false`, que es lo que declara
+  `electron-builder.yml`) instalado en silencio **no** relanza la aplicación por su cuenta: es la
+  misma pareja de banderas que manda `electron-updater`. Sin ella, "y se vuelve a abrir al
+  terminar" era una frase bonita en un cuadro de diálogo y un escritorio vacío en la realidad.
+- **El registro pendiente lleva las notas de la versión.** Después de instalarla, el feed dice que
+  no hay ninguna actualización: las novedades de la release que se acaba de aplicar no habría de
+  dónde sacarlas. Y se leen con valores por defecto, porque el archivo lo escribe una versión del
+  IDE y lo lee otra — un `pending.json` de la v2.7.0 no tiene `attempts` ni `notes`, y tratarlo
+  como un intento fallido pintaría un aviso de error a todo el que actualice desde ahí.
+- **La instalación pasa de `before-quit` a `will-quit`.** Ver la bitácora de errores: `before-quit`
+  se emite al empezar a cerrar, y ese cierre todavía se puede cancelar.
 
 ---
 
@@ -4533,3 +4624,88 @@ prueba de humo pasa. Publicar es
 `git tag -a v2.7.0 -m "DotForge IDE 2.7.0" && git push --follow-tags`; el tag **tiene que ser
 anotado** o el push sale en verde y no se publica nada, y el workflow se para si el tag y
 `package.json` no coincidieran (ADR-060).
+
+---
+
+### Iteración 37 — 2026-08-27 — Fase 27: el actualizador deja de ser mudo en los dos extremos
+**Objetivo:** que el gesto más intrusivo del IDE —cerrarse solo para instalar una versión nueva—
+diga qué va a pasar antes de ocurrir y qué ha pasado cuando ya ha ocurrido. El actualizador
+funcionaba desde la v2.1.0 y no contaba ninguna de las dos cosas.
+
+**Hecho:**
+
+*Antes de cerrar.* `applyConfirmation` y `applyActionLabel` (puros, en `src/shared/updates.ts`)
+componen el aviso previo y el texto del botón a partir de `planKind`. Pulsar "Cerrar e instalar"
+abre el modal propio —el asíncrono, el que no bloquea el renderer— con la duración, quién termina
+el trabajo y si la aplicación vuelve sola. Donde la actualización no puede aplicarse sola, el botón
+dice "Abrir instalador" y el aviso no promete ni silencio ni reapertura.
+
+*Al volver.* `judgePending` dicta los cuatro veredictos sobre el `pending.json` que quedó en el
+disco, y el arranque publica el resultado en `state.outcome`: el "✅ ¡Actualizado con éxito a la
+vX!" con las novedades guardadas, o el "⚠️ La actualización a la vX no se completó" con las dos
+causas posibles, la descarga intacta y el botón para reintentarlo. La evidencia es la versión que
+corre comparada con la prometida, más un contador de intentos que se anota **al lanzar** el
+instalador.
+
+*Y lo que hacía falta para que las dos frases fueran verdad.* `--force-run` junto al `/S`, y la
+instalación movida de `before-quit` a `will-quit`.
+
+**Decisión registrada:** ADR-066.
+
+> **Nota de numeración:** el encargo pedía el ADR-065, que ya estaba ocupado por la tira de
+> pestañas coloreada por proyecto (iteración 36). Éste es el 066; renumerar habría dejado en el
+> aire las referencias que ya apuntan al 065 desde `CLAUDE.md` y desde el código.
+
+**Errores encontrados y solucionados:**
+
+1. *Síntoma:* ninguno visible, y es el más grave de los tres. Con un archivo sin guardar, pulsar
+   "aplicar" lanzaba el instalador y **dejaba el IDE abierto**: el aviso de cambios sin guardar
+   aparecía después, y con "Seguir editando" la salida se anulaba mientras el instalador estaba ya
+   reemplazando los archivos de la aplicación en marcha.
+   *Causa raíz:* `before-quit` se emite al *empezar* a cerrar. El `beforeunload` del renderer llega
+   más tarde y puede cancelar el cierre; el instalador, no.
+   *Arreglo:* `will-quit`, que se emite cuando ya no queda ventana y la salida es un hecho. Es la
+   misma promesa del ADR-046 puesta en el evento que de verdad significa "esto se cierra". La regla
+   general queda anotada: **un evento que anuncia una intención no es un evento que anuncia un
+   hecho**, y lo irreversible cuelga del segundo.
+2. *Síntoma:* la tarjeta prometía "se vuelve a abrir al terminar" y no había forma de que fuera
+   verdad. Un instalador NSIS **asistido** (`oneClick: false`, que es lo que declara
+   `electron-builder.yml`) ejecutado con `/S` a secas instala y no relanza nada: el usuario que
+   acaba de leer la promesa se queda con el escritorio vacío.
+   *Arreglo:* `--force-run` junto al `/S`, que es la misma pareja de banderas que manda
+   `electron-updater`. La regla: **cuando una frase de la interfaz depende de una bandera, la
+   bandera es parte de la frase.**
+3. *Síntoma:* cerrar el aviso de "✅ ¡Actualizado!" dejaba programada al cierre una instalación que
+   ya no existía.
+   *Causa raíz:* `dismiss()` ponía `applyOnQuit: true` incondicionalmente. Con una tarjeta que sólo
+   hablaba de actualizaciones por venir tenía sentido; con una que también habla de las que ya
+   pasaron, no.
+   *Arreglo:* `applyOnQuit: pending !== null`, y una acción propia (`acknowledgeOutcome`) para
+   cerrar la noticia. Cerrar un mensaje y posponer una instalación son dos verbos distintos.
+
+**Lo que no se ha hecho, y por qué:**
+- **No se lee el resultado del instalador.** No se puede: se lanza `detached`, con `stdio:
+  'ignore'`, a un suspiro de que el proceso padre desaparezca. Esperar a un hijo que va a reemplazar
+  el ejecutable del padre es exactamente lo que el ADR-046 evita.
+- **No hay una pastilla en la barra de estado.** El encargo la mencionaba como alternativa a la
+  tarjeta. La tarjeta ya existe, ya sabe pintar notas de versión y ya está donde el usuario mira
+  cuando hay una actualización; una segunda superficie diciendo lo mismo en dos sitios es peor que
+  una.
+- **Un plan `open` no puede declararse fallido.** En macOS, "se abrió el `.dmg` y todavía no se ha
+  arrastrado nada" es el curso normal, no un incumplimiento.
+
+**Verificado sobre la aplicación real:**
+
+- **`--ui=update-done`**: `✅ ¡Actualizado con éxito a la v2.8.0!`, subtítulo
+  `Ya estás en la v2.8.0. Esto es lo que trae:`, las cuatro líneas de notas, un solo botón
+  ("Entendido") y la franja en `rgb(165, 140, 245)` — el acento.
+- **`--ui=update-failed`**: `⚠️ La actualización a la v2.8.0 no se completó`, el mensaje entero con
+  la versión en la que ha quedado el usuario, las dos causas, `Van 2 intentos.` y la nota de que la
+  descarga sigue guardada; botones `Cerrar e instalar` / `Al cerrar` y la franja en
+  `rgb(227, 196, 139)`, que es `--warning`.
+- **`--ui=update-confirm`**, que pulsa el botón como lo pulsaría una persona: el modal sale con
+  `Cerrar e instalar la v2.8.0`, el detalle completo y los botones `Ahora no` / `Cerrar e instalar`,
+  con el foco en el segundo.
+- `npx electron . --smoke-test` → `SMOKE_OK`.
+- `npm test` entero en verde: **1597 pruebas unitarias** (1567 antes), 88 de seguridad, 76 de
+  empaquetado y las tres arquitecturas compilando y pasando las suyas.
