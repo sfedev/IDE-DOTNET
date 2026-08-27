@@ -66,6 +66,21 @@
   --info: #86b6f0;
   --info-soft: rgba(134, 182, 240, 0.13);
 
+  /* --- Color de proyecto en las pestañas ---------------------------------------------------
+     Ocho tonos que tienen que distinguirse **de reojo**, en una franja de 2 px al borde de una
+     pestaña. Con más de ocho dejan de distinguirse, así que una solución de diez proyectos repite
+     dos colores en vez de tener diez tonos indistinguibles.
+     No compiten con el acento: el violeta sigue significando "esto está activo", y por eso el
+     tono 1 es un azul y no un morado. --------------------------------------------------------- */
+  --tab-project-1: #7aa2f7;
+  --tab-project-2: #7fcfa4;
+  --tab-project-3: #e0a97b;
+  --tab-project-4: #d78fbe;
+  --tab-project-5: #6fc2c9;
+  --tab-project-6: #d7c26a;
+  --tab-project-7: #9a8ce0;
+  --tab-project-8: #e08d8d;
+
   /* --- Tonos de tipo de archivo (árbol e iconos) ------------------------------------------ */
   --tone-csharp: #a58cf5;
   --tone-razor: #e0a97b;
@@ -188,6 +203,16 @@
   --success-soft: rgba(28, 122, 79, 0.1);
   --info: #2166b8;
   --info-soft: rgba(33, 102, 184, 0.1);
+
+  /* Los mismos ocho, oscurecidos: sobre fondo claro, un pastel de 2 px no se ve. */
+  --tab-project-1: #2d5fbb;
+  --tab-project-2: #1c7a4f;
+  --tab-project-3: #a35b12;
+  --tab-project-4: #a63d7d;
+  --tab-project-5: #176b74;
+  --tab-project-6: #86660a;
+  --tab-project-7: #5b3ad4;
+  --tab-project-8: #b5423a;
 
   --tone-csharp: #6d4de0;
   --tone-razor: #b06215;

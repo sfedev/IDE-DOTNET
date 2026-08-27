@@ -568,6 +568,18 @@ const UI_ACTIONS: Record<string, string> = {
    * observador se enteraba— y eso sólo se ve si el camino es el de verdad.
    */
   sidebar: "document.querySelector('#sidebar-toggle button')?.click()",
+  /**
+   * Fase 26: la tira de pestañas a la izquierda, con archivos de dos proyectos abiertos.
+   *
+   * Abre dos archivos del árbol antes de mover la tira: una tira vertical vacía no enseña ni el
+   * color de proyecto ni el recorte del nombre, que es justo lo que hay que revisar a ojo.
+   */
+  tabs:
+    "[...document.querySelectorAll('.tree-row')].filter((row) => /\.(cs|json|md)$/.test(row.textContent.trim()))" +
+    '.slice(0, 2).forEach((row, index) => setTimeout(() => row.click(), index * 700));' +
+    "setTimeout(() => document.querySelector('.activity-item[data-tool-id=settings]')?.click(), 2000);" +
+    'setTimeout(() => [...document.querySelectorAll(".segmented button")]' +
+    ".find((button) => button.textContent?.includes('Izquierda'))?.click(), 2600)",
   nesting:
     "[...document.querySelectorAll('.tree-row')]" +
     ".find((row) => row.textContent?.includes('appsettings.json'))" +

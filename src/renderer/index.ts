@@ -22,6 +22,8 @@ import type {
 } from '../shared/contracts.js';
 import { chromeThemeFor, isExtensionTheme } from '../shared/vsix-contributions.js';
 import { summarizePublish } from '../shared/dotnet-publish.js';
+import type { TabProject } from '../shared/editor-tabs.js';
+import { assignColors, TAB_POSITION_INFO, type TabPosition } from '../shared/editor-tabs.js';
 import type { AiContext, AiProviderId, AiStatus, AiTask } from '../shared/ai.js';
 import { buildHttpFile, findEndpoints, httpFileNameFor, requestFor } from '../shared/api-endpoints.js';
 import { isHttpFile, parseHttpFile } from '../shared/http-file.js';
@@ -570,6 +572,11 @@ class DotForgeApp {
     this.solution = solution;
     void this.refreshGit();
 
+    // Las pestañas necesitan saber de qué proyecto es cada archivo. Se hace en los **dos** caminos,
+    // también en la relectura: instalar un paquete relee la solución, y una relectura que añada o
+    // quite un proyecto tiene que verse en la tira.
+    this.applyTabProjects(solution);
+
     if (isSameSolution) {
       this.explorer.setSolution(solution);
       this.nuget.setSolution(solution);
@@ -601,6 +608,34 @@ class DotForgeApp {
         'info',
       );
     }
+  }
+
+  /**
+   * Reparte los colores de la solución y se los da al editor.
+   *
+   * Los colores se asignan en el orden en el que están declarados los proyectos —el del `.sln`, que
+   * es el que se está viendo en el explorador— y **no** se reasignan a los que ya tenían uno: si se
+   * reasignaran, crear un proyecto de pruebas cambiaría de golpe el código de colores que uno tenía
+   * memorizado.
+   *
+   * Sólo se guarda si ha cambiado algo. Guardar en cada relectura escribiría en el disco cada vez
+   * que termina una tarea de `dotnet`, porque el renderer relee la solución al terminar cada una.
+   */
+  private applyTabProjects(solution: SolutionInfo | null): void {
+    const projects: TabProject[] = (solution?.projects ?? []).map((project) => ({
+      name: project.name,
+      directory: project.directory,
+    }));
+
+    this.editor.setProjects(projects);
+
+    const settings = this.settings;
+    if (!settings) return;
+
+    const colors = assignColors(projects.map((project) => project.name), settings.editorTabs.colors);
+    if (colors === settings.editorTabs.colors) return;
+
+    void this.applySettings({ editorTabs: { ...settings.editorTabs, colors } });
   }
 
   private async reloadSolution(): Promise<void> {
@@ -1362,6 +1397,14 @@ class DotForgeApp {
     );
   }
 
+  /** Mueve la tira de pestañas. Nada que hacer si ya estaba ahí: se evita un guardado inútil. */
+  private setTabPosition(position: TabPosition): void {
+    const tabs = this.settings?.editorTabs;
+    if (!tabs || tabs.position === position) return;
+
+    void this.applySettings({ editorTabs: { ...tabs, position } });
+  }
+
   /** Deja visible una sola vista de la barra lateral: comparten contenedor. */
   private showSidebar(view: SidebarView): void {
     // Pulsar una herramienta con la barra escondida la trae de vuelta: es lo que espera quien
@@ -1569,6 +1612,17 @@ class DotForgeApp {
     // que se le mandó. Sin esto, soltar un icono no movía nada a la vista hasta el siguiente
     // repintado por otro motivo, y parecía que el arrastre no había funcionado.
     if (patch.activityBar !== undefined) this.renderActivityBar();
+
+    // La barra lateral también se conmuta desde Ajustes, no sólo con Ctrl+B: el estado del DOM se
+    // aplica aquí para que los dos caminos acaben en el mismo sitio.
+    if (patch.sidebarVisible !== undefined) this.applySidebarVisibility(this.settings.sidebarVisible);
+
+    // Mover la tira de pestañas cambia la rejilla que envuelve al editor, no su contenedor: hay que
+    // pedirle el tamaño a mano, o Monaco pinta con el ancho viejo hasta el fotograma siguiente.
+    if (patch.editorTabs !== undefined) {
+      this.editor.layout();
+      this.panel.fitTerminal();
+    }
 
     // El nivel de salida cambia el comando de la próxima tarea, no la que ya está corriendo:
     // decirlo evita el "pues a mí me sigue saliendo lo mismo".
@@ -2318,6 +2372,17 @@ class DotForgeApp {
         keybinding: `${modifier}+B`,
         run: () => this.toggleSidebar(),
       },
+      // Las tres posiciones de la tira de pestañas. Están en la paleta además de en Ajustes porque
+      // es un cambio que se prueba: se mueve, se mira y se deja o se vuelve.
+      ...TAB_POSITION_INFO.map(
+        (entry): Command => ({
+          id: `view.tabs-${entry.id}`,
+          icon: 'panel-bottom',
+          title: `Pestañas del editor: ${entry.label.toLowerCase()}`,
+          group: 'Ver',
+          run: () => this.setTabPosition(entry.id),
+        }),
+      ),
       {
         id: 'view.command-palette',
         icon: 'command',

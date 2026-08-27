@@ -12,6 +12,7 @@ import type { AppSettings } from '../../shared/contracts.js';
 import { DEFAULT_SETTINGS } from '../../shared/contracts.js';
 import { normalizeActivityOrder } from '../../shared/activity-bar.js';
 import { coerceVerbosity } from '../../shared/dotnet-verbosity.js';
+import { coerceTabSettings } from '../../shared/editor-tabs.js';
 import { parseJsonText } from '../../shared/json-text.js';
 import { coerceAiSettings } from './ai/preferences.js';
 
@@ -73,6 +74,10 @@ function coerce(raw: unknown): AppSettings {
   // porque el archivo venía de la versión anterior es un icono que desaparece sin explicación.
   const activityBar = (source['activityBar'] ?? {}) as Record<string, unknown>;
   settings.activityBar = { order: normalizeActivityOrder(activityBar['order']) };
+
+  // La organización de las pestañas la valida su propio modelo: los colores son índices que se
+  // convierten en clases CSS, y lo guardado lo puede haber escrito otra versión del IDE.
+  settings.editorTabs = coerceTabSettings(source['editorTabs']);
 
   // El asistente valida sus propias preferencias: el endpoint acaba siendo el destino de una
   // petición con la clave de API dentro, así que no basta con "es una cadena".

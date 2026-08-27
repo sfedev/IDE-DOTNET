@@ -14,6 +14,8 @@ import { DEFAULT_ACTIVITY_ORDER, isDefaultActivityOrder } from '../../shared/act
 import type { AppSettings, ExtensionContributions, UpdateState } from '../../shared/contracts.js';
 import { isExtensionTheme } from '../../shared/vsix-contributions.js';
 import type { DotnetVerbosity } from '../../shared/dotnet-verbosity.js';
+import type { TabPosition } from '../../shared/editor-tabs.js';
+import { TAB_POSITION_INFO } from '../../shared/editor-tabs.js';
 import { DOTNET_VERBOSITY_INFO, verbosityInfo } from '../../shared/dotnet-verbosity.js';
 import { byId, clear, el } from '../dom.js';
 import { icon, type IconName } from '../icons.js';
@@ -84,6 +86,8 @@ export class SettingsView {
         ),
         this.activityOrderRow(settings.activityBar.order),
       ]),
+
+      this.tabsGroup(settings),
 
       this.group('Editor', [
         this.toggleRow('Formatear al guardar', settings.formatOnSave, (value) =>
@@ -157,6 +161,39 @@ export class SettingsView {
             on: { click: () => this.host.apply({ activityBar: { order: [...DEFAULT_ACTIVITY_ORDER] } }) },
           }),
     );
+  }
+
+  /**
+   * Organización de las pestañas.
+   *
+   * Está en Apariencia y no en Editor a propósito: no cambia cómo se escribe, cambia cómo se
+   * encuentra un archivo entre veinte abiertos. Y el coloreado se explica con lo que resuelve —cinco
+   * `Program.cs` abiertos a la vez— en vez de con el nombre de la opción.
+   */
+  private tabsGroup(settings: AppSettings): HTMLElement {
+    const tabs = settings.editorTabs;
+    const apply = (patch: Partial<AppSettings['editorTabs']>): void =>
+      this.host.apply({ editorTabs: { ...tabs, ...patch } });
+
+    return this.group('Pestañas', [
+      this.segmentedRow<TabPosition>(
+        'Posición',
+        TAB_POSITION_INFO.map((entry): [TabPosition, string] => [entry.id, entry.label]),
+        tabs.position,
+        (value) => apply({ position: value }),
+      ),
+      this.toggleRow('Color por proyecto', tabs.colorize, (value) => apply({ colorize: value })),
+      this.toggleRow('Nombre del proyecto en la pestaña', tabs.showProjectName, (value) =>
+        apply({ showProjectName: value }),
+      ),
+      el('p', {
+        className: 'settings-note',
+        text:
+          'Una solución de siete proyectos abre cinco Program.cs y cinco appsettings.json: el nombre ' +
+          'del archivo deja de decir cuál es cuál, y el proyecto sí. El color se guarda por proyecto ' +
+          'y no cambia al añadir otro.',
+      }),
+    ]);
   }
 
   // --- Piezas -----------------------------------------------------------------------------------

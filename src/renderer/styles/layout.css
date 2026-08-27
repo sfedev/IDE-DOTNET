@@ -222,6 +222,15 @@ body {
   height: 4px;
 }
 
+/*
+  Rejilla del área principal.
+
+  Por defecto son cuatro filas: pestañas, editor, agarradera y panel. Con la tira de pestañas a un
+  lado (`workbench.editor.tabPosition`) pasa a ser una rejilla de dos columnas en la fila del
+  editor, y las tres filas de abajo cruzan las dos columnas. Se resuelve **entero en CSS**, con
+  áreas: mover un nodo en el DOM al cambiar la preferencia destruiría el contenedor de Monaco y
+  costaría recrear el editor.
+*/
 .main {
   display: grid;
   grid-template-rows: auto 1fr 4px var(--panel-height, 220px);
@@ -232,6 +241,52 @@ body {
 
 .main.panel-collapsed {
   grid-template-rows: auto 1fr 0 0;
+}
+
+.main.tabs-left,
+.main.tabs-right {
+  grid-template-rows: 1fr 4px var(--panel-height, 220px);
+}
+
+.main.tabs-left.panel-collapsed,
+.main.tabs-right.panel-collapsed {
+  grid-template-rows: 1fr 0 0;
+}
+
+.main.tabs-left {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.main.tabs-right {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.main.tabs-left > .tabs {
+  grid-row: 1;
+  grid-column: 1;
+}
+
+.main.tabs-left > .editor-area {
+  grid-row: 1;
+  grid-column: 2;
+}
+
+.main.tabs-right > .tabs {
+  grid-row: 1;
+  grid-column: 2;
+}
+
+.main.tabs-right > .editor-area {
+  grid-row: 1;
+  grid-column: 1;
+}
+
+/* La agarradera y el panel cruzan las dos columnas: el panel es de todo el editor, no de una mitad. */
+.main.tabs-left > .resizer,
+.main.tabs-right > .resizer,
+.main.tabs-left > .panel,
+.main.tabs-right > .panel {
+  grid-column: 1 / -1;
 }
 
 /* --- Pestañas del editor ---------------------------------------------------------------- */
@@ -249,6 +304,39 @@ body {
 
 .tabs::-webkit-scrollbar {
   height: 3px;
+}
+
+/*
+  Tira vertical.
+
+  El ancho lo fija `--tab-strip-width` y no el contenido: con `auto`, abrir un archivo de nombre
+  largo ensancharía la columna y el editor daría un salto lateral en mitad de la escritura.
+*/
+.tabs.vertical {
+  flex-direction: column;
+  align-items: stretch;
+  width: var(--tab-strip-width, 190px);
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border-bottom: none;
+}
+
+.tabs.vertical::-webkit-scrollbar {
+  width: 3px;
+}
+
+.tabs.position-left {
+  border-right: 1px solid var(--border-subtle);
+}
+
+.tabs.position-right {
+  border-left: 1px solid var(--border-subtle);
+}
+
+.tabs.vertical .tab {
+  max-width: none;
+  min-height: 30px;
 }
 
 .editor-area {

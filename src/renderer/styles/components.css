@@ -482,6 +482,117 @@
   color: var(--text-strong);
 }
 
+/* =============================================================================================
+ * Marca de proyecto en la pestaña (Fase 26)
+ *
+ * Una franja de 2 px del color del proyecto, en el borde que da a la tira: arriba con las pestañas
+ * arriba, y en el canto exterior cuando están a un lado. No es un fondo teñido a propósito: el
+ * fondo de la pestaña ya significa "activa", y teñirlo dejaría el estado activo sin forma de verse.
+ * ========================================================================================== */
+
+.tab-project {
+  position: absolute;
+  background: var(--tab-color, transparent);
+}
+
+.tabs:not(.vertical) .tab-project {
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+}
+
+.tabs.position-left .tab-project {
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+}
+
+.tabs.position-right .tab-project {
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+}
+
+/* La pestaña activa ya lleva su propia franja de acento arriba; con la tira vertical no choca. */
+.tabs:not(.vertical) .tab.active .tab-project {
+  display: none;
+}
+
+.tab-project-1 { --tab-color: var(--tab-project-1); }
+.tab-project-2 { --tab-color: var(--tab-project-2); }
+.tab-project-3 { --tab-color: var(--tab-project-3); }
+.tab-project-4 { --tab-color: var(--tab-project-4); }
+.tab-project-5 { --tab-color: var(--tab-project-5); }
+.tab-project-6 { --tab-color: var(--tab-project-6); }
+.tab-project-7 { --tab-color: var(--tab-project-7); }
+.tab-project-8 { --tab-color: var(--tab-project-8); }
+
+/*
+  Nombre del proyecto escrito en la pestaña, cuando se pide.
+  Va en su propia línea con la tira vertical, donde hay sitio; con la tira arriba no se ofrece
+  espacio para dos líneas, así que se pone detrás del nombre y se recorta antes que él.
+*/
+.tab-project-name {
+  color: var(--text-faint);
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.tabs.vertical .tab {
+  padding-left: 13px;
+}
+
+.tabs.position-right .tab {
+  padding-left: 11px;
+  padding-right: 13px;
+}
+
+.tabs.vertical .tab-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  flex: 1;
+  line-height: var(--leading-tight);
+}
+
+.tabs:not(.vertical) .tab-text {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* Con la tira vertical, el separador entre pestañas es una línea horizontal, no vertical. */
+.tabs.vertical .tab::after {
+  left: 0;
+  right: 0;
+  top: auto;
+  bottom: 0;
+  width: auto;
+  height: 1px;
+}
+
+/*
+  Con la tira a un lado, cada borde dice una cosa distinta y no pueden ser el mismo: el canto
+  **exterior** lleva el color del proyecto y el **interior** —el que da al código— lleva el acento
+  de "esta es la pestaña activa". Puestos los dos en el mismo borde, uno tapa al otro y la pestaña
+  activa parece no tener proyecto.
+*/
+.tabs.position-left .tab.active {
+  box-shadow: inset -2px 0 0 var(--accent);
+}
+
+.tabs.position-right .tab.active {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
 /* El punto de "sin guardar" ocupa el sitio de la ✕ hasta que se pasa el ratón por encima. */
 .tab.dirty .tab-close .icon-close { display: none; }
 .tab:not(.dirty) .tab-close .icon-dirty { display: none; }

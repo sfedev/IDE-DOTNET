@@ -506,3 +506,33 @@ export type {
   PublishOptions,
   PublishSummary,
 } from '../shared/dotnet-publish.js';
+
+/**
+ * Organización visual de las pestañas del editor (Fase 26).
+ *
+ * A qué proyecto pertenece un archivo y qué color le toca. Son reglas con casos borde reales
+ * —proyectos anidados, prefijos textuales que no son prefijos de ruta, colores que no pueden
+ * cambiar al añadir un proyecto— y por eso viven fuera del DOM.
+ */
+export {
+  assignColors,
+  coerceTabPosition,
+  coerceTabSettings,
+  colorForProject,
+  DEFAULT_TAB_POSITION,
+  DEFAULT_TAB_SETTINGS,
+  decorateTab,
+  MAX_REMEMBERED_COLORS,
+  projectForFile,
+  pruneColors,
+  TAB_COLOR_COUNT,
+  TAB_POSITIONS,
+  TAB_POSITION_INFO,
+} from '../shared/editor-tabs.js';
+export type {
+  ColorAssignment,
+  TabDecoration,
+  TabPosition,
+  TabProject,
+  TabProjectSettings,
+} from '../shared/editor-tabs.js';

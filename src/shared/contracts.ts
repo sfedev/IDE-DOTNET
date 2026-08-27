@@ -68,6 +68,12 @@ export type {
 } from './dotnet-publish.js';
 import type { PublishOptions } from './dotnet-publish.js';
 
+// La organización visual de las pestañas también tiene su modelo puro: a qué proyecto pertenece un
+// archivo y qué color le toca. Se reexporta para importar de un único sitio.
+export type { TabPosition, TabProjectSettings } from './editor-tabs.js';
+import type { TabProjectSettings } from './editor-tabs.js';
+import { DEFAULT_TAB_SETTINGS } from './editor-tabs.js';
+
 // El gestor de EF Core y el cliente HTTP tienen su propio módulo de modelo (parseo de la salida
 // de `dotnet ef`, esquema deducido de las migraciones, formato `.http`), pero su superficie IPC
 // es parte del contrato: se reexporta para importar de un único sitio.
@@ -724,6 +730,14 @@ export interface AppSettings {
    */
   restoreTerminals: boolean;
   /**
+   * Organización visual de la tira de pestañas: dónde va y de qué color es cada proyecto.
+   *
+   * Los colores se guardan por nombre de proyecto y no se derivan de la posición en la solución:
+   * añadir un proyecto recolorearía todos los demás, y el código de colores que uno tenía
+   * memorizado cambiaría de golpe. `coerceTabSettings` es quien lo valida al leerlo.
+   */
+  editorTabs: TabProjectSettings;
+  /**
    * Barra lateral a la vista.
    *
    * Se guarda porque quien la esconde para leer código lo hace durante un rato largo, no durante
@@ -765,6 +779,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autoUpdateCheck: true,
   restoreTerminals: true,
   sidebarVisible: true,
+  editorTabs: DEFAULT_TAB_SETTINGS,
   activityBar: { order: DEFAULT_ACTIVITY_ORDER },
   ai: DEFAULT_AI_SETTINGS,
 };

@@ -8,6 +8,8 @@
 import type * as MonacoApi from 'monaco-editor';
 
 import type { AppSettings, EditorDocument, GitFileDiff } from '../../shared/contracts.js';
+import type { TabProject } from '../../shared/editor-tabs.js';
+import { decorateTab, DEFAULT_TAB_SETTINGS } from '../../shared/editor-tabs.js';
 import { diffKey } from '../../shared/git.js';
 import { baseName, byId, clear, el } from '../dom.js';
 import {
@@ -98,6 +100,14 @@ export class EditorView {
    * teclado dejara de llegar a Monaco.
    */
   private readonly closeLock = new ConfirmationLock();
+
+  /**
+   * Proyectos de la solución abierta, para saber de cuál es cada pestaña.
+   *
+   * Lo pone el shell al abrir o releer una solución. Vacío significa "sin solución": las pestañas
+   * se pintan sin marca, que es lo correcto — un archivo suelto no pertenece a ningún proyecto.
+   */
+  private projects: readonly TabProject[] = [];
 
   /** Ids de decoración por archivo, necesarios para reemplazarlas sin duplicar. */
   private readonly breakpointDecorations = new Map<string, string[]>();
@@ -237,6 +247,22 @@ export class EditorView {
       fontFamily: settings.fontFamily,
       fontSize: settings.fontSize,
     });
+
+    // La tira de pestañas depende de la preferencia: cambiar de posición o apagar el coloreado
+    // tiene que verse sin abrir otro archivo.
+    this.renderTabs();
+  }
+
+  /**
+   * Proyectos de la solución abierta.
+   *
+   * Lo llama el shell al abrir y al releer una solución. Se repinta la tira porque los colores y
+   * los tooltips dependen de esto: instalar un paquete relee la solución, y una relectura no puede
+   * dejar las pestañas señalando proyectos que ya no existen.
+   */
+  setProjects(projects: readonly TabProject[]): void {
+    this.projects = projects;
+    this.renderTabs();
   }
 
   listTabs(): OpenTab[] {
@@ -774,10 +800,27 @@ export class EditorView {
     const container = byId('tabs');
     clear(container);
 
+    const tabSettings = this.settings?.editorTabs ?? DEFAULT_TAB_SETTINGS;
+    const position = tabSettings.position;
+
+    // La posición se resuelve entera en CSS, con clases sobre los dos contenedores. Mover un nodo
+    // en el DOM destruiría el contenedor de Monaco y costaría recrear el editor.
+    //
+    // Se alternan clases sueltas y no se reescribe `className`: sobre `.main` también vive
+    // `panel-collapsed`, que lo pone el panel inferior, y reescribir la lista entera desde aquí
+    // desplegaría el panel cada vez que se abre una pestaña.
+    const main = byId('main');
+    container.classList.toggle('vertical', position !== 'top');
+    for (const side of ['left', 'right'] as const) {
+      container.classList.toggle(`position-${side}`, position === side);
+      main.classList.toggle(`tabs-${side}`, position === side);
+    }
+
     for (const tab of this.tabs.values()) {
       const isActive = tab.path === this.activePath && this.activeDiff === null;
 
       const spec = iconForFile(tab.name);
+      const decoration = decorateTab(tab.path, tab.name, this.projects, tabSettings);
 
       // El punto de "sin guardar" y la ✕ comparten sitio: el CSS decide cuál se ve según el
       // estado y el hover, para que la pestaña no cambie de ancho al pasar el ratón.
@@ -802,8 +845,12 @@ export class EditorView {
         el(
           'button',
           {
-            className: `tab${isActive ? ' active' : ''}${tab.dirty ? ' dirty' : ''}`,
-            title: tab.path,
+            className: `tab${isActive ? ' active' : ''}${tab.dirty ? ' dirty' : ''}${
+              decoration.colorClass ? ` ${decoration.colorClass}` : ''
+            }`,
+            // El tooltip nombra el proyecto **y** conserva la ruta entera: dos soluciones abiertas
+            // una detrás de otra pueden tener dos proyectos con el mismo nombre.
+            title: decoration.tooltip,
             role: 'tab',
             attrs: { 'aria-selected': String(isActive) },
             on: {
@@ -820,8 +867,18 @@ export class EditorView {
               },
             },
           },
+          // La franja del color del proyecto. Es un nodo y no un `border`: el borde ya lo usa el
+          // separador entre pestañas, y superponerlos deja una raya de dos colores.
+          decoration.colorClass ? el('span', { className: 'tab-project' }) : null,
           icon(spec.name, { size: 14, className: `tone-${spec.tone}` }),
-          el('span', { className: 'tab-name', text: tab.name }),
+          el(
+            'span',
+            { className: 'tab-text' },
+            el('span', { className: 'tab-name', text: tab.name }),
+            decoration.projectLabel === null
+              ? null
+              : el('span', { className: 'tab-project-name', text: decoration.projectLabel }),
+          ),
           close,
         ),
       );
