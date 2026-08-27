@@ -11,21 +11,25 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   describeContributions,
   extensionFolderName,
   hasNewerVersion,
+  nativeEquivalentFor,
+  NATIVE_EQUIVALENTS,
   isExtensionEntry,
   manifestId,
   parseVsixManifest,
   sortInstalled,
   STATIC_CONTRIBUTIONS,
 } from '../../build/ui-lib.mjs';
+
 import {
   extensionsDirectory,
   findInstalled,
@@ -37,6 +41,9 @@ import {
 } from '../../build/main-lib.mjs';
 import { MANIFEST_FILE } from '../../build/toolchain.mjs';
 import { makeZip } from './zip-fixture.mjs';
+
+/** Raíz del repositorio, para las comprobaciones sobre el código fuente. */
+const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 const MANIFEST = {
   name: 'csharp-theme',
@@ -258,5 +265,80 @@ describe('instalación en el disco', () => {
     await withExtensions(async () => {
       assert.deepEqual(await listInstalled(), []);
     });
+  });
+});
+
+/**
+ * Extensiones con equivalente nativo.
+ *
+ * El ADR-048 dice qué **no** funciona aquí, y para casi todas las extensiones eso es todo lo que se
+ * puede decir con honestidad. Para unas pocas se queda corto: alguien instala Claude Code, lee que
+ * ninguna de sus nueve contribuciones tiene efecto —lo cual es cierto, su interfaz es un webview—
+ * y se queda sin enterarse de que el IDE lo abre en una terminal con `Ctrl+Shift+C`.
+ *
+ * La tabla se mantiene corta a propósito: cada entrada es una promesa de que el equivalente existe
+ * y funciona, así que estas pruebas comprueban justamente eso — que lo prometido está declarado en
+ * el IDE y no es una frase suelta.
+ */
+describe('extensiones con equivalente nativo', () => {
+  it('Claude Code tiene el suyo, con comando y atajo', () => {
+    const equivalente = nativeEquivalentFor('anthropic.claude-code');
+
+    assert.ok(equivalente, 'la extensión de Claude Code debería tener equivalente');
+    assert.equal(equivalente.command, 'ai.openClaudeTerminal');
+    assert.equal(equivalente.keybinding, 'Ctrl+Shift+C');
+    assert.match(equivalente.summary, /terminal/i);
+  });
+
+  /**
+   * El identificador viaja como lo escribió su autor y los registros no lo normalizan igual: Open
+   * VSX devuelve `Anthropic.claude-code` con mayúscula y el manifiesto del paquete instalado también.
+   * Comparar tal cual dejaría la ficha sin el aviso justo en el caso real.
+   */
+  it('el identificador se compara sin distinguir mayúsculas', () => {
+    for (const id of ['Anthropic.claude-code', 'ANTHROPIC.CLAUDE-CODE', '  anthropic.claude-code  ']) {
+      assert.ok(nativeEquivalentFor(id), id);
+    }
+  });
+
+  it('una extensión cualquiera no tiene equivalente, y eso es lo normal', () => {
+    for (const id of ['ms-dotnettools.csharp', 'Telokis.theme-dracula-at-dusk', '', 'anthropic.otra-cosa']) {
+      assert.equal(nativeEquivalentFor(id), null, id);
+    }
+  });
+
+  it('no se parece por prefijo: un identificador que empieza igual no cuela', () => {
+    assert.equal(nativeEquivalentFor('anthropic.claude-code-extra'), null);
+    assert.equal(nativeEquivalentFor('anthropic.claude'), null);
+  });
+
+  /**
+   * Cada entrada promete que hay un comando que hace eso. Si alguien renombra el comando en la
+   * paleta y se olvida de la tabla, el botón de la ficha no haría nada — `runCommandById` sale sin
+   * decir palabra cuando no encuentra el identificador.
+   */
+  it('todo comando prometido existe en la paleta del renderer', () => {
+    const fuente = readFileSync(join(RAIZ, 'src', 'renderer', 'index.ts'), 'utf8');
+
+    for (const entry of NATIVE_EQUIVALENTS) {
+      if (entry.command === null) continue;
+      assert.ok(
+        fuente.includes(`id: '${entry.command}'`),
+        `${entry.extensionId}: el comando ${entry.command} no está registrado en la paleta`,
+      );
+    }
+  });
+
+  it('cada entrada está completa: sin medias promesas', () => {
+    for (const entry of NATIVE_EQUIVALENTS) {
+      assert.equal(entry.extensionId, entry.extensionId.toLowerCase(), 'la tabla se escribe en minúsculas');
+      assert.ok(entry.summary.length > 30, `${entry.extensionId}: el resumen no explica nada`);
+      // Un botón sin comando no se puede pulsar, y un comando sin texto no se puede etiquetar.
+      assert.equal(
+        entry.command === null,
+        entry.action === null,
+        `${entry.extensionId}: comando y texto del botón van juntos`,
+      );
+    }
   });
 });

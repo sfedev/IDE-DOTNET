@@ -24,7 +24,7 @@ import {
   formatDownloads,
   formatRating,
 } from '../../shared/open-vsx.js';
-import { hasNewerVersion } from '../../shared/vsix.js';
+import { hasNewerVersion, nativeEquivalentFor } from '../../shared/vsix.js';
 import { byId, clear, debounce, el, repaintPreservingFocus } from '../dom.js';
 import { FOCUS_KEY_ATTRIBUTE } from '../focus-guard.js';
 import { icon } from '../icons.js';
@@ -33,6 +33,13 @@ import { confirmDialog } from './confirm-dialog.js';
 export interface ExtensionsHost {
   notify(message: string, level: 'info' | 'ok' | 'warn' | 'error'): void;
   openUrl(url: string): void;
+  /**
+   * Ejecuta un comando de la paleta por su identificador.
+   *
+   * Lo usa la ficha para ofrecer el equivalente nativo de una extensión: la vista no sabe abrir una
+   * terminal, y no tiene por qué: sabe qué comando lo hace.
+   */
+  runCommand(id: string): void;
   /**
    * Relee lo que aportan las instaladas: temas y fragmentos.
    *
@@ -408,9 +415,51 @@ export class ExtensionsView {
         ),
         el('div', { className: 'ext-meta', text: meta.join(' · ') }),
         extension.description === '' ? null : el('div', { className: 'ext-description', text: extension.description }),
+        // Antes de instalarla, que es cuando más sirve saberlo.
+        this.nativeEquivalentRow(extension.id),
         actions,
       ),
     );
+  }
+
+  /**
+   * "Aquí esto ya lo hace el IDE de otra forma", con el botón para probarlo.
+   *
+   * Decir sólo lo que no funciona es honesto y a veces insuficiente. Quien instala Claude Code lee
+   * que ninguna de sus nueve contribuciones tiene efecto —que es verdad— y se queda sin saber que
+   * el IDE abre Claude Code en una terminal desde la v2.6.0. La ficha es el único sitio donde esa
+   * persona está mirando en ese momento.
+   */
+  private nativeEquivalentRow(extensionId: string): HTMLElement | null {
+    const equivalent = nativeEquivalentFor(extensionId);
+    if (equivalent === null) return null;
+
+    const row = el(
+      'div',
+      { className: 'ext-contrib ok' },
+      icon('sparkles', { size: 12 }),
+      el('span', { text: equivalent.summary }),
+    );
+
+    if (equivalent.command !== null && equivalent.action !== null) {
+      row.appendChild(
+        el(
+          'button',
+          {
+            className: 'btn small',
+            title: equivalent.keybinding === null ? equivalent.action : `${equivalent.action} (${equivalent.keybinding})`,
+            on: { click: () => this.host.runCommand(equivalent.command!) },
+          },
+          el('span', { text: equivalent.action }),
+        ),
+      );
+
+      if (equivalent.keybinding !== null) {
+        row.appendChild(el('span', { className: 'ext-meta', text: equivalent.keybinding }));
+      }
+    }
+
+    return row;
   }
 
   private installedCard(extension: InstalledExtension): HTMLElement {
@@ -459,6 +508,10 @@ export class ExtensionsView {
         ),
       );
     }
+
+    // Y, si lo hay, por dónde sí: va detrás del aviso porque es la respuesta a lo que acaba de leer.
+    const equivalent = this.nativeEquivalentRow(extension.id);
+    if (equivalent !== null) body.appendChild(equivalent);
 
     body.appendChild(
       el(

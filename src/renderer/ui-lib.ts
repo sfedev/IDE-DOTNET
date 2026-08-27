@@ -429,6 +429,8 @@ export {
   installedFrom,
   isExtensionEntry,
   manifestId,
+  nativeEquivalentFor,
+  NATIVE_EQUIVALENTS,
   parseVsixManifest,
   sortInstalled,
   STATIC_CONTRIBUTIONS,
@@ -436,7 +438,7 @@ export {
   VSIX_MANIFEST,
   VSIX_ROOT,
 } from '../shared/vsix.js';
-export type { ContributionSummary, InstalledExtension, VsixManifest } from '../shared/vsix.js';
+export type { ContributionSummary, InstalledExtension, NativeEquivalent, VsixManifest } from '../shared/vsix.js';
 
 /**
  * Contribuciones declarativas de las extensiones: temas y fragmentos.

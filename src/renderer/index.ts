@@ -276,6 +276,7 @@ class DotForgeApp {
     notify: (message, level) => this.notify(message, level),
     openUrl: (url) => void window.dotforge.app.openExternal(url),
     reloadContributions: () => this.loadExtensionContributions(),
+    runCommand: (id) => void this.runCommandById(id),
   });
 
   /** Tarjeta flotante de actualización. No ocupa sitio en la interfaz hasta que hay algo que decir. */

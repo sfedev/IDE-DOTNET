@@ -170,6 +170,60 @@ export const STATIC_CONTRIBUTIONS: readonly string[] = [
   'configurationDefaults',
 ];
 
+/**
+ * Extensiones cuyo trabajo **ya lo hace DotForge de otra forma**.
+ *
+ * La ficha de una extensión dice honestamente qué no tiene efecto aquí (ADR-048), y para casi todas
+ * eso es todo lo que se puede decir. Para unas pocas no: lo que la extensión trae existe en el IDE
+ * por otro camino, y quedarse en "no tiene efecto" deja al usuario en un callejón sin salida
+ * teniendo la respuesta a un atajo de distancia.
+ *
+ * El caso que lo motivó es literal: alguien instala **Claude Code for VS Code**, la ficha le dice
+ * que ninguna de sus nueve contribuciones funciona aquí —y es verdad, su interfaz es un webview y
+ * DotForge no tiene host de extensiones (ADR-062)— mientras `Ctrl+Shift+C` abre Claude Code en una
+ * terminal de verdad desde la v2.6.0.
+ *
+ * Es una tabla y no un `if` en la vista a propósito: así se pueden añadir casos sin tocar el
+ * pintado, y se pueden probar sin DOM. Se mantiene **corta**: una entrada aquí es una promesa de
+ * que el equivalente existe y funciona.
+ */
+export interface NativeEquivalent {
+  /** Identificador de la extensión, en la forma `publisher.name`. */
+  extensionId: string;
+  /** Qué hace DotForge en su lugar, en una frase. */
+  summary: string;
+  /** Comando de la paleta que lo abre, si lo hay. */
+  command: string | null;
+  /** Cómo se invoca, para poder enseñarlo junto al botón. */
+  keybinding: string | null;
+  /** Texto del botón. */
+  action: string | null;
+}
+
+export const NATIVE_EQUIVALENTS: readonly NativeEquivalent[] = [
+  {
+    extensionId: 'anthropic.claude-code',
+    summary:
+      'Claude Code funciona aquí sin la extensión: se abre en una pestaña de terminal de verdad, ' +
+      'sobre la solución abierta.',
+    command: 'ai.openClaudeTerminal',
+    keybinding: 'Ctrl+Shift+C',
+    action: 'Abrir Claude Code',
+  },
+];
+
+/**
+ * El equivalente nativo de una extensión, si lo hay.
+ *
+ * La comparación es sin distinguir mayúsculas porque el identificador viaja como lo escribió su
+ * autor y los registros no coinciden entre sí: Open VSX devuelve `Anthropic.claude-code` y el
+ * manifiesto del paquete instalado dice lo mismo, pero nada garantiza que siga siendo así.
+ */
+export function nativeEquivalentFor(extensionId: string): NativeEquivalent | null {
+  const wanted = extensionId.trim().toLowerCase();
+  return NATIVE_EQUIVALENTS.find((entry) => entry.extensionId === wanted) ?? null;
+}
+
 export interface ContributionSummary {
   /** Etiquetas legibles de lo que aporta y se puede usar. */
   supported: string[];
