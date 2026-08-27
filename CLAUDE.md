@@ -274,11 +274,14 @@ La release de GitHub es lo único que el actualizador in-app puede leer, así qu
 del empaquetado, no un trámite posterior. Lo hace la CI al ver el tag:
 
 ```bash
-npm version 2.6.0 --no-git-tag-version && git commit -am "v2.6.0" && git tag v2.6.0 && git push --follow-tags
+npm version 2.7.0 --no-git-tag-version && git commit -am "v2.7.0" && git tag -a v2.7.0 -m "DotForge IDE 2.7.0" && git push --follow-tags
 ```
 
-- `node scripts/release-notes.mjs --tag v2.6.0` — enseña las notas que se van a publicar, antes de
+- `node scripts/release-notes.mjs --tag v2.7.0` — enseña las notas que se van a publicar, antes de
   empujar nada. Acepta `--previous`, `--artifacts dist` y `--output <archivo>`.
+- **El tag tiene que ser anotado (`-a`).** `git push --follow-tags` **sólo empuja los anotados**: con
+  un tag ligero el push sale en verde, el tag se queda en local, el workflow no se dispara y parece
+  que se ha publicado. No hay ningún error que lo delate.
 - El workflow se para si el tag y `package.json` no dicen la misma versión (ADR-060): sube la versión
   **antes** de etiquetar.
 - También se puede lanzar a mano desde la pestaña Actions (`workflow_dispatch`), indicando el tag.
@@ -1165,6 +1168,10 @@ npm run fetch:toolchain -- --platform win32 --arch x64
   añadió. Resultado: la regla estaba probada, en verde, y el módulo que más falta le hacía consultaba
   la API de GitHub **sin autenticar aunque hubiera token**, con 60 peticiones por hora y por IP. Al
   escribir un módulo que se parece a otro ya vigilado, lo primero es meterlo en la lista.
+- **`git push --follow-tags` no empuja un tag ligero.** Sólo empuja los **anotados** (`git tag -a`),
+  y no dice nada del otro: el push sale en verde, el tag se queda en local, el workflow de release
+  no se dispara y todo parece publicado hasta que alguien mira las releases. El comando que estuvo
+  documentado en este mismo archivo tenía justo ese fallo.
 - **Un checkout de CI no trae el historial.** `actions/checkout` clona con `fetch-depth: 1`, así que
   cualquier paso que mire `git log` o busque el tag anterior no encuentra nada — y no falla: sale
   vacío. Unas notas de versión en blanco se publican igual de bien que unas llenas.
