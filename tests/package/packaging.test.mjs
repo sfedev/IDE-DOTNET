@@ -485,7 +485,68 @@ describe('publicación de releases', () => {
   it('un borrador no se da por publicado: no lo ve el feed', () => {
     // El paso de verificación no puede exigir que el feed devuelva algo que un borrador nunca
     // devuelve, o publicar en borrador fallaría siempre y por el motivo equivocado.
-    assert.match(activas, /if: \$\{\{ inputs\.draft != true \}\}/, 'la verificación no exime al borrador');
+    assert.match(activas, /inputs\.draft != true/, 'la verificación no exime al borrador');
+  });
+
+  /**
+   * El ensayo (`dry_run`).
+   *
+   * Existe porque `draft: true` **no** es un ensayo seguro cuando el tag ya está publicado: el paso
+   * de publicación es crear-o-completar y el `--draft` sólo viaja a `gh release create`, así que
+   * sobre una release existente se entra por la otra rama y se le reescriben notas y artefactos a
+   * la versión que los usuarios están viendo. Lo comprobamos sobre la v2.8.0, que ya estaba
+   * publicada cuando hizo falta validar la subida de las acciones.
+   *
+   * Lo que el ensayo tiene que garantizar es exactamente esto: que llega hasta el traspaso de
+   * artefactos y no toca ninguna release.
+   */
+  describe('ensayo sin publicar', () => {
+    const publishJob = activas.slice(activas.indexOf('  publish:'));
+
+    it('el input existe y por defecto está apagado: un ensayo se pide, no se hereda', () => {
+      assert.match(activas, /dry_run:/, 'falta el input dry_run');
+      const block = activas.slice(activas.indexOf('dry_run:'));
+      assert.match(block.slice(0, 200), /default: false/, 'dry_run tiene que venir apagado');
+    });
+
+    /**
+     * Los tres pasos que escriben en GitHub tienen que quedar fuera. Se listan por nombre en vez
+     * de contar `if:`, porque un paso nuevo que publicara algo no haría fallar a un contador.
+     */
+    it('ningún paso que toque una release corre en ensayo', () => {
+      for (const step of ['Publicar la release y adjuntar los artefactos', 'Comprobar que el actualizador in-app la ve']) {
+        const at = publishJob.indexOf(step);
+        assert.ok(at > 0, `no se encuentra el paso "${step}"`);
+        assert.match(
+          publishJob.slice(at, at + 200),
+          /inputs\.dry_run != true/,
+          `"${step}" se ejecutaría en un ensayo`,
+        );
+      }
+    });
+
+    /**
+     * Y el ensayo tiene que **decir** lo que ha validado. Un modo de diagnóstico mudo es
+     * indistinguible del pipeline roto que pretende comprobar: sin esta comprobación, un
+     * `download-artifact` que dejara `dist/` vacío pasaría en verde, porque los pasos que habrían
+     * protestado son justo los que el ensayo se salta.
+     */
+    it('el ensayo comprueba el traspaso de artefactos y falla si dist/ llega vacío', () => {
+      const at = publishJob.indexOf('Ensayo — comprobar el traspaso de artefactos entre jobs');
+      assert.ok(at > 0, 'falta el paso que comprueba el traspaso');
+
+      const step = publishJob.slice(at, at + 900);
+      assert.match(step, /inputs\.dry_run == true/, 'el paso de ensayo no está condicionado al ensayo');
+      assert.match(step, /dist\/\*\.exe/, 'el paso de ensayo no mira los artefactos de dist/');
+      assert.match(step, /::error::/, 'el paso de ensayo no falla si no hay artefactos');
+    });
+
+    it('el ensayo va después de descargar los artefactos, no antes', () => {
+      assert.ok(
+        publishJob.indexOf('download-artifact') < publishJob.indexOf('Ensayo — comprobar el traspaso'),
+        'el ensayo comprobaría un dist/ que todavía no se ha rellenado',
+      );
+    });
   });
 });
 

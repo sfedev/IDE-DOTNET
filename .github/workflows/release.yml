@@ -54,6 +54,22 @@ on:
         required: false
         default: false
         type: boolean
+      # Ensayo: recorre el pipeline entero y se para justo antes de tocar ninguna release.
+      #
+      # Existe porque `draft: true` **no** es un ensayo seguro cuando el tag ya está publicado. El
+      # paso de publicación es crear-o-completar, y el `--draft` sólo viaja a `gh release create`:
+      # sobre una release que ya existe se entra por la otra rama y se le reescriben las notas y los
+      # artefactos a la versión que los usuarios están viendo, sin que nazca ningún borrador.
+      #
+      # Lo que de verdad hace falta ensayar —y lo único que puede romperse al subir las acciones— es
+      # el traspaso de artefactos entre jobs: `upload-artifact` y `download-artifact` son una pareja
+      # y ya rompieron compatibilidad entre majors una vez. Eso ocurre **antes** de `gh`, así que
+      # cortar aquí lo valida entero sin arriesgar nada.
+      dry_run:
+        description: 'Ensayo: construye, traspasa artefactos y compone notas, pero no publica nada'
+        required: false
+        default: false
+        type: boolean
 
 # Mínimo por defecto: sólo el job que publica sube el permiso de escritura que necesita.
 permissions:
@@ -249,11 +265,41 @@ jobs:
         shell: bash
         run: node scripts/release-notes.mjs --tag "${{ steps.target.outputs.tag }}" --artifacts dist --output release-notes.md
 
+      # Un ensayo que no dice nada es indistinguible del pipeline roto que pretende comprobar: si
+      # `download-artifact` no entendiera lo que subió `upload-artifact`, `dist/` llegaría vacío y
+      # los pasos siguientes —que en ensayo no se ejecutan— serían los únicos en protestar. Aquí se
+      # afirma lo que se está validando: que los binarios cruzaron de un job al otro, con el nombre
+      # y el tamaño con los que se subieron.
+      - name: Ensayo — comprobar el traspaso de artefactos entre jobs
+        if: ${{ inputs.dry_run == true }}
+        shell: bash
+        env:
+          TAG: ${{ steps.target.outputs.tag }}
+        run: |
+          shopt -s nullglob
+          assets=(dist/*.exe dist/*.zip dist/*.dmg)
+          if [ ${#assets[@]} -eq 0 ]; then
+            echo "::error::el traspaso de artefactos ha fallado: dist/ está vacío tras download-artifact."
+            exit 1
+          fi
+
+          echo "Traspaso correcto — ${#assets[@]} artefactos recibidos del job de construcción:"
+          for asset in "${assets[@]}"; do
+            printf '  %s (%s bytes)\n' "$(basename "$asset")" "$(wc -c < "$asset")"
+          done
+
+          echo
+          echo "Notas compuestas para $TAG:"
+          sed 's/^/  /' release-notes.md
+          echo
+          echo "ENSAYO: no se crea, ni se edita, ni se borra ninguna release."
+
       # Crear o completar, en ese orden. Los tres disparos convergen aquí: con `release: published`
       # la publicación ya existe y lo único que falta son los binarios, y con un tag empujado no
       # existe nada todavía. `--clobber` hace el paso idempotente: relanzar el workflow reemplaza
       # los artefactos en vez de fallar por duplicado.
       - name: Publicar la release y adjuntar los artefactos
+        if: ${{ inputs.dry_run != true }}
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -292,7 +338,7 @@ jobs:
       # `parseReleaseFeed`— devuelva esta versión con al menos un artefacto colgando. Un borrador
       # no aparece ahí, y decirlo aquí evita buscar el fallo en el cliente.
       - name: Comprobar que el actualizador in-app la ve
-        if: ${{ inputs.draft != true }}
+        if: ${{ inputs.draft != true && inputs.dry_run != true }}
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
