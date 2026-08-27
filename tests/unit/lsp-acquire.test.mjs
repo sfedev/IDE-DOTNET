@@ -24,6 +24,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, stat, truncate, writeFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -54,10 +57,14 @@ import {
   selectRoslynVersion,
   serializeQuarantine,
   serverRequestResponse,
+  staleQuarantineEntries,
   verifyInstall,
   ZipError,
 } from '../../build/toolchain.mjs';
 import { corruptDeclaredSize, makeZip } from './zip-fixture.mjs';
+
+/** Raíz del repositorio, para las comprobaciones estructurales sobre el código fuente. */
+const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 /**
  * Trozo real del índice de `microsoft.codeanalysis.languageserver.win-x64`.
@@ -151,7 +158,9 @@ describe('política de versiones del servidor de Roslyn', () => {
   it('salta las versiones en cuarentena, incluida la fijada', () => {
     const selection = selectRoslynVersion(FEED_INDEX, { blocked: [ROSLYN_PINNED_VERSION] });
     assert.notEqual(selection.version, ROSLYN_PINNED_VERSION);
-    assert.equal(selection.reason, 'stable');
+    // El motivo era `stable`, que se traduce como "la fijada ya no está en el feed". Aquí sí está:
+    // lo que pasa es que este equipo la ha vetado, que es lo contrario y lleva a otro sitio.
+    assert.equal(selection.reason, 'quarantined');
   });
 
   it('devuelve null cuando no queda ninguna candidata', () => {
@@ -500,5 +509,203 @@ describe('respuestas del cliente a las peticiones del servidor', () => {
     assert.equal(serverRequestResponse('client/registerCapability', { registrations: [] }), null);
     assert.equal(serverRequestResponse('window/workDoneProgress/create', { token: 1 }), null);
     assert.equal(serverRequestResponse('workspace/_roslyn_projectNeedsRestore', {}), null);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Contrato del ADR-040: la versión no se resuelve al vuelo
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Lo que el ADR-040 exige, comprobado como contrato y no como intención.
+ *
+ * El feed publica 763 compilaciones y ninguna es estable en SemVer, así que "la más alta" es la de
+ * anoche de la rama principal. La política tiene que apoyarse en una **constante literal** que
+ * alguien ha arrancado a mano; en cuanto eso se convierta en un cálculo, el ADR-040 se ha perdido
+ * aunque el código siga pareciendo correcto.
+ */
+describe('contrato del ADR-040: versión fijada y determinista', () => {
+  const fuente = readFileSync(join(RAIZ, 'src', 'shared', 'lsp-versions.ts'), 'utf8');
+
+  it('la versión fijada es una constante literal, no algo que se calcule', () => {
+    // Una versión concreta, escrita con todos sus dígitos, dentro de la lista de verificadas.
+    assert.match(
+      fuente,
+      /export const ROSLYN_VERIFIED_VERSIONS: readonly string\[\] = \[\s*'\d+\.\d+\.\d+-[0-9A-Za-z.\-]+'/,
+      'la lista de versiones verificadas ya no empieza por una versión literal',
+    );
+    assert.match(
+      fuente,
+      /export const ROSLYN_PINNED_VERSION: string = ROSLYN_VERIFIED_VERSIONS\[0\]!/,
+      'la fijada tiene que ser la primera verificada, no otra cosa',
+    );
+  });
+
+  it('la fijada tiene forma de versión completa del feed', () => {
+    assert.match(ROSLYN_PINNED_VERSION, /^\d+\.\d+\.\d+-\d+\.\d+\.\d+$/);
+    assert.equal(isUnstableVersion(ROSLYN_PINNED_VERSION), false, 'la fijada no puede ser una compilación de prueba');
+  });
+
+  it('no se elige por fecha ni por "la más alta" cuando la fijada está disponible', () => {
+    // El índice trae versiones más altas que la fijada, a propósito: si el selector las prefiriera,
+    // esto se pondría en rojo.
+    assert.ok(
+      FEED_INDEX.some((version) => compareRoslynVersions(version, ROSLYN_PINNED_VERSION) > 0),
+      'el índice de prueba tiene que contener versiones más altas que la fijada',
+    );
+    assert.equal(selectRoslynVersion(FEED_INDEX).version, ROSLYN_PINNED_VERSION);
+  });
+
+  it('el orden del feed no cambia lo que se elige', () => {
+    for (const orden of [FEED_INDEX, [...FEED_INDEX].reverse(), [...FEED_INDEX].sort()]) {
+      assert.equal(selectRoslynVersion(orden).version, ROSLYN_PINNED_VERSION);
+    }
+  });
+
+  it('la selección es determinista: mismo feed, misma respuesta', () => {
+    const primera = selectRoslynVersion(FEED_INDEX);
+    const segunda = selectRoslynVersion(FEED_INDEX);
+    assert.deepEqual(primera, segunda);
+  });
+
+  /**
+   * La instalación se verifica archivo a archivo contra el manifiesto (ADR-041), y el manifiesto
+   * anota la versión del paquete. Comprobar que **esa** es la que se pidió es lo que separa
+   * "verificada" de "descargada".
+   */
+  it('el manifiesto de la instalación anota la versión exacta que se pidió', () => {
+    const manifest = buildManifest({
+      kind: 'roslyn',
+      packageVersion: ROSLYN_PINNED_VERSION,
+      rid: 'win-x64',
+      sourceSha256: 'abc',
+      installedAtUtc: '2026-08-27T10:00:00.000Z',
+      files: [],
+    });
+    assert.equal(manifest.packageVersion, ROSLYN_PINNED_VERSION);
+  });
+});
+
+/**
+ * El estado degradado tiene que decir **cuál** de sus causas se ha dado.
+ *
+ * Antes no lo decía: con la fijada vetada en el equipo, la barra de estado anunciaba "la fijada ya
+ * no está en el feed". Es falso —seguía publicada— y manda a mirar al feed de Azure cuando el
+ * problema está en un archivo de `userData`. Costó una sesión entera de diagnóstico.
+ */
+describe('por qué no se está usando la versión fijada', () => {
+  it('vetada en este equipo: se dice que falló aquí, no que desapareció', () => {
+    const selection = selectRoslynVersion(FEED_INDEX, { blocked: [ROSLYN_PINNED_VERSION] });
+
+    assert.equal(selection.reason, 'quarantined');
+    const frase = describeSelection(selection);
+    assert.match(frase, /falló en este equipo/);
+    assert.doesNotMatch(frase, /ya no está en el feed/, 'sigue en el feed: decir lo contrario es mentir');
+  });
+
+  it('ausente del feed: entonces sí es lo que dice', () => {
+    const sinFijada = FEED_INDEX.filter((version) => version !== ROSLYN_PINNED_VERSION);
+    const selection = selectRoslynVersion(sinFijada);
+
+    assert.equal(selection.reason, 'stable');
+    assert.match(describeSelection(selection), /ya no está en el feed/);
+  });
+
+  it('vetada y además ausente: se prefiere decir que no está, que es lo accionable', () => {
+    // Si no está publicada, levantar el veto no serviría de nada: no hay nada que instalar.
+    const sinFijada = FEED_INDEX.filter((version) => version !== ROSLYN_PINNED_VERSION);
+    const selection = selectRoslynVersion(sinFijada, { blocked: [ROSLYN_PINNED_VERSION] });
+    assert.equal(selection.reason, 'stable');
+  });
+
+  it('cada motivo tiene su frase, y ninguna se queda sin traducir', () => {
+    for (const reason of ['pinned', 'verified', 'stable', 'fallback', 'quarantined']) {
+      const frase = describeSelection({ version: '1.2.3-4.5.6', reason });
+      assert.ok(frase.includes('1.2.3-4.5.6'), reason);
+      assert.ok(frase.length > 20, `${reason}: la frase no explica nada`);
+    }
+  });
+});
+
+/**
+ * Un veto de cuarentena caduca al actualizar el IDE (ADR-063).
+ *
+ * De los fallos de arranque de Roslyn documentados en este proyecto, **dos han resultado ser bugs
+ * del cliente**: contestar `null` a `workspace/configuration` (ADR-043) y mandar `shutdown` con
+ * `params: null`. Un veto dictado por una versión del IDE que ya no existe es un juicio sobre
+ * código que ya no se ejecuta, y mantenerlo deja al usuario con una versión elegida sola para
+ * siempre — que es justo lo que el ADR-040 quería evitar.
+ */
+describe('los vetos de cuarentena caducan con la versión del IDE', () => {
+  const vetada = {
+    version: '4.14.0-3.26423.7',
+    rid: 'win-x64',
+    reason: 'se cerró solo con código 0',
+    atUtc: '2026-08-25T10:00:59.292Z',
+    ideVersion: '2.5.0',
+  };
+
+  const record = addQuarantineEntry({ version: 1, entries: [] }, vetada);
+
+  it('la misma versión del IDE sigue respetando su propio veto', () => {
+    assert.deepEqual(quarantinedVersions(record, 'win-x64', '2.5.0'), ['4.14.0-3.26423.7']);
+  });
+
+  it('otra versión del IDE no lo respeta: se vuelve a probar', () => {
+    assert.deepEqual(quarantinedVersions(record, 'win-x64', '2.6.0'), []);
+  });
+
+  it('una entrada sin versión del IDE es de antes de que esto existiera, y se reintenta', () => {
+    const antiguo = addQuarantineEntry({ version: 1, entries: [] }, { ...vetada, ideVersion: undefined });
+    assert.deepEqual(quarantinedVersions(antiguo, 'win-x64', '2.6.0'), []);
+    // Sin pedir versión se sigue listando entera: es lo que quiere quien sólo enumera lo que hay.
+    assert.deepEqual(quarantinedVersions(antiguo, 'win-x64'), ['4.14.0-3.26423.7']);
+  });
+
+  it('los vetos caducados se pueden enumerar para poder decirlo', () => {
+    const caducados = staleQuarantineEntries(record, 'win-x64', '2.6.0');
+    assert.equal(caducados.length, 1);
+    assert.equal(caducados[0].ideVersion, '2.5.0');
+    assert.deepEqual(staleQuarantineEntries(record, 'win-x64', '2.5.0'), []);
+  });
+
+  it('el veto caducado sigue escrito: caduca, no se borra', () => {
+    // Borrarlo perdería el historial de qué falló y cuándo, que es lo único que queda si vuelve
+    // a fallar. Lo que cambia es si bloquea, no si existe.
+    assert.equal(record.entries.length, 1);
+    assert.deepEqual(quarantinedVersions(record, 'win-x64'), ['4.14.0-3.26423.7']);
+  });
+
+  it('sobrevive a la ida y vuelta por el archivo', () => {
+    const releido = parseQuarantine(serializeQuarantine(record));
+    assert.equal(releido.entries[0].ideVersion, '2.5.0');
+    assert.deepEqual(quarantinedVersions(releido, 'win-x64', '2.6.0'), []);
+  });
+
+  it('una entrada con una versión de IDE que no es una cadena se descarta entera', () => {
+    const roto = parseQuarantine(JSON.stringify({ version: 1, entries: [{ ...vetada, ideVersion: 42 }] }));
+    assert.deepEqual(roto.entries, []);
+  });
+});
+
+/**
+ * `shutdown` no lleva parámetros, y mandar `null` no es lo mismo que omitirlos.
+ *
+ * StreamJsonRpc —que es lo que usa Roslyn— cuenta los argumentos de la petición al deserializarla y
+ * ante un `null` levanta `InvalidOperationException: Unexpected value kind: Null` **fuera de
+ * cualquier try**: el servidor muere con excepción no controlada (0xE0434352). Se comprobó
+ * lanzando el servidor real: con `params: null` muere; omitiéndolo, aguanta y contesta.
+ */
+describe('el cliente no manda params nulos por el cable', () => {
+  const cliente = readFileSync(join(RAIZ, 'src', 'main', 'lsp', 'lsp-client.ts'), 'utf8');
+
+  it('los mensajes se componen omitiendo params cuando no hay', () => {
+    assert.match(cliente, /\.\.\.paramsField\(params\)/);
+    assert.match(cliente, /params === null \|\| params === undefined \? \{\} : \{ params \}/);
+  });
+
+  it('ningún mensaje se escribe con params puesto a pelo', () => {
+    // `{ jsonrpc: '2.0', id, method, params }` es exactamente lo que mataba al servidor.
+    assert.doesNotMatch(cliente, /jsonrpc: '2\.0'[^}]*,\s*params\s*[},]/, 'hay un mensaje con params sin filtrar');
   });
 });

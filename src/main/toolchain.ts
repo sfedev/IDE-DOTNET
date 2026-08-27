@@ -46,6 +46,7 @@ export {
   MAX_QUARANTINE_ENTRIES,
   parseQuarantine,
   quarantinedVersions,
+  staleQuarantineEntries,
   removeQuarantineEntry,
   serializeQuarantine,
 } from '../shared/lsp-health.js';

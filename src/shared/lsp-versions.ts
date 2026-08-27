@@ -71,8 +71,16 @@ export const ROSLYN_VERIFIED_VERSIONS: readonly string[] = ['4.14.0-3.26423.7'];
 /** La versión que se usa mientras el feed la siga publicando. */
 export const ROSLYN_PINNED_VERSION: string = ROSLYN_VERIFIED_VERSIONS[0]!;
 
-/** Por qué se eligió lo que se eligió. Se enseña en la barra de estado y se comprueba en las pruebas. */
-export type RoslynSelectionReason = 'pinned' | 'verified' | 'stable' | 'fallback';
+/**
+ * Por qué se eligió lo que se eligió. Se enseña en la barra de estado y se comprueba en las pruebas.
+ *
+ * `quarantined` existe porque el mensaje mentía. Cuando la fijada estaba vetada **en este equipo**,
+ * la selección caía a `stable` y la barra de estado decía "la fijada ya no está en el feed", que es
+ * falso y manda a buscar el problema al sitio equivocado: al feed de Azure en vez de a un archivo
+ * de `userData`. Costó una sesión entera de diagnóstico averiguarlo, y la conclusión general es que
+ * un estado degradado tiene que decir **cuál** de sus causas se ha dado, no la más probable.
+ */
+export type RoslynSelectionReason = 'pinned' | 'verified' | 'stable' | 'fallback' | 'quarantined';
 
 export interface RoslynSelection {
   version: string;
@@ -177,7 +185,8 @@ export function selectRoslynVersion(
   const blocked = new Set(options.blocked ?? []);
   const verified = options.verified ?? ROSLYN_VERIFIED_VERSIONS;
 
-  const usable = available.map((version) => version.trim()).filter((version) => version !== '' && !blocked.has(version));
+  const published = new Set(available.map((version) => version.trim()).filter((version) => version !== ''));
+  const usable = [...published].filter((version) => !blocked.has(version));
 
   if (usable.length === 0) return null;
 
@@ -192,6 +201,11 @@ export function selectRoslynVersion(
   const best = pickLatestVersion(stable.length > 0 ? stable : usable);
   if (best === null) return null;
 
+  // Las dos causas se parecen desde fuera —no se está usando la fijada— y son opuestas por dentro:
+  // una está en el feed y la otra no. Decir la equivocada manda a mirar donde no es.
+  const pinnedIsQuarantined = verified.some((candidate) => published.has(candidate) && blocked.has(candidate));
+  if (pinnedIsQuarantined) return { version: best, reason: 'quarantined' };
+
   return { version: best, reason: stable.length > 0 ? 'stable' : 'fallback' };
 }
 
@@ -204,6 +218,8 @@ export function describeSelection(selection: RoslynSelection): string {
       return `${selection.version} (versión verificada de reserva)`;
     case 'stable':
       return `${selection.version} (la fijada ya no está en el feed; la más reciente sin marcar como prueba)`;
+    case 'quarantined':
+      return `${selection.version} (la versión fijada falló en este equipo y está descartada; se reintentará al actualizar DotForge)`;
     case 'fallback':
       return `${selection.version} (no queda ninguna versión estable disponible)`;
   }

@@ -674,6 +674,14 @@ npx electron . --smoke-test
   apaga limpiamente. Lo decide `src/shared/lsp-protocol.ts`, que es puro.
 - Una versión que falla queda en cuarentena **por RID**, salvo que la auditoría demuestre que la
   culpa era de la copia: entonces se borra la copia y se le levanta el veto (ADR-044).
+- **Un veto de cuarentena caduca al actualizar el IDE** (ADR-063). Dice "esto no arrancó **con este
+  cliente**", y de los tres fallos de arranque documentados, **dos han sido bugs del cliente**. La
+  entrada lleva `ideVersion` y sólo bloquea mientras esa versión sea la que corre; caduca, no se
+  borra, porque es el único historial de qué falló.
+- **El motivo de no estar usando la fijada se dice entero.** "Vetada en este equipo" y "ya no está
+  en el feed" son estados opuestos —en uno sigue publicada— y decir el equivocado manda a mirar al
+  feed de Azure cuando el problema está en un archivo de `userData`. Costó una sesión de diagnóstico.
+- **`shutdown` va sin parámetros.** Ver la sección de trampas: `params: null` mata al servidor.
 
 ### Peticiones del toolchain y token de GitHub (`src/shared/github-api.ts`)
 
@@ -1125,6 +1133,16 @@ npm run fetch:toolchain -- --platform win32 --arch x64
   return;` deja `length` narrowed al literal `1`, y un `length === 0` posterior —perfectamente
   alcanzable, porque los `await` de en medio modifican la lista— sale como `TS2367: types '1' and
   '0' have no overlap`, que se lee como si el código fuera imposible. Se compara `> 1`.
+- **Mandar `params: null` no es lo mismo que omitir `params`.** Roslyn habla por StreamJsonRpc, que
+  cuenta los argumentos de la petición nada más deserializarla y **fuera de cualquier `try`**: ante
+  un `null` levanta `InvalidOperationException: Unexpected value kind: Null` y el servidor muere con
+  excepción no controlada (`0xE0434352`), no con un cierre. Le pasaba a `shutdown`, que en LSP no
+  lleva parámetros. La especificación de JSON-RPC dice que `params` es opcional: se omite.
+- **Un veto de cuarentena que nadie puede levantar es una avería permanente.** El IDE llevaba nueve
+  versiones usando un Roslyn elegido solo porque un bug del cliente —ya arreglado— había vetado la
+  versión fijada, y la única salida existente exigía que la auditoría declarase corrupta la copia.
+  Antes de subir una versión fijada porque "el feed la retiró", pregúntale al feed: publicaba las
+  763 compilaciones de siempre y la fijada estaba entre ellas.
 - **`CreateProcess` no aplica `PATHEXT`.** En Windows, buscar un programa por `PATH` probando las
   extensiones de `PATHEXT` encuentra `npx.cmd`; lanzarlo por su nombre a secas **falla**, porque
   `CreateProcess` sólo prueba `.exe`. Se comprueba una cosa y se ejecuta otra, y el error —"Cannot

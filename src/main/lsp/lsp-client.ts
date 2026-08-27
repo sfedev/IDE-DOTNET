@@ -327,7 +327,7 @@ export class LspClient extends EventEmitter {
 
   notify(method: string, params: unknown): void {
     if (!this.child) return;
-    this.writeTo(this.child, { jsonrpc: '2.0', method, params });
+    this.writeTo(this.child, { jsonrpc: '2.0', method, ...paramsField(params) });
   }
 
   /** Cancela una petición en vuelo (el usuario siguió escribiendo y el resultado ya no sirve). */
@@ -347,7 +347,7 @@ export class LspClient extends EventEmitter {
       timer.unref?.();
 
       this.pending.set(id, { resolve, reject, timer, method });
-      this.writeTo(child, { jsonrpc: '2.0', id, method, params });
+      this.writeTo(child, { jsonrpc: '2.0', id, method, ...paramsField(params) });
     });
   }
 
@@ -432,3 +432,23 @@ export class LspClient extends EventEmitter {
 }
 
 export const lspClient = new LspClient();
+
+/**
+ * El campo `params` de un mensaje JSON-RPC, o nada si no hay parámetros.
+ *
+ * **No es lo mismo omitir `params` que mandar `null`**, aunque en JSON lo parezca. Roslyn habla por
+ * StreamJsonRpc, cuyo formateador de `System.Text.Json` cuenta los argumentos de la petición nada
+ * más deserializarla, y ante un `null` levanta `InvalidOperationException: Unexpected value kind:
+ * Null` **fuera de cualquier try**: el servidor muere con una excepción no controlada
+ * (`0xE0434352`), no con un cierre.
+ *
+ * Le pasaba a `shutdown`, que en LSP no lleva parámetros y se mandaba con `null`. El daño real era
+ * pequeño —se estaba parando el servidor de todas formas— salvo por una cosa: el mismo camino lo
+ * recorre `start()`, que empieza parando el anterior, así que cada reinicio dejaba una excepción no
+ * controlada en el registro y un proceso muerto de mala manera.
+ *
+ * La especificación de JSON-RPC dice que `params` es opcional; omitirlo es lo correcto.
+ */
+function paramsField(params: unknown): { params?: unknown } {
+  return params === null || params === undefined ? {} : { params };
+}

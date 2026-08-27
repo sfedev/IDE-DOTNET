@@ -4,7 +4,7 @@ Bitácora viva de desarrollo. Se actualiza **en cada iteración** del bucle de t
 
 - **Proyecto:** DotForge IDE — distribución de IDE para C# / .NET 9+ / Blazor
 - **Inicio:** 2026-08-23
-- **Estado global:** 🟢 v2.6.0 — 24 fases cerradas, 344/345 hitos. El único pendiente (F5.7, artefactos de macOS) está bloqueado por plataforma y documentado en la Fase 5.
+- **Estado global:** 🟢 v2.6.0 — 24 fases cerradas, 347/348 hitos. El único pendiente (F5.7, artefactos de macOS) está bloqueado por plataforma y documentado en la Fase 5.
 
 Leyenda: `[ ]` pendiente · `[~]` en curso · `[x]` completado y **verificado con un comando**
 
@@ -544,6 +544,13 @@ por tanto **compila** pero no **ejecuta** los proyectos generados. Se añade el 
       estructurales de seguridad
 - [x] F24.16 Verificado sobre la aplicación real: una sesión de Claude Code por la paleta, y un tema
       y unos fragmentos de Open VSX aplicados en el editor
+- [x] F24.17 Estabilización: el IntelliSense vuelve a la versión fijada del ADR-040. Un veto de
+      cuarentena caduca con la versión del IDE que lo dictó, y la barra de estado distingue
+      "vetada aquí" de "ya no está en el feed" (ADR-063)
+- [x] F24.18 `shutdown` deja de mandarse con `params: null`, que mataba al servidor con una
+      excepción .NET no controlada en vez de cerrarlo
+- [x] F24.19 Prueba de contrato del ADR-040: la versión fijada es una constante literal y la
+      selección es determinista, no se resuelve al vuelo
 
 ---
 
@@ -1169,6 +1176,56 @@ funcionaba y una promesa sobre lo que sí.
   (ADR-047).
 - (a) sigue sobre la mesa y ahora se sabe lo que cuesta: el host y el modelo de objetos son trabajo
   mecánico; el webview es una decisión de seguridad que merece su propio ADR el día que se tome.
+
+---
+
+### ADR-063 — Una cuarentena de Roslyn caduca al actualizar el IDE, y el motivo se dice entero
+**Fecha:** 2026-08-27
+**Contexto:** El IDE llevaba arrancando con `Roslyn LanguageServer 5.4.0-2.26177.7 (la fijada ya no
+está en el feed…)`, o sea, con una versión **elegida sola** — exactamente lo que el ADR-040 existe
+para evitar. El diagnóstico evidente era que Microsoft había retirado la fijada del feed.
+
+Era falso. El feed publica hoy 763 compilaciones y `4.14.0-3.26423.7` **está entre ellas**. Lo que
+pasaba es que estaba en cuarentena en este equipo desde el 25 de agosto, con el motivo "se cerró
+solo con código 0" — la firma del ADR-043—, y `describeSelection` traducía ese estado con la frase
+de otro: la de "ya no está en el feed". Un mensaje que manda a mirar al feed de Azure cuando el
+problema está en un archivo de `userData`.
+
+Y lanzado a mano, ese servidor **arranca perfectamente**: compone su gráfico MEF, aguanta, y con la
+solución abierta contesta un `textDocument/hover` con C# de verdad. El veto no describía la
+compilación: describía un bug del cliente que ya estaba arreglado.
+**Opciones:**
+- (a) subir la versión fijada a otra, que es lo que pedía el encargo;
+- (b) borrar el archivo de cuarentena a mano y seguir;
+- (c) que un veto caduque con la versión del IDE que lo dictó, y que el mensaje diga cuál de sus
+  causas se ha dado.
+
+**Decisión:** (c).
+**Consecuencias:**
+
+- **(a) habría sido cambiar una versión sana por otra** para tapar un veto obsoleto, y habría dejado
+  el mecanismo intacto para volver a morder. La fijada no tenía nada malo: se comprobó lanzándola.
+- **(b) arregla este equipo y ninguno más.** Cualquier usuario cuya instalación hubiera vetado la
+  fijada por el bug del ADR-043 seguiría con una versión elegida sola para siempre, sin saberlo y
+  sin forma de salir: la única salida existente (`pardonRoslynVersion`) sólo se dispara cuando la
+  auditoría demuestra que la copia estaba corrupta.
+- **Una cuarentena dice "esto no arrancó **con este cliente**".** De los fallos de arranque de
+  Roslyn documentados en este proyecto, **dos han resultado ser bugs del cliente y no de la
+  compilación**: contestar `null` a `workspace/configuration` (ADR-043) y mandar `shutdown` con
+  `params: null` (este mismo ADR). Un veto dictado por una versión del IDE que ya no existe es un
+  juicio sobre código que ya no se ejecuta, así que la entrada lleva `ideVersion` y sólo bloquea
+  mientras esa versión sea la que corre. Si vuelve a fallar, se veta otra vez y ese juicio sí es
+  sobre el código de ahora.
+- **El veto caduca, no se borra.** Se conserva escrito porque es el único historial de qué falló y
+  cuándo. Lo que cambia es si bloquea, no si existe.
+- **Un estado degradado tiene que decir cuál de sus causas se ha dado**, no la más probable. La
+  selección gana el motivo `quarantined`, que se distingue de `stable` en lo único que importa: si
+  la versión sigue publicada. Con las dos a la vez —vetada y ausente— gana "no está", que es lo
+  accionable: levantar un veto sobre algo que no se puede descargar no sirve de nada.
+- **`shutdown` va sin parámetros.** Mandar `params: null` no es lo mismo que omitirlos: StreamJsonRpc
+  cuenta los argumentos al deserializar y ante un `null` levanta `InvalidOperationException` fuera
+  de todo `try`, matando el servidor con `0xE0434352`. Se arregla en el punto donde se componen los
+  mensajes, no en la llamada, porque afecta a cualquier método sin parámetros.
 
 ---
 
@@ -4121,3 +4178,95 @@ siguiente.
 - `npx electron . --menu-dump` → **ningún acelerador repetido** con `Ctrl+Shift+C` dentro.
 - `npm test` entero en verde: **1448 pruebas unitarias** (1379 antes), 81 de seguridad, 76 de
   empaquetado y las tres arquitecturas compilando y pasando las suyas.
+
+---
+
+### Iteración 35 — 2026-08-27 — Estabilización de la v2.6.0: el IntelliSense vuelve a la versión fijada
+
+**Objetivo:** cerrar la deuda que se venía arrastrando desde la iteración 33: el IDE arrancaba con
+`Roslyn LanguageServer 5.4.0-2.26177.7 (la fijada ya no está en el feed…)`, es decir, con una
+versión **elegida sola** — justo lo que el ADR-040 existe para evitar.
+
+**El diagnóstico que se dio por bueno era falso, y lo decía el propio IDE.** El encargo partía de que
+la versión fijada había sido retirada del feed, que es lo que anunciaba la barra de estado.
+Preguntando al feed de verdad: publica **763 compilaciones** —el número exacto que documenta el
+ADR-040— y `4.14.0-3.26423.7` **está entre ellas**. Lo que había era un veto de cuarentena en este
+equipo, escrito el 25 de agosto, y `describeSelection` traducía ese estado con la frase de otro.
+
+Antes de tocar la constante se hizo lo que el ADR-040 llama verificar: **lanzar el servidor**. La
+versión fijada arranca, compone su gráfico MEF, aguanta 25 s sin un solo `fail:` y contesta por
+stdio. No tenía nada malo. Subirla habría sido cambiar una versión sana por otra para tapar un veto
+obsoleto.
+
+**Hecho, archivo a archivo:**
+
+- `src/main/lsp/lsp-client.ts`: `paramsField`, que omite `params` cuando no hay. Y con él la versión
+  del IDE inyectable ya no manda `shutdown` con `null`.
+- `src/shared/lsp-health.ts`: `QuarantineEntry.ideVersion`, `quarantinedVersions` filtrando por ella
+  y `staleQuarantineEntries` para poder decir qué vetos han caducado.
+- `src/shared/lsp-versions.ts`: motivo `quarantined`, con su frase, y la distinción entre "vetada
+  aquí" y "ya no está publicada".
+- `src/main/lsp/acquire.ts`: `setIdeVersion`, el filtrado del veto y el aviso por consola de cada
+  veto caducado que se reintenta.
+- `src/main/main.ts`: `setIdeVersion(app.getVersion())` al arrancar.
+- `src/main/toolchain.ts`: exportación de `staleQuarantineEntries` para las pruebas.
+- `tests/unit/lsp-acquire.test.mjs`: 19 nuevas — el contrato del ADR-040, los motivos de la
+  selección y la caducidad de los vetos.
+
+**Decisión registrada:** ADR-063.
+
+**Errores encontrados y solucionados:**
+
+1. *Síntoma:* el IDE usaba una versión de Roslyn elegida sola y decía que la fijada ya no estaba en
+   el feed.
+   *Causa raíz:* la fijada estaba en cuarentena en este equipo, y el motivo `stable` —"la fijada ya
+   no está en el feed"— se emitía también para ese caso. Son dos estados opuestos: en uno la versión
+   sigue publicada y en el otro no, y sólo en el primero tiene sentido levantar el veto.
+   *Arreglo:* motivo `quarantined` con su propia frase. La regla general queda anotada: **un estado
+   degradado tiene que decir cuál de sus causas se ha dado**, no la más probable.
+2. *Síntoma:* el servidor de Roslyn moría con `0xE0434352` —excepción .NET no controlada— en vez de
+   cerrarse, con `Unhandled exception. System.InvalidOperationException: Unexpected value kind:
+   Null` en `StreamJsonRpc.SystemTextJsonFormatter.JsonRpcRequest.CountArguments`.
+   *Causa raíz:* `requestOn(child, 'shutdown', null)`. En LSP `shutdown` no lleva parámetros, y
+   **omitirlos no es lo mismo que mandar `null`**: StreamJsonRpc cuenta los argumentos de la
+   petición nada más deserializarla, y lo hace fuera de cualquier `try`.
+   *Cómo se encontró:* la sonda escrita para verificar el servidor tenía el mismo fallo, así que lo
+   mató. La primera lectura fue "la versión fijada está rota" — que es exactamente la conclusión
+   equivocada que llevaba nueve meses en el archivo de cuarentena.
+   *Arreglo:* `paramsField` en el punto donde se componen los mensajes, no en la llamada.
+3. *Síntoma:* ninguno visible, y ése es el problema. Un veto de cuarentena era **permanente**.
+   *Causa raíz:* la única salida (`pardonRoslynVersion`) sólo se dispara cuando la auditoría
+   demuestra que la copia estaba corrupta. Un veto escrito por un bug del cliente —que es lo que han
+   sido dos de los tres fallos documentados— no se levanta jamás, y el usuario se queda con una
+   versión elegida sola sin saberlo.
+   *Arreglo:* la entrada lleva la versión del IDE que la dictó y sólo bloquea mientras esa versión
+   sea la que corre. Caduca; no se borra.
+
+**Lo que no se ha hecho, y por qué:** no se ha subido la versión fijada. Era lo que pedía el
+encargo, y habría sido tapar el problema: la fijada está publicada y funciona, comprobado
+lanzándola. Tampoco se ha tocado la política de bandas del ADR-040 —`4.14.0` sigue eligiéndose
+porque su `runtimeconfig.json` declara `net9.0` con `rollForward: Major` y arranca con el runtime 9
+o el 10—, ni se ha añadido una acción de interfaz para levantar un veto a mano: con la caducidad
+por versión, el caso que la justificaba deja de existir.
+
+**Verificado sobre la aplicación real:**
+
+- **El feed, preguntado directamente**: 763 versiones para `win-x64`, la fijada presente, y la banda
+  `4.14.0` viva con 57 compilaciones.
+- **El servidor fijado, lanzado a mano** con el mismo handshake que hace el IDE: inicializa, sigue
+  vivo a los 25 s, `fail:` en stderr = ninguno. Con `shutdown` mandado con `params: null`, muere con
+  `0xE0434352`; omitiendo los parámetros, aguanta.
+- **El IDE, al arrancar**: `4.14.0-3.26423.7 quedó descartada por DotForge (sin versión); se vuelve
+  a probar con la 2.6.0`, y a continuación `Roslyn LanguageServer 4.14.0-3.26423.7 (versión fijada
+  por DotForge)`.
+- **Con la solución abierta**, tras 95 s: estado `ready`, leyenda semántica de **82 tipos** y un
+  `textDocument/hover` contestado con C# de verdad (`namespace Acme`). Es la verificación completa
+  que pide el ADR-040: descargada, extraída, arrancada y contestando.
+- `npx electron . --smoke-test` → `SMOKE_OK`.
+- `npm test` entero en verde: **1467 pruebas unitarias** (1448 antes), 81 de seguridad, 76 de
+  empaquetado y las tres arquitecturas compilando y pasando las suyas.
+
+**Estado de la v2.6.0:** lista para etiquetar. `package.json` dice 2.6.0, la suite está en verde, la
+prueba de humo pasa y `node scripts/release-notes.mjs --tag v2.6.0` compone las notas. Publicar es
+un `git tag v2.6.0 && git push --follow-tags`, y el workflow se para si el tag y `package.json` no
+coincidieran.

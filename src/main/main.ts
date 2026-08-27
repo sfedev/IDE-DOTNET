@@ -29,6 +29,7 @@ import * as processRegistry from './services/process-registry.js';
 import * as settingsService from './services/settings-service.js';
 import * as startupService from './services/startup-service.js';
 import * as terminalLayoutStore from './services/terminal-layout-store.js';
+import { setIdeVersion } from './lsp/acquire.js';
 import * as updaterService from './services/updater-service.js';
 import * as extensionInstaller from './services/extension-installer.js';
 import { STARTUP_CHECK_DELAY_MS } from '../shared/updates.js';
@@ -710,6 +711,9 @@ app.whenReady().then(async () => {
   settingsService.initialize(app.getPath('userData'));
   startupService.initialize(app.getPath('userData'));
   terminalLayoutStore.initialize(app.getPath('userData'));
+  // Los vetos de cuarentena de Roslyn se fechan con la versión del IDE que los dicta, y caducan al
+  // actualizar: dicen "esto no arrancó con este cliente", y el cliente cambia (ADR-063).
+  setIdeVersion(app.getVersion());
   aiSecrets.initialize(app.getPath('userData'));
   await settingsService.load();
   await aiSecrets.load();

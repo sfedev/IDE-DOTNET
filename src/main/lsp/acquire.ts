@@ -25,6 +25,7 @@ import {
   addQuarantineEntry,
   parseQuarantine,
   quarantinedVersions,
+  staleQuarantineEntries,
   removeQuarantineEntry,
   serializeQuarantine,
   type QuarantineRecord,
@@ -63,6 +64,24 @@ export interface AcquireProgress {
     ratio: number | null,
     detail: string,
   ): void;
+}
+
+/**
+ * Versión de DotForge en marcha, para fechar y caducar los vetos de cuarentena (ADR-063).
+ *
+ * Se inyecta en vez de importar `electron`: este módulo se prueba con Node pelado. Sin fijarla, las
+ * entradas se comparan contra `0.0.0`, que no coincide con ninguna versión real — todas las
+ * cuarentenas se considerarían de otra versión y se reintentarían. Es la respuesta conservadora
+ * para el caso en el que nadie la haya fijado.
+ */
+let ideVersion = '0.0.0';
+
+export function setIdeVersion(version: string): void {
+  if (version.trim() !== '') ideVersion = version.trim();
+}
+
+export function currentIdeVersion(): string {
+  return ideVersion;
 }
 
 /** Identificador de runtime de .NET para la plataforma actual. */
@@ -151,6 +170,7 @@ export async function quarantineRoslynVersion(
     rid,
     reason,
     atUtc: now().toISOString(),
+    ideVersion,
   });
 
   await mkdir(toolchainDir, { recursive: true });
@@ -189,7 +209,17 @@ export async function roslynFeedVersions(rid: string): Promise<string[]> {
 }
 
 async function resolveRoslynVersion(toolchainDir: string, rid: string): Promise<RoslynSelection> {
-  const blocked = quarantinedVersions(await readQuarantine(toolchainDir), rid);
+  const record = await readQuarantine(toolchainDir);
+  const blocked = quarantinedVersions(record, rid, ideVersion);
+
+  // Un veto dictado por otra versión del IDE no bloquea: se dice y se reintenta (ADR-063).
+  for (const stale of staleQuarantineEntries(record, rid, ideVersion)) {
+    console.error(
+      `[lsp] ${stale.version} quedó descartada por DotForge ${stale.ideVersion ?? '(sin versión)'}; ` +
+        `se vuelve a probar con la ${ideVersion}`,
+    );
+  }
+
   const selection = selectRoslynVersion(await roslynFeedVersions(rid), { blocked });
 
   if (selection === null) {

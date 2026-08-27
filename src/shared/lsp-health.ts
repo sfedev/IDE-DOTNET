@@ -174,6 +174,19 @@ export interface QuarantineEntry {
   rid: string;
   reason: string;
   atUtc: string;
+  /**
+   * Versión de DotForge que dictó el veto.
+   *
+   * Sin esto, una cuarentena es **para siempre**, y la historia de este proyecto dice que eso está
+   * mal: de los fallos de arranque de Roslyn documentados, dos han resultado ser bugs del cliente y
+   * no de la compilación —contestar `null` a `workspace/configuration` (ADR-043) y mandar
+   * `shutdown` con `params: null` (ADR-063)—. Un veto dictado por una versión del IDE que ya no
+   * existe es un juicio sobre código que ya no se ejecuta.
+   *
+   * Opcional porque los archivos escritos antes de la v2.6.0 no lo llevan; sin él, la entrada se
+   * considera de otra versión y se reintenta, que es justo lo que hay que hacer con ella.
+   */
+  ideVersion?: string;
 }
 
 export interface QuarantineRecord {
@@ -194,7 +207,8 @@ function isEntry(value: unknown): value is QuarantineEntry {
     record['version'] !== '' &&
     typeof record['rid'] === 'string' &&
     typeof record['reason'] === 'string' &&
-    typeof record['atUtc'] === 'string'
+    typeof record['atUtc'] === 'string' &&
+    (record['ideVersion'] === undefined || typeof record['ideVersion'] === 'string')
   );
 }
 
@@ -215,9 +229,27 @@ export function serializeQuarantine(record: QuarantineRecord): string {
   return `${JSON.stringify(record, null, 2)}\n`;
 }
 
-/** Las versiones vetadas para un RID concreto. */
-export function quarantinedVersions(record: QuarantineRecord, rid: string): string[] {
-  return record.entries.filter((entry) => entry.rid === rid).map((entry) => entry.version);
+/**
+ * Las versiones vetadas para un RID concreto **en esta versión de DotForge**.
+ *
+ * Un veto caduca al actualizar el IDE, y esa es la parte importante (ADR-063): la cuarentena dice
+ * "esta compilación no arrancó **con este cliente**", y cuando el cliente cambia esa afirmación deja
+ * de estar comprobada. Se reintenta una vez; si vuelve a fallar, se vuelve a vetar con la versión
+ * nueva y esta vez el juicio sí es sobre el código que corre.
+ *
+ * Sin `ideVersion` no se filtra nada: quien no la pase se lleva la lista entera, que es el
+ * comportamiento de antes y el que quieren las herramientas que sólo listan lo que hay.
+ */
+export function quarantinedVersions(record: QuarantineRecord, rid: string, ideVersion?: string): string[] {
+  return record.entries
+    .filter((entry) => entry.rid === rid)
+    .filter((entry) => ideVersion === undefined || entry.ideVersion === ideVersion)
+    .map((entry) => entry.version);
+}
+
+/** Vetos que dictó otra versión del IDE: siguen escritos, pero ya no bloquean nada. */
+export function staleQuarantineEntries(record: QuarantineRecord, rid: string, ideVersion: string): QuarantineEntry[] {
+  return record.entries.filter((entry) => entry.rid === rid && entry.ideVersion !== ideVersion);
 }
 
 /** Añade una entrada sin duplicar y dejando la más reciente delante. */
