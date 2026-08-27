@@ -4741,5 +4741,81 @@ declaraba nadie: quien clone con Node 20 se entera ahora al instalar, y no al fa
 con un error que no menciona la versión.
 
 **Pendiente de validar:** el par `upload-artifact` / `download-artifact` salta tres majors y ya
-rompió compatibilidad una vez (v3 -> v4). Se valida con `workflow_dispatch` y `draft: true`, que
-ejercita el pipeline entero sin publicar nada que el actualizador in-app pueda ver.
+rompió compatibilidad una vez (v3 -> v4). Se valida en la iteración siguiente — y no con
+`draft: true`, que era el plan y resultó no ser un ensayo seguro.
+
+---
+
+### Iteración 38 — 2026-08-27 — Validar en la CI la subida de las acciones a Node 24
+**Objetivo:** comprobar en un run de verdad que `upload-artifact@v7` y `download-artifact@v8` se
+entienden, sin que ningún usuario reciba nada. Era lo único con riesgo real de la subida: los dos
+son una pareja y ya rompieron compatibilidad entre majors una vez.
+
+**El plan era `draft: true`, y no servía.** Al leer el job de publicación antes de disparar nada
+apareció el motivo: el paso es *crear-o-completar* y el `--draft` sólo viaja a `gh release create`.
+
+```bash
+if gh release view "$TAG" > /dev/null 2>&1; then
+  gh release edit "$TAG" --notes-file release-notes.md   # <- rama "ya existe": el flag no llega
+else
+  gh release create "$TAG" ... "${flags[@]}"             # <- aqui, y solo aqui, va --draft
+fi
+```
+
+Y el portillo de versión (ADR-060) obliga a que el tag coincida con `package.json`, que decía
+`2.8.0`: justo la release **ya publicada**. O sea, el único tag admisible era el que entraba por la
+rama de arriba. Un `workflow_dispatch` con `draft: true` no habría creado ningún borrador: le habría
+reescrito las notas y reemplazado los binarios a la versión que los usuarios estaban viendo — lo
+contrario de la garantía que el encargo pedía. Con cualquier otro tag, el portillo corta el job y no
+hay tres jobs en verde que enseñar.
+
+**Hecho:** un input `dry_run` que recorre el pipeline entero y se para antes de tocar nada.
+Construye, sube los artefactos, los descarga en el job de publicación y compone las notas; los dos
+pasos que escriben en GitHub quedan fuera con `if: inputs.dry_run != true`. Es exactamente donde
+vive el riesgo —el traspaso ocurre **antes** de que entre `gh`—, así que valida lo que hay que
+validar sin arriesgar nada. Con un paso que además lo dice: lista los binarios recibidos con su
+tamaño y falla si `dist/` llega vacío; sin eso, un traspaso roto pasaría en verde, porque los pasos
+que habrían protestado son justo los que el ensayo se salta.
+
+Cuatro pruebas estructurales lo vigilan: que el input venga apagado, que ningún paso que escriba en
+GitHub corra en ensayo, que el ensayo compruebe el traspaso y falle sin artefactos, y que vaya
+después de descargarlos y no antes.
+
+**Errores encontrados y solucionados:**
+
+1. *Síntoma:* el primer vigilante del run informó de un ensayo "terminado" con un solo job y sin
+   conclusión, y el run llevaba treinta segundos corriendo.
+   *Causa raíz:* `gh run watch` salió en el acto, y su error iba a `/dev/null`. La comprobación de
+   que la release no se había tocado se hizo, por tanto, **antes** de que existiera el job que podía
+   tocarla: habría dado "verde" pasara lo que pasara después.
+   *Arreglo:* sondeo explícito de `gh run view --json status` hasta `completed`, con las respuestas
+   inesperadas impresas en vez de tragadas. Es la trampa que este mismo archivo ya tenía anotada
+   —un diagnóstico mudo es indistinguible de lo que pretende comprobar— cometida por el vigilante.
+2. *Síntoma:* el segundo vigilante iba camino de quedarse ciego a mitad.
+   *Causa raíz:* sondeaba la API **sin autenticar** cada 20 s, y quedaban 8 peticiones de las 60 por
+   hora y por IP. Es el 403 del ADR-050 mordiendo en local en vez de en CI.
+   *Arreglo:* sondear con `gh`, que usa el token del usuario y tiene 5 000/hora.
+
+**Verificado sobre la CI real** (run
+[33105631850](https://github.com/sfedev/IDE-DOTNET/actions/runs/33105631850), `workflow_dispatch`
+sobre `master` en `6fdba1d`, `tag=v2.8.0`, `dry_run=true`):
+
+- **Los tres jobs en verde**: `Pruebas`, `Artefactos de Windows` y `Publicar la release`.
+- **El traspaso, que era lo único en duda**: `Traspaso correcto — 2 artefactos recibidos del job de
+  construcción`, con `DotForge IDE-2.8.0-Setup-x64.exe` (126 763 081 b) y
+  `DotForge IDE-2.8.0-win-x64.zip` (174 258 920 b). `upload-artifact@v7` y `download-artifact@v8` se
+  entienden. Las notas se compusieron enteras, con sus cuatro cambios y sus dos descargas.
+- **Los dos pasos que escriben en GitHub, `skipped`** — no `success`, que es la diferencia entre no
+  haber publicado y haber publicado sin enterarse.
+- **La v2.8.0, intacta.** Se capturó su estado antes del ensayo y se comparó después: mismo
+  `updated_at` (`18:42:19Z`) y **los mismos identificadores de artefacto** (`532721703`,
+  `532721702`). Es la comprobación que de verdad zanja la duda: `gh release upload --clobber` no
+  reutiliza ids, así que unos números iguales demuestran que nadie subió nada.
+- **Ninguna release nueva y ningún borrador**: siguen siendo v2.8.0, v2.7.0 y v2.6.0, las tres
+  publicadas y con dos artefactos cada una. No hubo nada que limpiar.
+- `npm test` entero en verde, incluidas las cuatro pruebas nuevas del ensayo.
+
+**Lo que no se ha hecho, y por qué:** no se arregla que la rama "ya existe" ignore el `--draft`. Es
+un fallo real, pero tocar la lógica de publicación tiene su propio riesgo —mal hecho, convierte una
+release publicada en borrador y la saca del feed— y no era lo que había que validar hoy. Queda
+anotado aquí y en `CLAUDE.md`; el ensayo, que es lo que hacía falta, ya no depende de ello.

@@ -302,6 +302,14 @@ npm version 2.8.0 --no-git-tag-version && git commit -am "v2.8.0" && git tag -a 
 - El workflow se para si el tag y `package.json` no dicen la misma versión (ADR-060): sube la versión
   **antes** de etiquetar.
 - También se puede lanzar a mano desde la pestaña Actions (`workflow_dispatch`), indicando el tag.
+- **Para ensayar el pipeline sin publicar nada**, `dry_run: true`. Construye, traspasa los
+  artefactos entre jobs, compone las notas y se para antes de tocar ninguna release; el paso de
+  ensayo lista los binarios recibidos y falla si no llegó ninguno. Es lo que hay que usar tras
+  subir las acciones de la CI. **No** vale `draft: true` para esto: ver la sección de trampas.
+
+```bash
+gh workflow run release.yml --ref master -f tag=v2.8.0 -f dry_run=true
+```
 
 ### Publicar un proyecto
 
@@ -1166,8 +1174,19 @@ npm run fetch:toolchain -- --platform win32 --arch x64
   subiendo los `uses:`, y conviene comprobar dos cosas antes: que el major nuevo declare
   `using: node24`, y que no haya renombrado ningún `with:` que usemos. `upload-artifact` y
   `download-artifact` son **una pareja** y ya rompieron compatibilidad entre majors una vez, así
-  que se validan juntas con `workflow_dispatch` y `draft: true`, que no publica nada que el
-  actualizador in-app pueda ver.
+  que se validan juntas con `workflow_dispatch` y **`dry_run: true`**.
+- **`draft: true` no es un ensayo cuando el tag ya está publicado.** El paso que publica es
+  *crear-o-completar*, y el `--draft` sólo viaja a `gh release create`: sobre una release que ya
+  existe se entra por la otra rama, que le reescribe las notas y le reemplaza los binarios a la
+  versión que los usuarios están viendo. Y como el portillo del ADR-060 exige que el tag coincida
+  con `package.json`, el único tag admisible suele ser justo ése. Para ensayar está `dry_run`, que
+  construye, traspasa los artefactos y compone las notas, y se para antes de tocar ninguna release
+  —el riesgo de subir las acciones vive en el traspaso, que ocurre **antes** de que entre `gh`—.
+  El ensayo **dice** lo que ha validado (lista los binarios recibidos y falla si `dist/` llega
+  vacío): sin eso, un traspaso roto pasaría en verde, porque los pasos que habrían protestado son
+  justo los que se salta. Y al comprobarlo desde fuera, lo que zanja la duda no es que la release
+  siga publicada, sino que **sus artefactos conserven el mismo `id`**: `gh release upload
+  --clobber` no reutiliza identificadores.
 - **La API de GitHub sin autenticar da 403 en CI, no 429.** Son 60 peticiones por hora **y por IP**,
   y la IP de un runner compartido está agotada casi siempre. El mensaje no menciona el límite, así
   que parece un problema de permisos o de red. Con `GITHUB_TOKEN` en el entorno son 5 000/hora.
