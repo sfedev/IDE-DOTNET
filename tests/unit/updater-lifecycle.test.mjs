@@ -13,10 +13,13 @@
 import { describe, it, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 
 import { updaterService } from '../../build/main-lib.mjs';
+
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 const roots = [];
 
@@ -234,3 +237,31 @@ describe('las acciones de la tarjeta no se pisan entre sí', () => {
   });
 });
 
+/**
+ * Dónde se lanza el instalador.
+ *
+ * Es una comprobación estructural porque lo que se vigila sólo ocurre dentro de Electron y sólo
+ * cuando hay un archivo sin guardar: `before-quit` se emite al *empezar* a cerrar, y el aviso de
+ * cambios sin guardar puede anular la salida después. El instalador se lanzaba igual y reemplazaba
+ * los archivos de una aplicación que se quedaba abierta, justo después de anunciar lo contrario.
+ */
+describe('el instalador se lanza cuando la salida ya es un hecho', () => {
+  const main = readFileSync(join(repoRoot, 'src', 'main', 'main.ts'), 'utf8');
+
+  it('la instalación cuelga de `will-quit`, no de `before-quit`', () => {
+    const willQuit = main.indexOf("app.on('will-quit'");
+    const beforeQuit = main.indexOf("app.on('before-quit'");
+
+    assert.ok(willQuit > 0, 'existe un manejador de will-quit');
+    assert.ok(beforeQuit > 0, 'existe un manejador de before-quit');
+    assert.ok(
+      main.indexOf('runPendingInstaller()') > willQuit,
+      'runPendingInstaller vive dentro de will-quit',
+    );
+    assert.equal(
+      main.slice(beforeQuit, willQuit).includes('runPendingInstaller'),
+      false,
+      'before-quit no puede lanzar el instalador: ese cierre todavía se puede cancelar',
+    );
+  });
+});

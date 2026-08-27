@@ -887,18 +887,6 @@ app.on('window-all-closed', () => {
  * al cierre del IDE ocupando puertos o bloqueando archivos del workspace.
  */
 app.on('before-quit', () => {
-  /**
-   * Actualización pendiente: éste es el único momento en el que se puede aplicar.
-   *
-   * Va lo primero, antes de parar nada: si algo de lo que viene detrás lanzase una excepción, el
-   * instalador ya se habría lanzado. Y se lanza desprendido del proceso, porque el padre está a
-   * punto de desaparecer.
-   */
-  if (updaterService.hasPendingInstall()) {
-    const detail = updaterService.runPendingInstaller();
-    if (detail !== null) console.log(`[updater] ${detail}`);
-  }
-
   void lspClient.stop();
   // Una petición en streaming sigue consumiendo tokens aunque nadie mire la respuesta.
   aiService.cancelAll();
@@ -909,6 +897,27 @@ app.on('before-quit', () => {
   // propio árbol de hijos, y sin esto cerrar el IDE deja vivos tantos como pestañas hubiera.
   ptyService.disposeAll();
   processRegistry.killAll();
+});
+
+/**
+ * Actualización pendiente: éste es el único momento en el que se puede aplicar.
+ *
+ * Va en `will-quit` y **no** en `before-quit`, que es donde estuvo hasta ahora, por una razón
+ * concreta: `before-quit` se emite al *empezar* a cerrar, y el cierre todavía se puede cancelar
+ * después. El aviso de cambios sin guardar del renderer hace exactamente eso —para el
+ * `beforeunload`, pregunta, y con "Seguir editando" anula la salida—, así que el instalador se
+ * lanzaba igual y se ponía a reemplazar los archivos de una aplicación que se quedaba abierta,
+ * justo después de haberle dicho al usuario que el IDE se iba a cerrar.
+ *
+ * `will-quit` se emite cuando ya no queda ventana y la salida es un hecho. Es la misma promesa del
+ * ADR-046 —un único camino de instalación, al cerrar— puesta en el evento que de verdad significa
+ * "esto se cierra".
+ */
+app.on('will-quit', () => {
+  if (!updaterService.hasPendingInstall()) return;
+
+  const detail = updaterService.runPendingInstaller();
+  if (detail !== null) console.log(`[updater] ${detail}`);
 });
 
 process.on('exit', () => {
