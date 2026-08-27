@@ -4,7 +4,7 @@ Bitácora viva de desarrollo. Se actualiza **en cada iteración** del bucle de t
 
 - **Proyecto:** DotForge IDE — distribución de IDE para C# / .NET 9+ / Blazor
 - **Inicio:** 2026-08-23
-- **Estado global:** 🟢 v2.5.0 — 23 fases cerradas, 328/329 hitos. El único pendiente (F5.7, artefactos de macOS) está bloqueado por plataforma y documentado en la Fase 5.
+- **Estado global:** 🟢 v2.6.0 — 24 fases cerradas, 344/345 hitos. El único pendiente (F5.7, artefactos de macOS) está bloqueado por plataforma y documentado en la Fase 5.
 
 Leyenda: `[ ]` pendiente · `[~]` en curso · `[x]` completado y **verificado con un comando**
 
@@ -517,6 +517,33 @@ por tanto **compila** pero no **ejecuta** los proyectos generados. Se añade el 
 - [x] F23.8 Pruebas: 26 nuevas del modelo y del almacén, más 2 de seguridad de la superficie nueva
 - [x] F23.9 Verificado sobre la aplicación real: tres pestañas reabiertas en orden y con la activa
       correcta, sin crecer entre reaperturas, y el ajuste apagado dejando el panel limpio
+
+### Fase 24 — Claude Code en la terminal y consumo declarativo de extensiones
+- [x] F24.1 Perfil "Claude Code" en el catálogo, con las tres formas en que se instala declaradas
+      como alternativas del propio catálogo (ADR-062)
+- [x] F24.2 `resolveProgram` devuelve la ruta resuelta, no el nombre: en Windows, `CreateProcess`
+      sólo prueba `.exe` al buscar por `PATH` y un `.cmd` se encuentra y no se puede lanzar
+- [x] F24.3 Un perfil no disponible dice **cómo** instalarlo (`unavailableReason`), no sólo que falta
+- [x] F24.4 Comando `ai.openClaudeTerminal` en la paleta y en el menú IA, con `Ctrl+Shift+C`
+- [x] F24.5 Abre **o enfoca**: pulsar el atajo dos veces no deja dos sesiones abiertas
+- [x] F24.6 `claude` en la terminal asistida es una orden del intérprete, como `cd`: abre su pestaña
+      en vez de fallar por la lista blanca
+- [x] F24.7 Sugerencias de la CLI de Claude y de las órdenes de barra de una sesión
+- [x] F24.8 Modo de diagnóstico `--ui=claude`, que ejercita la cadena entera por la paleta
+- [x] F24.9 Los modos de diagnóstico no restauran pestañas de terminal: reabrirlas dejaba el bucle
+      de eventos vivo y `--smoke-test` no terminaba
+- [x] F24.10 `src/shared/vsix-contributions.ts` (nuevo): modelo puro de temas y fragmentos, con la
+      normalización de colores que Monaco exige y el nombre de tema que Monaco acepta
+- [x] F24.11 `src/main/services/extension-contributions.ts` (nuevo): lectura del disco, cadena de
+      `include`, `.tmTheme` traducido desde su plist y validación de toda ruta del manifiesto
+- [x] F24.12 Canal `extensions:contributions`, pedido al arrancar y tras instalar o desinstalar
+- [x] F24.13 Los temas de extensión se registran en Monaco y se eligen desde Ajustes; el resto de la
+      ventana usa el tema propio que declare su `uiTheme`, y el ajuste lo dice
+- [x] F24.14 Los fragmentos se registran como proveedor de autocompletado, agrupados por lenguaje
+- [x] F24.15 Pruebas: 69 nuevas (22 del perfil y las sugerencias, 47 de las contribuciones) más 2
+      estructurales de seguridad
+- [x] F24.16 Verificado sobre la aplicación real: una sesión de Claude Code por la paleta, y un tema
+      y unos fragmentos de Open VSX aplicados en el editor
 
 ---
 
@@ -1087,6 +1114,61 @@ encontrarse el panel como lo dejó.
 - **Una pestaña que aquí no se puede abrir se salta y se dice.** Sin `node-pty`, una disposición de
   tres PowerShell no puede dejar tres pestañas muertas con un mensaje dentro: se abre lo que se
   puede y se avisa de cuántas se han quedado fuera y por qué (ADR-033, otra vez).
+
+---
+
+### ADR-062 — Claude Code es un intérprete del catálogo, y lo declarativo de un `.vsix` por fin se consume
+**Fecha:** 2026-08-27
+**Contexto:** Dos preguntas que resultaron ser la misma. La primera: cómo usar la extensión de
+Claude Code para VS Code dentro de DotForge. Se auditó lo que necesita —96 símbolos distintos de la
+API de `vscode`, concentrados en `workspace`, `window`, `commands` y `Uri`— y lo que decide es que
+**su interfaz es un webview**: `createWebviewPanel`, `registerWebviewViewProvider`,
+`registerWebviewPanelSerializer`. Un webview es HTML y JavaScript de un tercero dentro de la ventana,
+y eso choca de frente con la CSP del renderer y con la regla de que aquí no se inyecta marcado — ni
+siquiera para los iconos (ADR-049).
+
+La segunda salió de la misma auditoría: el IDE **no consumía nada** de las extensiones instaladas.
+El ADR-048 decía que las contribuciones declarativas "sirven aquí" y que la lista crecería cuando el
+IDE supiera consumirlas; entretanto, `defineThemes()` sólo definía los dos temas propios y nadie
+leía la carpeta de extensiones salvo el instalador. La ficha decía la verdad sobre lo que *no*
+funcionaba y una promesa sobre lo que sí.
+**Opciones:**
+- (a) escribir un host de extensiones con webviews, para ejecutar la extensión tal cual;
+- (b) host mínimo sin webviews, que dejaría la extensión de Claude Code a medias;
+- (c) integrar la **CLI** como un perfil más de la terminal, y aparte cumplir lo declarativo;
+- (d) no hacer nada y seguir instalando extensiones sin consumirlas.
+
+**Decisión:** (c), las dos mitades.
+**Consecuencias:**
+
+- **La CLI no necesita un host: necesita una terminal de verdad, y eso existe desde la v2.5.0.**
+  Claude Code pasa a ser un perfil del catálogo, con su comando, su atajo y su pestaña. El coste es
+  una tarde en vez de un trimestre, y lo que se pierde frente a la extensión —el panel lateral, las
+  diferencias dentro del editor— es justo lo que exigía el webview.
+- **Un perfil puede tener varias formas de lanzarse, todas del catálogo.** `claude` se instala de
+  tres maneras y ninguna es la canónica: el instalador nativo deja un ejecutable, `npm install -g`
+  deja un `.cmd` en Windows, y `npx` funciona sin instalar nada. Elegir una sola declararía no
+  disponible a quien tenga cualquiera de las otras dos. La garantía del ADR-059 no cambia: el
+  renderer manda un identificador y nada más; las alternativas son una lista cerrada escrita en el
+  catálogo, y hay una prueba de seguridad que lo exige.
+- **Lo que se lanza es la ruta resuelta, no el nombre.** En Windows, `CreateProcess` busca por
+  `PATH` pero sólo prueba `.exe`: `npx` se encuentra al comprobar y **falla al lanzarse**. Aparece
+  como "Cannot create process, error code: 2", que no menciona ni el programa ni la extensión.
+- **En la terminal asistida, `claude` es una orden del intérprete**, como `cd` y `pwd` (ADR-055).
+  Ahí no hay pseudoterminal y Claude Code es una interfaz de pantalla completa: intentarlo y fallar
+  —o rechazarlo por la lista blanca, que hablaría de permisos— es peor que llevarlo a su pestaña.
+- **Y lo declarativo se consume de verdad.** Temas y fragmentos de los `.vsix` instalados, leídos,
+  convertidos y aplicados. Es el ADR-048 cumplido, no ampliado: lo que se ejecuta sigue siendo nada.
+- **Un tema de extensión colorea el editor, no la ventana.** No sabe nada de la barra de actividad
+  ni del panel, que se pintan con los tokens de `theme.css`. El resto del IDE usa el tema propio que
+  declare su `uiTheme`, y el ajuste lo dice con esas palabras: la alternativa era fingir que reviste
+  la ventana entera y que el usuario descubriera que no.
+- **Toda ruta del manifiesto se valida contra la carpeta de la extensión.** `contributes` es JSON
+  escrito por un tercero, viene dentro de un paquete descargado de un registro público, y su `path`
+  acaba en un `readFile`. Mismo cuidado que ya se tiene con el nombre de la carpeta al instalar
+  (ADR-047).
+- (a) sigue sobre la mesa y ahora se sabe lo que cuesta: el host y el modelo de objetos son trabajo
+  mecánico; el webview es una decisión de seguridad que merece su propio ADR el día que se tome.
 
 ---
 
@@ -3928,3 +4010,114 @@ pestaña vacía es un intercambio malísimo. Sólo se restaura sobre un panel in
 versión se fija y se verifica a mano, y la fijada ha desaparecido del feed: hoy se está usando una
 elegida sola, que es exactamente lo que ese ADR existe para evitar. El camino de respaldo está
 haciendo su trabajo y avisando; queda como primer candidato del próximo ciclo.
+
+---
+
+### Iteración 34 — 2026-08-27 — Fase 24: Claude Code en la terminal, y el ADR-048 cumplido
+
+**Objetivo:** dos encargos que resultaron ser el mismo. Usar Claude Code dentro del IDE sin escribir
+un host de extensiones, y hacer que lo que las extensiones aportan de forma declarativa —temas y
+fragmentos— se consuma de verdad.
+
+**Sobre la numeración:** el encargo pedía "Fase 22" y "ADR-060", pero los dos existen desde la
+iteración 32 (publicación de releases), igual que la Fase 23 y el ADR-061. Esto es la **Fase 24** y
+el **ADR-062**; renumerar habría pisado historia ya escrita.
+
+**Lo que la auditoría encontró antes de tocar nada:** la extensión de Claude Code para VS Code usa
+96 símbolos distintos de la API de `vscode`, y su interfaz **es un webview**. Eso no es volumen de
+trabajo: es una decisión de seguridad contra la CSP del renderer. La CLI, en cambio, sólo necesita
+una terminal de verdad, y eso existe desde la v2.5.0. Y de paso: el IDE **no consumía nada** de las
+extensiones instaladas, ni siquiera lo que su propia ficha listaba como soportado.
+
+**Hecho, archivo a archivo:**
+
+- `src/shared/terminal-profiles.ts`: perfil `claude`, `launchCandidates`, `resolveLaunch` y
+  `unavailableReason`. Un perfil puede declarar alternativas; todas salen del catálogo.
+- `src/main/services/terminal-pty-service.ts`: `resolveProgram` devuelve la ruta resuelta y `create`
+  pasa a ser asíncrona (mirar el `PATH` toca el disco).
+- `src/shared/terminal-cwd.ts` y `src/main/services/terminal-session.ts`: la orden `open-claude`.
+- `src/shared/menu-template.ts`, `src/renderer/index.ts`: el comando y su atajo.
+- `src/renderer/views/panel.ts`: `openOrFocusTerminal`.
+- `src/renderer/terminal-suggest.ts`: la CLI y las órdenes de barra.
+- `src/shared/vsix-contributions.ts` (**nuevo**) y
+  `src/main/services/extension-contributions.ts` (**nuevo**): el consumo declarativo entero.
+- `src/renderer/monaco-setup.ts`, `views/editor.ts`, `views/settings.ts`, `views/extensions.ts`: los
+  temas registrados, aplicados, ofrecidos y recargados al instalar o desinstalar.
+- `src/main/main.ts`, `src/main/ipc/register.ts`: `--ui=claude`, el canal de contribuciones y el
+  modo de diagnóstico que ya no restaura terminales.
+- Pruebas: `tests/unit/vsix-contributions.test.mjs` (**nuevo**, 36),
+  `tests/unit/extension-contributions.test.mjs` (**nuevo**, 11), más las de perfiles, sugerencias,
+  clasificación de líneas y dos estructurales de seguridad.
+
+**Decisión registrada:** ADR-062.
+
+**Errores encontrados y solucionados:**
+
+1. *Síntoma:* la pestaña de Claude Code moría al abrirse con `Cannot create process, error code: 2`,
+   después de que el menú la ofreciera como disponible.
+   *Causa raíz:* en Windows, `npx` es `npx.cmd`. `programExists` lo encontraba probando las
+   extensiones de `PATHEXT`, pero **`CreateProcess` sólo prueba `.exe`** al buscar por `PATH`: se
+   comprobaba una cosa y se lanzaba otra.
+   *Arreglo:* `resolveProgram` devuelve la ruta concreta y es esa la que se lanza. El error no
+   nombra el programa ni la extensión, así que desde fuera parece un fallo de node-pty.
+2. *Síntoma:* `npm test` fallaba en la prueba de humo con un timeout de 150 s, y la misma prueba
+   pasaba lanzada sola. La aplicación imprimía `SMOKE_OK` y no terminaba nunca.
+   *Causa raíz:* **la Fase 23**, con una disposición de terminal guardada. `--smoke-test` reabría
+   las pestañas PTY de la última solución, y matarlas al salir lanza el ayudante de ConPTY de
+   node-pty, que en un proceso sin consola falla con `AttachConsole failed` y deja vivo el bucle de
+   eventos. Es la cuarta vez que esa familia de fallo cuelga algo en este proyecto.
+   *Arreglo:* los modos de diagnóstico no restauran terminales. Es la misma regla que ya se aplicaba
+   a la comprobación de actualizaciones, y estaba escrita tres líneas más arriba: "deben partir
+   siempre del mismo estado".
+3. *Síntoma:* se instala un tema oscuro de Open VSX, el editor se pone **blanco**, y no hay ningún
+   error por ninguna parte.
+   *Causa raíz:* dos fallos encadenados. `monaco.editor.defineTheme` **valida el nombre del tema** y
+   lanza `Illegal theme name!` con cualquier cosa que no sean letras, dígitos y guiones — y el
+   identificador (`ext:Telokis.theme-dracula-at-dusk:Dracula At Dusk`) lleva dos puntos, puntos y
+   espacios. El tema no quedaba registrado; y `setTheme` con un nombre desconocido **no protesta**:
+   cae al tema claro por defecto.
+   *Arreglo:* `monacoThemeName` sanea el identificador y le pega un hash, porque el saneado pierde
+   información. El identificador legible y el nombre interno son dos cosas distintas a propósito.
+4. *Síntoma:* con el tema ya registrado, cambiarlo desde Ajustes no hacía nada.
+   *Causa raíz:* `updateOptions({ theme })`. En Monaco el tema es **global** y esa opción se ignora
+   en silencio (sólo se lee al crear el editor). El conmutador claro/oscuro llevaba funcionando de
+   rebote desde siempre: `defineThemes` redefine el tema activo con los tokens CSS ya cambiados, así
+   que el editor se repintaba **conservando el nombre**. En cuanto hay un tema que es otro nombre y
+   no otra definición del mismo, eso deja de bastar.
+   *Arreglo:* `monaco.editor.setTheme` explícito.
+5. *Síntoma:* un `.tmTheme` se parseaba sin error y salía vacío.
+   *Causa raíz:* un plist alterna `<key>` y su valor como **hermanos**, y fast-xml-parser sin
+   `preserveOrder` los agrupa por etiqueta —todas las claves juntas, todas las cadenas juntas— y la
+   correspondencia se pierde. Además el mensaje de error del servicio decía "apunta fuera de la
+   extensión", que era falso: confundía "ruta inválida" con "no se ha podido interpretar".
+   *Arreglo:* `preserveOrder: true` y emparejado por posición; y los dos motivos, separados.
+6. *Síntoma:* tres pruebas del almacén de disposiciones en rojo — arrastrado de la iteración
+   anterior y anotado aquí porque volvió a pasar: **contrabarras a través del shell**, esta vez en
+   una ruta de mentira de Windows, donde la efe y la be van precedidas de contrabarra y son
+   caracteres de control.
+   *Arreglo:* rutas de mentira con barras normales, escritas con la herramienta de edición.
+
+**Lo que no se ha hecho, y por qué:** no hay host de extensiones. Ejecutar el código de un `.vsix`
+exige un proceso aparte, un módulo `vscode` que implemente esos 96 símbolos y —para esta extensión
+en concreto— webviews, que es HTML de un tercero dentro de la ventana. Lo primero es trabajo
+mecánico; lo segundo es una decisión de seguridad que merece su propio ADR el día que se tome. Y
+tampoco se consumen las **gramáticas** TextMate: Monaco usa Monarch, y traducir una gramática de
+TextMate exige `vscode-textmate` y el WASM de Oniguruma. Es una funcionalidad entera, no el paso
+siguiente.
+
+**Verificado sobre la aplicación real:**
+
+- **Claude Code por la paleta**, que es como lo abriría una persona: `--ui=claude` deja la pestaña
+  `[Claude Code]` abierta y activa, y a la segunda invocación **la enfoca en vez de duplicarla**.
+- **Una sesión de verdad**: el programa lanzado es el `npx.CMD` de la instalación de Node, con
+  `npm exec @anthropic-ai/claude-code` corriendo dentro. El perfil se ofrece disponible porque `npx`
+  está, aunque `claude` no esté instalado en esta máquina.
+- **Un tema real de Open VSX**: instalado `Telokis.theme-dracula-at-dusk`, 334 reglas de token
+  convertidas y el fondo del editor medido en `rgb(14, 20, 25)` —que es su `#0e1419`—, con el resto
+  de la ventana en `dotforge-dark`. Volviendo a "Ninguno" desde Ajustes, `rgb(27, 29, 39)`.
+- **Fragmentos reales**: instalada una extensión de fragmentos de C#, escrito `dfxfa` en un
+  `IClock.cs` de verdad y disparado el autocompletado: el widget de sugerencias enseña
+  `dfxfact · dotforge.pruebas-csharp`. Las extensiones de prueba se han desinstalado al terminar.
+- `npx electron . --menu-dump` → **ningún acelerador repetido** con `Ctrl+Shift+C` dentro.
+- `npm test` entero en verde: **1448 pruebas unitarias** (1379 antes), 81 de seguridad, 76 de
+  empaquetado y las tres arquitecturas compilando y pasando las suyas.

@@ -14,7 +14,10 @@ Su módulo estrella es el **Scaffolding Wizard**: un generador de arquitecturas 
 que produce soluciones .NET **compilables y ejecutables** siguiendo Clean Architecture,
 Arquitectura Hexagonal (Ports & Adapters) o Domain-Driven Design + CQRS.
 
-En la rama principal, **todavía sin publicar** (será la v2.6.0): la CI **publica la release** —un tag
+Desde la v2.6.0 **Claude Code se abre dentro del IDE** (`Ctrl+Shift+C`): no como extensión —eso
+exigiría un host de webviews— sino como un intérprete más del catálogo de la terminal, sobre la
+solución abierta. Las extensiones instaladas **por fin aportan algo**: sus temas de color y sus
+fragmentos se leen, se convierten y se aplican en el editor. La CI **publica la release** —un tag
 SemVer, una release en GitHub con sus binarios y sus notas, y el actualizador in-app con algo que
 ofrecer por primera vez desde que existe— y el panel de terminal **vuelve como se dejó**: las
 pestañas de cada solución, con su intérprete y su directorio, se recuerdan y se reabren.
@@ -127,6 +130,7 @@ IDE-DOTNET/
 │   │   ├── terminal-cwd.ts     # * Navegación de la terminal: qué es un `cd` y cómo se pinta (puro)
 │   │   ├── terminal-profiles.ts # * Perfiles de terminal: catálogo, plataforma y nombre de pestaña (puro)
 │   │   ├── terminal-layout.ts  # * Pestañas guardadas: saneado y plan de reapertura (puro)
+│   │   ├── vsix-contributions.ts # * Temas y fragmentos de un .vsix -> formato de Monaco (puro)
 │   │   ├── json-text.ts        # * JSON escrito por otras herramientas: la marca de orden de bytes (puro)
 │   │   ├── menu-template.ts    # * Contenido de la barra de menú, con aceleradores de roles (puro)
 │   │   ├── nuget-install.ts    # * Instalar un paquete en varios proyectos: plan y progreso (puro)
@@ -151,6 +155,7 @@ IDE-DOTNET/
 │   │   ├── services/terminal-session.ts  # Directorio de trabajo de la terminal (resuelve y valida)
 │   │   ├── services/terminal-pty-service.ts # Sesiones de pseudoterminal (node-pty, opcional)
 │   │   ├── services/terminal-layout-store.ts # Pestañas recordadas, una entrada por solución
+│   │   ├── services/extension-contributions.ts # Temas y fragmentos leídos de userData/extensions
 │   │   ├── services/           # Solución, NuGet, tareas dotnet, terminal, rutas, ZIP, settings,
 │   │   │                       # git-service.ts (estado y operaciones de control de fuentes),
 │   │   │                       # efcore-service.ts (dotnet ef + migraciones del disco),
@@ -297,7 +302,7 @@ npx electron . --smoke-test
   `nesting`, `startup`, `startup-dialog`, `terminal-suggest`, `git`, `git-diff`, `startup-play`,
   `startup-run-mode`, `ai-toggle`, `efcore`, `http`, `logs`, `startup-logs`, `containers`,
   `tests`, `tests-run`, `metrics`, `audit`, `extensions`, `update`, `search`, `unsaved`,
-  `terminal-pty`). `search`
+  `terminal-pty`, `claude`). `search`
   además **escribe** en la caja: el panel de búsqueda no enseña nada hasta que hay una consulta, así
   que abrirlo y ya no revisa nada. `update` pinta la tarjeta de
   actualización con un estado de ejemplo: publicar una versión de verdad para poder mirarla no es
@@ -556,6 +561,24 @@ npx electron . --smoke-test
   último que escribió es lo único que lo explica.
 - xterm **no se bundlea**, como Monaco: se sirve desde `build/vendor/xterm/`. Sus `<script>` van
   **antes** que el loader AMD de Monaco en `index.html`; ver la sección de trampas.
+
+### Claude Code y las contribuciones de un `.vsix` (`src/shared/vsix-contributions.ts`)
+
+- **Claude Code es un perfil de terminal, no una extensión** (ADR-062). Su extensión de VS Code usa
+  96 símbolos de la API de `vscode` y su interfaz es un **webview**, que choca con la CSP y con la
+  regla de no inyectar marcado. La CLI sólo necesita una terminal de verdad, y eso ya existe.
+- **Un perfil puede tener varias formas de lanzarse, todas del catálogo.** `claude` se instala de
+  tres maneras y ninguna es la canónica. La garantía del ADR-059 no cambia: el renderer manda un
+  identificador; las alternativas son una lista cerrada escrita en `terminal-profiles.ts`.
+- **Se lanza la ruta resuelta, no el nombre.** Ver la sección de trampas: `CreateProcess` no aplica
+  `PATHEXT`.
+- **En la terminal asistida, `claude` es una orden del intérprete**, como `cd`: abre su pestaña.
+- **Lo declarativo de un `.vsix` se consume; su código sigue sin ejecutarse.** Temas (JSON y
+  `.tmTheme`) y fragmentos. Las gramáticas TextMate **no**: Monaco usa Monarch.
+- **Un tema de extensión colorea el editor, no la ventana.** El resto del IDE usa el tema propio que
+  declare su `uiTheme`, y el ajuste lo dice con esas palabras.
+- **Toda ruta del manifiesto se valida contra la carpeta de la extensión**: `contributes` es JSON de
+  un tercero y su `path` acaba en un `readFile` (misma regla que el ADR-047).
 
 ### Pestañas recordadas (`src/shared/terminal-layout.ts`, `src/main/services/terminal-layout-store.ts`)
 
@@ -1102,6 +1125,22 @@ npm run fetch:toolchain -- --platform win32 --arch x64
   return;` deja `length` narrowed al literal `1`, y un `length === 0` posterior —perfectamente
   alcanzable, porque los `await` de en medio modifican la lista— sale como `TS2367: types '1' and
   '0' have no overlap`, que se lee como si el código fuera imposible. Se compara `> 1`.
+- **`CreateProcess` no aplica `PATHEXT`.** En Windows, buscar un programa por `PATH` probando las
+  extensiones de `PATHEXT` encuentra `npx.cmd`; lanzarlo por su nombre a secas **falla**, porque
+  `CreateProcess` sólo prueba `.exe`. Se comprueba una cosa y se ejecuta otra, y el error —"Cannot
+  create process, error code: 2"— no menciona ni el programa ni la extensión. Lo que se lanza tiene
+  que ser la **ruta ya resuelta**.
+- **Monaco valida el nombre de un tema.** `defineTheme` lanza `Illegal theme name!` con cualquier
+  cosa que no sean letras, dígitos y guiones: ni dos puntos, ni puntos, ni espacios. Y el fallo no se
+  ve, porque `setTheme` con un nombre desconocido **no protesta**: cae a su tema claro por defecto.
+  El síntoma es "instalo un tema oscuro y el editor se pone blanco".
+- **`updateOptions({ theme })` no hace nada.** En Monaco el tema es **global** (`monaco.editor.
+  setTheme`) y esa opción sólo se lee al crear el editor. El conmutador claro/oscuro de DotForge
+  funcionaba de rebote: `defineThemes` redefine el tema **activo** con los tokens CSS ya cambiados,
+  así que el editor se repintaba conservando el nombre. Con un tema que es otro nombre, deja de valer.
+- **Un plist no se lee sin `preserveOrder`.** Un `<dict>` alterna `<key>` y su valor como hermanos;
+  sin conservar el orden, fast-xml-parser los agrupa por etiqueta y la correspondencia se pierde. Un
+  `.tmTheme` así se parsea sin error y sale vacío.
 - **Una regla estructural sólo vigila la lista que le pasas.** La prueba que exige que ningún
   adquisidor escriba cabeceras a mano (ADR-050) llevaba dos módulos en su lista y el tercero
   —`updater-service.ts`, que hace exactamente el mismo par de peticiones— nació después y nunca se
