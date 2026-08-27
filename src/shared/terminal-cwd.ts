@@ -27,11 +27,24 @@ export type TerminalIntent =
   | { kind: 'change-directory'; target: string | null }
   /** Pregunta dónde está. */
   | { kind: 'print-directory' }
+  /**
+   * Pide Claude Code.
+   *
+   * No es un programa que esta terminal pueda lanzar y por eso se clasifica aquí: la asistida no
+   * tiene pseudoterminal, y Claude Code es una interfaz de pantalla completa que sin TTY no puede
+   * funcionar. En vez de intentarlo y fallar —o de rechazarlo por la lista blanca, que hablaría de
+   * programas permitidos y no de lo que pasa— se atiende como orden del intérprete y se abre su
+   * pestaña, que es lo que el usuario quería (ADR-062).
+   */
+  | { kind: 'open-claude' }
   /** Cualquier otra cosa: se lanza como programa. */
   | { kind: 'command' };
 
 const CHANGE_KEYWORDS = new Set(['cd', 'chdir', 'set-location', 'sl']);
 const PRINT_KEYWORDS = new Set(['pwd', 'get-location', 'gl', 'cwd']);
+
+/** Cómo se escribe "abre Claude Code". Se acepta el nombre del ejecutable en sus tres formas. */
+const CLAUDE_KEYWORDS = new Set(['claude', 'claude.cmd', 'claude.exe']);
 
 /**
  * Modificadores del `cd` de cmd que no son el destino.
@@ -63,6 +76,10 @@ export function classifyLine(argv: readonly string[]): TerminalIntent {
   const keyword = first.toLowerCase();
 
   if (PRINT_KEYWORDS.has(keyword) && argv.length === 1) return { kind: 'print-directory' };
+
+  // Con argumentos o sin ellos: `claude doctor` en la asistida tampoco puede correr, y llevarlo a
+  // una terminal de verdad es mejor respuesta que un error.
+  if (CLAUDE_KEYWORDS.has(keyword)) return { kind: 'open-claude' };
 
   // `D:` a secas: cambia de unidad. Con algo detrás (`D: algo`) no es eso, y se deja pasar como
   // comando para que el error diga que el programa no existe.

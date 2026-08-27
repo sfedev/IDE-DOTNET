@@ -23,7 +23,8 @@ export type SuggestionKind =
   | 'project'
   | 'container'
   | 'image'
-  | 'script';
+  | 'script'
+  | 'slash';
 
 export interface Suggestion {
   /** Texto que sustituye al token que se está escribiendo. */
@@ -69,6 +70,10 @@ const DEFAULT_PROGRAMS: CommandSpec[] = [
   { value: 'node', detail: 'runtime de Node' },
   { value: 'docker', detail: 'contenedores' },
   { value: 'az', detail: 'CLI de Azure' },
+  // No lo lanza esta terminal: `claude` es una interfaz de pantalla completa y la asistida no tiene
+  // pseudoterminal. Escribirlo abre su pestaña, que sí la tiene (ADR-062), y por eso se ofrece aquí:
+  // es lo que la gente va a teclear.
+  { value: 'claude', detail: 'abre Claude Code en su pestaña' },
 ];
 
 /** Subcomandos de git, ordenados por frecuencia real de uso, no alfabéticamente. */
@@ -253,6 +258,47 @@ const NODE_SUBCOMMANDS: CommandSpec[] = [
   { value: '--env-file=.env', detail: 'carga variables de un archivo' },
 ];
 
+/**
+ * Subcomandos de la CLI de Claude Code.
+ *
+ * Sólo los que no abren la interfaz interactiva —esos se escriben dentro de la sesión— más las dos
+ * banderas que más se usan al arrancarla. Es la lista que sirve **antes** de entrar.
+ */
+const CLAUDE_SUBCOMMANDS: CommandSpec[] = [
+  { value: '--continue', detail: 'retoma la última conversación' },
+  { value: '--resume', detail: 'elige una conversación anterior' },
+  { value: 'doctor', detail: 'diagnostica la instalación' },
+  { value: 'update', detail: 'actualiza la CLI' },
+  { value: 'mcp', detail: 'servidores MCP configurados' },
+  { value: 'config', detail: 'ajustes de la CLI' },
+];
+
+/**
+ * Órdenes de barra de una sesión de Claude Code.
+ *
+ * Se escriben **dentro** de la sesión, que es una pestaña de pseudoterminal donde este motor no
+ * interviene: ahí el autocompletado lo pone Claude. Están aquí como referencia, y se ofrecen cuando
+ * la línea empieza por `/`, que en la terminal asistida no significa ninguna otra cosa — ningún
+ * programa de la lista blanca empieza por barra.
+ */
+const CLAUDE_SLASH_COMMANDS: CommandSpec[] = [
+  { value: '/help', detail: 'todas las órdenes disponibles' },
+  { value: '/clear', detail: 'vacía el contexto de la conversación' },
+  { value: '/compact', detail: 'resume el contexto para que quepa más' },
+  { value: '/cost', detail: 'lo que llevas gastado en la sesión' },
+  { value: '/context', detail: 'en qué se está yendo el contexto' },
+  { value: '/model', detail: 'cambia de modelo' },
+  { value: '/review', detail: 'revisa los cambios pendientes' },
+  { value: '/doctor', detail: 'diagnostica la instalación' },
+  { value: '/config', detail: 'ajustes de la sesión' },
+  { value: '/status', detail: 'versión, cuenta y conexión' },
+  { value: '/bug', detail: 'informa de un fallo a Anthropic' },
+  { value: '/init', detail: 'genera un CLAUDE.md del repositorio' },
+  { value: '/memory', detail: 'edita los archivos de memoria' },
+  { value: '/agents', detail: 'sub-agentes disponibles' },
+  { value: '/exit', detail: 'cierra la sesión' },
+];
+
 /** Subcomandos de Docker que esperan un contenedor como argumento siguiente. */
 const DOCKER_CONTAINER_COMMANDS = new Set([
   'logs', 'exec', 'stop', 'start', 'restart', 'rm', 'inspect', 'attach', 'top', 'port', 'kill', 'cp', 'stats',
@@ -342,6 +388,12 @@ function byPrefix(suggestions: Suggestion[], typing: string): Suggestion[] {
 export function suggest(line: string, context: SuggestContext = {}): Suggestion[] {
   const { tokens, typing } = splitLine(line);
 
+  // Una barra al principio: órdenes de una sesión de Claude Code. Va antes que nada porque `/`
+  // no es el principio de ningún programa de la lista blanca.
+  if (tokens.length === 0 && typing.startsWith('/')) {
+    return byPrefix(toSuggestions(CLAUDE_SLASH_COMMANDS, 'slash'), typing);
+  }
+
   // Primer token: el programa.
   if (tokens.length === 0) {
     const extra = (context.programs ?? [])
@@ -361,6 +413,7 @@ export function suggest(line: string, context: SuggestContext = {}): Suggestion[
     return byPrefix(npmSuggestions(tokens, context), typing);
   }
   if (program === 'node') return byPrefix(toSuggestions(NODE_SUBCOMMANDS, 'flag'), typing);
+  if (program === 'claude') return byPrefix(toSuggestions(CLAUDE_SUBCOMMANDS, 'subcommand'), typing);
 
   return [];
 }
@@ -575,4 +628,6 @@ export const SUGGESTION_SOURCES = {
   az: AZ_SUBCOMMANDS.map((spec) => spec.value),
   npm: NPM_SUBCOMMANDS.map((spec) => spec.value),
   node: NODE_SUBCOMMANDS.map((spec) => spec.value),
+  claude: CLAUDE_SUBCOMMANDS.map((spec) => spec.value),
+  claudeSlash: CLAUDE_SLASH_COMMANDS.map((spec) => spec.value),
 } as const;

@@ -1705,6 +1705,32 @@ export class PanelView {
       .catch(() => undefined);
   }
 
+  /**
+   * Abre una pestaña de ese perfil, o enfoca la que ya haya.
+   *
+   * Es lo que quiere un acceso directo: pulsar el atajo dos veces no puede dejar dos sesiones de
+   * Claude Code abiertas —cada una es un proceso con su contexto y su coste— y volver a la que ya
+   * está es lo que uno espera de un atajo con nombre propio.
+   *
+   * Se prefiere una que siga viva. Una pestaña cuyo intérprete terminó se conserva porque lo último
+   * que escribió es lo único que explica por qué (ADR-059), pero enfocarla en vez de abrir una
+   * nueva sería devolver al usuario a un cadáver.
+   */
+  async openOrFocusTerminal(profileId: string): Promise<void> {
+    this.show('terminal');
+
+    const existing =
+      this.terminals.find((terminal) => terminal.profileId === profileId && !terminal.exited) ??
+      this.terminals.find((terminal) => terminal.profileId === profileId && terminal.kind === 'lite');
+
+    if (existing) {
+      this.showTerminal(existing.id);
+      return;
+    }
+
+    await this.openTerminal(profileId);
+  }
+
   /** Activa una pestaña de terminal. */
   showTerminal(id: string): void {
     if (!this.terminals.some((terminal) => terminal.id === id)) return;
@@ -2007,6 +2033,7 @@ const KIND_LABEL: Record<Suggestion['kind'], string> = {
   package: 'paquete',
   project: 'proyecto',
   container: 'contenedor',
+  slash: 'sesión',
   image: 'imagen',
   script: 'script',
 };

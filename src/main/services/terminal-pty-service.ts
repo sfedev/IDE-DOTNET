@@ -29,7 +29,12 @@ import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { delimiter, extname, isAbsolute, join } from 'node:path';
 
-import { findProfile, type TerminalProfile } from '../../shared/terminal-profiles.js';
+import {
+  findProfile,
+  resolveLaunch,
+  unavailableReason,
+  type TerminalProfile,
+} from '../../shared/terminal-profiles.js';
 
 /**
  * La parte de `node-pty` que se usa, declarada aquí.
@@ -212,8 +217,8 @@ function shellEnvironment(): Record<string, string> {
  * Se busca como lo haría el intérprete: ruta absoluta tal cual, y si no, por `PATH` probando las
  * extensiones de `PATHEXT` en Windows.
  */
-export async function programExists(file: string): Promise<boolean> {
-  if (isAbsolute(file)) return exists(file);
+export async function resolveProgram(file: string): Promise<string | null> {
+  if (isAbsolute(file)) return (await exists(file)) ? file : null;
 
   const extensions =
     process.platform === 'win32'
@@ -224,15 +229,24 @@ export async function programExists(file: string): Promise<boolean> {
   const directories = (process.env['PATH'] ?? '').split(delimiter).filter((entry) => entry !== '');
 
   for (const directory of directories) {
-    if (hasExtension && (await exists(join(directory, file)))) return true;
-    if (hasExtension) continue;
+    if (hasExtension) {
+      const candidate = join(directory, file);
+      if (await exists(candidate)) return candidate;
+      continue;
+    }
 
     for (const extension of extensions) {
-      if (await exists(join(directory, `${file}${extension}`))) return true;
+      const candidate = join(directory, `${file}${extension}`);
+      if (await exists(candidate)) return candidate;
     }
   }
 
-  return false;
+  return null;
+}
+
+/** ¿Está instalado? Envoltorio de `resolveProgram` para quien sólo necesita el sí o el no. */
+export async function programExists(file: string): Promise<boolean> {
+  return (await resolveProgram(file)) !== null;
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -258,7 +272,7 @@ export interface CreateOptions {
  *         hay demasiadas sesiones abiertas. Las tres son estados normales y el llamante las enseña
  *         como aviso, no como error de programa.
  */
-export function create(options: CreateOptions, callbacks: PtyCallbacks): PtySessionInfo {
+export async function create(options: CreateOptions, callbacks: PtyCallbacks): Promise<PtySessionInfo> {
   const pty = loadNodePty();
   if (!pty) throw new PtyUnavailableError(availability().reason ?? 'no hay pseudoterminales');
 
@@ -273,12 +287,19 @@ export function create(options: CreateOptions, callbacks: PtyCallbacks): PtySess
     throw new PtyUnavailableError(`el perfil "${options.profileId}" no abre ningún intérprete`);
   }
 
+  // Cuál de las alternativas del catálogo hay en esta máquina. Para un intérprete del sistema es
+  // siempre la primera; para `claude`, la que corresponda a cómo se instalara. Que no haya ninguna
+  // es el caso normal de una herramienta que no viene con el sistema, y se dice con la orden de
+  // instalación dentro.
+  const launch = await resolveLaunch(profile, resolveProgram);
+  if (launch === null) throw new PtyUnavailableError(unavailableReason(profile));
+
   const terminalId = randomUUID();
-  const args = [...profile.args];
+  const args = [...launch.args];
 
   let child: PtyProcess;
   try {
-    child = pty.spawn(profile.file, args, {
+    child = pty.spawn(launch.file, args, {
       name: 'xterm-256color',
       cols: options.columns ?? DEFAULT_COLUMNS,
       rows: options.rows ?? DEFAULT_ROWS,
@@ -289,14 +310,14 @@ export function create(options: CreateOptions, callbacks: PtyCallbacks): PtySess
     // El caso normal: `pwsh.exe` ofrecido y no instalado. El mensaje de node-pty no nombra el
     // programa, así que se nombra aquí.
     throw new PtyUnavailableError(
-      `no se ha podido arrancar ${profile.file}: ${error instanceof Error ? error.message : String(error)}`,
+      `no se ha podido arrancar ${launch.file}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 
   const info: PtySessionInfo = {
     terminalId,
     profileId: profile.id,
-    file: profile.file,
+    file: launch.file,
     pid: child.pid,
     cwd: options.cwd,
   };

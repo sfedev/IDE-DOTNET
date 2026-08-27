@@ -47,7 +47,12 @@ import { isTrustedDownload, isValidSegment, SEARCH_PAGE_SIZE } from '../../share
 import type { InstalledExtension } from '../../shared/vsix.js';
 import type { SearchSummary } from '../../shared/file-search.js';
 import { coerceSearchOptions } from '../../shared/file-search.js';
-import { coerceProfileId, profilesFor } from '../../shared/terminal-profiles.js';
+import {
+  coerceProfileId,
+  profilesFor,
+  resolveLaunch,
+  unavailableReason,
+} from '../../shared/terminal-profiles.js';
 import { coerceIncomingLayout, isRestorable, restorablePlan } from '../../shared/terminal-layout.js';
 import { describeFault, type ServerFault } from '../../shared/lsp-health.js';
 import { legendFromCapabilities } from '../../shared/semantic-tokens.js';
@@ -417,7 +422,25 @@ function syncTerminalContext(): void {
   });
 }
 
-export function registerIpcHandlers(): void {
+export interface IpcOptions {
+  /**
+   * Modo de diagnóstico: `--smoke-test`, `--screenshot=`, `--ui=`.
+   *
+   * Apaga lo que hace que dos arranques no se parezcan. La comprobación automática de
+   * actualizaciones ya se omitía por esto mismo —"deben partir siempre del mismo estado y no
+   * depender de la red"— y restaurar las pestañas de terminal es peor todavía: no sólo depende del
+   * estado de la máquina, sino que **abre intérpretes de verdad**, y matarlos al salir lanza el
+   * ayudante de ConPTY de node-pty, que en un proceso sin consola falla y deja el bucle de eventos
+   * vivo. Es la cuarta vez que esa familia de fallo cuelga algo en este proyecto.
+   */
+  diagnostic?: boolean;
+}
+
+let diagnosticMode = false;
+
+export function registerIpcHandlers(options: IpcOptions = {}): void {
+  diagnosticMode = options.diagnostic === true;
+
   // Sin workspace la terminal arranca en la carpeta personal, que es donde arranca cualquier
   // terminal del sistema.
   syncTerminalContext();
@@ -949,7 +972,9 @@ export function registerIpcHandlers(): void {
     const argv = commandRunner.tokenize(text);
 
     const builtin = await terminalSession.handleBuiltin(argv);
-    if (builtin !== null) return { task: null, cwd: builtin.cwd, output: builtin.output };
+    if (builtin !== null) {
+      return { task: null, cwd: builtin.cwd, output: builtin.output, intent: builtin.intent };
+    }
 
     const here = terminalSession.cwd();
     const task = commandRunner.runCommand(text, here.path, {
@@ -959,7 +984,7 @@ export function registerIpcHandlers(): void {
         broadcast(IPC_EVENTS.taskExit, { ...payload, diagnostics: [], applicationUrl: null }),
     });
 
-    return { task, cwd: here, output: [] };
+    return { task, cwd: here, output: [], intent: 'command' };
   });
 
   // --- Pseudoterminales (Fase 21) ---------------------------------------------------------------
@@ -984,15 +1009,19 @@ export function registerIpcHandlers(): void {
         // ese intérprete concreto no está instalado. El segundo es el caso normal de `pwsh.exe`,
         // que es una instalación aparte, y decirlo aquí evita que el fallo llegue después y en
         // otro panel, que es la peor forma de enterarse.
-        const installed = profile.file !== null && (await ptyService.programExists(profile.file));
+        //
+        // Se pregunta por **todas** las formas de lanzarlo que declara el catálogo, no sólo por la
+        // primera: `claude` instalado con npm en Windows es un `.cmd`, y darlo por ausente porque
+        // no hay un `.exe` sería declarar no disponible lo que sí está.
+        const launch = await resolveLaunch(profile, ptyService.resolveProgram);
 
         return {
           id: profile.id,
           label: profile.label,
           kind: profile.kind,
           hint: profile.hint,
-          available: state.available && installed,
-          reason: !state.available ? state.reason : installed ? null : `${profile.file} no está instalado.`,
+          available: state.available && launch !== null,
+          reason: !state.available ? state.reason : launch !== null ? null : unavailableReason(profile),
         };
       }),
     );
@@ -1005,7 +1034,7 @@ export function registerIpcHandlers(): void {
    * búsqueda se toma del guardián de rutas (ADR-057). Lo que llega es el identificador de perfil,
    * que pasa por `coerceProfileId` y sólo puede acabar siendo uno de los del catálogo.
    */
-  ipcMain.handle(IPC.terminalCreate, (_event, profileId: unknown, size: unknown): TerminalSessionInfo => {
+  ipcMain.handle(IPC.terminalCreate, async (_event, profileId: unknown, size: unknown): Promise<TerminalSessionInfo> => {
     const measured = typeof size === 'object' && size !== null ? (size as { columns?: unknown; rows?: unknown }) : {};
 
     return ptyService.create(
@@ -1063,7 +1092,7 @@ export function registerIpcHandlers(): void {
    */
   ipcMain.handle(IPC.terminalLayoutRestore, async (): Promise<TerminalLayoutRestore> => {
     const workspace = getWorkspaceRoot();
-    if (workspace === null || !settingsService.current().restoreTerminals) {
+    if (workspace === null || diagnosticMode || !settingsService.current().restoreTerminals) {
       return { tabs: [], activeIndex: 0, skipped: 0 };
     }
 

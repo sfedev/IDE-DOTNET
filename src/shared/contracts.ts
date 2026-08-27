@@ -491,6 +491,14 @@ export interface TerminalRunResult {
   task: DotnetTaskStarted | null;
   cwd: TerminalCwd;
   output: string[];
+  /**
+   * Qué era la línea.
+   *
+   * El renderer sólo mira una: `open-claude`, que no lanza nada y le pide que abra la pestaña de
+   * Claude Code. Va como dato y no como evento porque es la respuesta a algo que el renderer acaba
+   * de pedir, no una notificación que llegue por su cuenta.
+   */
+  intent: 'change-directory' | 'print-directory' | 'open-claude' | 'command';
 }
 
 /**
@@ -902,6 +910,7 @@ export type MenuCommand =
   | 'ai.tests'
   | 'ai.fix'
   | 'ai.reset'
+  | 'ai.openClaudeTerminal'
   | 'help.about'
   | 'help.docs';
 

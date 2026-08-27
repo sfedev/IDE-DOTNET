@@ -755,9 +755,26 @@ describe('pseudoterminales', () => {
   it('los argumentos del intérprete son los del catálogo, ya troceados', () => {
     // Nunca una línea de shell, ni siquiera aquí: el intérprete se lanza con su array de argumentos
     // y lo que el usuario escriba va por la entrada estándar, que es otra cosa.
-    assert.match(service, /const args = \[\.\.\.profile\.args\]/);
-    assert.match(service, /pty\.spawn\(profile\.file, args, \{/);
+    assert.match(service, /const args = \[\.\.\.launch\.args\]/);
+    assert.match(service, /pty\.spawn\(launch\.file, args, \{/);
     assert.doesNotMatch(profiles, /shell:\s*true/);
+  });
+
+  /**
+   * Desde que un perfil puede tener varias formas de lanzarse (ADR-062), lo que se spawnea ya no es
+   * literalmente `profile.file`: es lo que devuelve `resolveLaunch`. La garantía tiene que seguir
+   * siendo la misma, así que se comprueba de dónde sale ese valor — de una lista cerrada escrita en
+   * el catálogo, no de un argumento de `create`.
+   */
+  it('las alternativas de lanzamiento salen del catálogo, no de quien llama', () => {
+    assert.match(service, /const launch = await resolveLaunch\(profile, resolveProgram\)/);
+    assert.doesNotMatch(service, /options\.fallbacks|options\.launch/, 'el llamante propone programas');
+
+    // `launchCandidates` sólo puede componer la lista con lo que hay en el propio perfil.
+    assert.match(
+      profiles,
+      /return \[\{ file: profile\.file, args: \[\.\.\.profile\.args\] \}, \.\.\.\(profile\.fallbacks \?\? \[\]\)\];/,
+    );
   });
 
   it('lo que se escribe está acotado en tamaño', () => {
@@ -775,6 +792,24 @@ describe('pseudoterminales', () => {
     assert.doesNotMatch(service, /^import .* from 'node-pty'/m, 'no puede importarse arriba');
     assert.match(service, /createRequire\(anchor\)\('node-pty'\)/);
     assert.match(service, /catch \(error\) \{[\s\S]*loadError =/);
+  });
+
+  /**
+   * Los modos de diagnóstico no abren intérpretes.
+   *
+   * Vecino del de abajo y por el mismo motivo: procesos que sobreviven a quien los abrió. Con una
+   * disposición guardada, `--smoke-test` reabría las pestañas de terminal de la última solución, y
+   * matarlas al salir lanza el ayudante de ConPTY de node-pty, que en un proceso sin consola falla
+   * con `AttachConsole failed` y **deja el bucle de eventos vivo**: la prueba de humo imprimía
+   * `SMOKE_OK` y nunca terminaba. Es la misma regla que ya se aplicaba a la comprobación de
+   * actualizaciones: un modo de diagnóstico parte siempre del mismo estado.
+   */
+  it('un modo de diagnóstico no restaura pestañas de terminal', () => {
+    assert.match(register, /if \(workspace === null \|\| diagnosticMode \|\|/);
+    assert.match(
+      readSource('src/main/main.ts'),
+      /registerIpcHandlers\(\{ diagnostic: isSmokeTest \|\| uiAction !== null \|\| screenshotTarget !== null \}\)/,
+    );
   });
 
   it('cerrar el IDE se lleva por delante los intérpretes abiertos', () => {

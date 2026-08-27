@@ -286,6 +286,10 @@ export function buildMenuTemplate(options: MenuTemplateOptions): MenuSection[] {
         command('Generar pruebas xUnit', 'ai.tests'),
         command('Corregir la violación de arquitectura', 'ai.fix'),
         separator,
+        // Claude Code no es una extensión aquí: es un intérprete más del catálogo de la terminal
+        // (ADR-062). Va en este menú porque es donde lo busca quien lo quiere usar, no en Ver.
+        command('Abrir Claude Code en Terminal', 'ai.openClaudeTerminal', 'CmdOrCtrl+Shift+C'),
+        separator,
         command('Empezar una conversación nueva', 'ai.reset'),
       ],
     },

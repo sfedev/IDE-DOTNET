@@ -437,6 +437,20 @@ const UI_ACTIONS: Record<string, string> = {
     'setTimeout(() => [...document.querySelectorAll(".nuget-audit-head button")]' +
     ".find((button) => button.textContent?.includes('Analizar'))?.click(), 900)",
   palette: "document.querySelector('#statusbar button:last-of-type')?.click()",
+  /**
+   * Fase 24: Claude Code por el camino que usaría una persona — la paleta, no una llamada IPC.
+   *
+   * Es lo único que comprueba la cadena entera: que el comando está registrado con ese
+   * identificador, que la paleta lo encuentra por su título y que el panel abre **o enfoca** su
+   * pestaña. Una llamada directa a `terminal.create` se salta las tres cosas.
+   */
+  claude:
+    "document.querySelector('#statusbar button:last-of-type')?.click();" +
+    "setTimeout(() => {" +
+    "  const box = document.querySelector('.palette input');" +
+    "  if (box) { box.value = 'Claude Code'; box.dispatchEvent(new Event('input', { bubbles: true })); }" +
+    "  setTimeout(() => document.querySelector('.palette-item')?.click(), 500);" +
+    "}, 500)",
   terminal: "[...document.querySelectorAll('.panel-tab')].find((tab) => tab.textContent?.includes('Terminal'))?.click()",
   /**
    * Fase 21: abre el panel, despliega el selector de intérpretes y arranca PowerShell.
@@ -718,7 +732,7 @@ app.whenReady().then(async () => {
     quit: () => app.quit(),
   });
 
-  registerIpcHandlers();
+  registerIpcHandlers({ diagnostic: isSmokeTest || uiAction !== null || screenshotTarget !== null });
 
   // El menú necesita dos cosas del proceso principal: la lista de recientes al construirse y una
   // forma de abrir una. Se le inyectan en vez de que las importe, para que `menu.ts` siga sin saber

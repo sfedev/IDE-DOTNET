@@ -26,10 +26,13 @@ import {
   coerceProfileId,
   defaultProfileId,
   findProfile,
+  launchCandidates,
   MAX_PTY_SESSIONS,
   MAX_WRITE_CHARS,
   profilesFor,
   ptyService,
+  resolveLaunch,
+  unavailableReason,
   PtyUnavailableError,
   TERMINAL_PROFILES,
   terminalTabName,
@@ -65,7 +68,7 @@ describe('catálogo de perfiles', () => {
 
   it('cada plataforma ofrece lo suyo y nada de las otras', () => {
     const windows = profilesFor('win32').map((profile) => profile.id);
-    assert.deepEqual(windows, ['pwsh', 'powershell', 'cmd', 'lite']);
+    assert.deepEqual(windows, ['pwsh', 'powershell', 'cmd', 'claude', 'lite']);
     assert.ok(!windows.includes('bash'), 'bash no se ofrece en Windows');
 
     const mac = profilesFor('darwin').map((profile) => profile.id);
@@ -161,15 +164,17 @@ describe('sesiones de pseudoterminal', () => {
     else assert.equal(state.reason, null);
   });
 
-  it('un perfil que no abre intérprete se rechaza como estado, no como fallo de programa', () => {
-    assert.throws(
+  // `create` es asíncrona desde que hay perfiles con varias formas de lanzarse: mirar el `PATH`
+  // toca el disco, y hacerlo síncrono bloquearía el hilo que repinta la ventana (ADR-051).
+  it('un perfil que no abre intérprete se rechaza como estado, no como fallo de programa', async () => {
+    await assert.rejects(
       () => ptyService.create({ profileId: 'lite', cwd: workspace }, { onData() {}, onExit() {} }),
       PtyUnavailableError,
     );
   });
 
-  it('un perfil inventado tampoco abre nada', () => {
-    assert.throws(
+  it('un perfil inventado tampoco abre nada', async () => {
+    await assert.rejects(
       () => ptyService.create({ profileId: 'fish', cwd: workspace }, { onData() {}, onExit() {} }),
       PtyUnavailableError,
     );
@@ -234,3 +239,100 @@ function ejecutar(file, args, timeoutMs) {
     });
   });
 }
+
+/**
+ * Perfiles con varias formas de lanzarse.
+ *
+ * `claude` no es un intérprete del sistema: se instala de tres maneras y ninguna es la canónica.
+ * El instalador nativo deja un ejecutable, `npm install -g` deja un `.cmd` en Windows y un script
+ * sin extensión en el resto, y `npx` funciona sin haber instalado nada. Elegir una sola en el
+ * catálogo declararía no disponible a quien tenga cualquiera de las otras dos.
+ */
+describe('resolución del programa a lanzar', () => {
+  const claude = findProfile('claude');
+
+  /**
+   * Un buscador de programas de mentira: devuelve la ruta resuelta, como el de verdad.
+   *
+   * Que devuelva la **ruta** y no un booleano es lo que arregló el fallo que se coló en la primera
+   * versión de esto: en Windows, `CreateProcess` sólo prueba `.exe` al buscar por `PATH`, así que
+   * `npx` se encontraba y no se podía lanzar.
+   */
+  const only = (...installed) => async (file) => (installed.includes(file) ? `/fake/bin/${file}` : null);
+
+  it('el catálogo declara el perfil de Claude Code en las tres plataformas', () => {
+    assert.ok(claude, 'no está en el catálogo');
+    assert.equal(claude.kind, 'pty');
+    for (const platform of ['win32', 'darwin', 'linux']) {
+      assert.ok(profilesFor(platform).some((profile) => profile.id === 'claude'), platform);
+    }
+  });
+
+  it('las alternativas van detrás de la principal y en orden', () => {
+    assert.deepEqual(
+      launchCandidates(claude).map((candidate) => candidate.file),
+      ['claude', 'claude.cmd', 'claude.exe', 'npx'],
+    );
+  });
+
+  it('un perfil sin programa no tiene ninguna forma de lanzarse', () => {
+    // La asistida no lanza nada: devuelve una lista vacía en vez de un null que haya que
+    // comprobar en tres sitios distintos.
+    assert.deepEqual(launchCandidates(findProfile('lite')), []);
+  });
+
+  it('gana la primera que esté instalada', async () => {
+    const nativo = await resolveLaunch(claude, only('claude'));
+    assert.equal(nativo.file, '/fake/bin/claude');
+    assert.deepEqual(nativo.args, []);
+  });
+
+  /**
+   * El caso de Windows con npm, que es el más frecuente y el que se rompería con un catálogo de un
+   * solo programa: `npm install -g` no deja ningún `.exe`.
+   */
+  it('en Windows con npm se encuentra el .cmd, no un .exe que no existe', async () => {
+    const shim = await resolveLaunch(claude, only('claude.cmd'));
+    assert.equal(shim.file, '/fake/bin/claude.cmd');
+  });
+
+  it('sin instalar nada se cae a npx, con el paquete nombrado', async () => {
+    const viaNpx = await resolveLaunch(claude, only('npx'));
+    assert.equal(viaNpx.file, '/fake/bin/npx');
+    assert.deepEqual(viaNpx.args, ['--yes', '@anthropic-ai/claude-code']);
+  });
+
+  it('sin ninguna de las cuatro, no hay con qué lanzarlo', async () => {
+    assert.equal(await resolveLaunch(claude, only()), null);
+  });
+
+  /**
+   * Un perfil atenuado sin motivo es peor que uno ausente: el usuario ve una opción que no
+   * responde y no tiene dónde mirar. Para una herramienta que se instala con npm, el motivo tiene
+   * que traer la orden dentro.
+   */
+  it('el motivo de no estar disponible trae la orden de instalación', () => {
+    const reason = unavailableReason(claude);
+    assert.match(reason, /claude no está instalado/);
+    assert.match(reason, /npm install -g @anthropic-ai\/claude-code/);
+  });
+
+  it('un intérprete del sistema no inventa una orden de instalación', () => {
+    // "pwsh.exe no está instalado" ya lo dice todo: PowerShell 7 no se instala con npm.
+    const reason = unavailableReason(findProfile('pwsh'));
+    assert.match(reason, /pwsh\.exe no está instalado/);
+    assert.doesNotMatch(reason, /npm install/);
+  });
+
+  it('los argumentos son siempre un array, nunca una línea de shell', () => {
+    for (const profile of TERMINAL_PROFILES) {
+      for (const candidate of launchCandidates(profile)) {
+        assert.ok(Array.isArray(candidate.args), `${profile.id}: argumentos que no son array`);
+        for (const argument of candidate.args) {
+          assert.equal(typeof argument, 'string');
+          assert.doesNotMatch(argument, /[|&;<>]/, `${profile.id}: "${argument}" parece una línea de shell`);
+        }
+      }
+    }
+  });
+});

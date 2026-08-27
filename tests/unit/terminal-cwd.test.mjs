@@ -238,3 +238,41 @@ describe('recortar una ruta larga', () => {
     assert.equal(elide('C:\\CarpetaConUnNombreLarguisimoDeVerdad', 10), 'C:\\CarpetaConUnNombreLarguisimoDeVerdad');
   });
 });
+
+/**
+ * Claude Code como orden del intérprete.
+ *
+ * Misma familia que `cd` y `pwd` (ADR-055): primero se clasifica, después se lanza. Sin esto,
+ * escribir `claude` en la terminal asistida acabaría en el ejecutor, y el error hablaría de la
+ * lista de programas permitidos, que no viene a cuento: el problema no es el permiso, es que esa
+ * terminal no tiene pseudoterminal y Claude Code es una interfaz de pantalla completa.
+ */
+describe('claude no es un programa que esta terminal pueda lanzar', () => {
+  it('se reconoce a secas', () => {
+    assert.deepEqual(classifyLine(['claude']), { kind: 'open-claude' });
+  });
+
+  it('con argumentos también: tampoco puede correr aquí', () => {
+    assert.deepEqual(classifyLine(['claude', 'doctor']), { kind: 'open-claude' });
+    assert.deepEqual(classifyLine(['claude', '--continue']), { kind: 'open-claude' });
+  });
+
+  it('se reconoce con las tres formas del ejecutable, sin distinguir mayúsculas', () => {
+    for (const word of ['claude', 'Claude', 'CLAUDE', 'claude.cmd', 'claude.exe']) {
+      assert.equal(classifyLine([word]).kind, 'open-claude', word);
+    }
+  });
+
+  it('no se lleva por delante nada que se le parezca', () => {
+    // Un programa cuyo nombre empieza igual sigue siendo un programa.
+    assert.equal(classifyLine(['claudia']).kind, 'command');
+    assert.equal(classifyLine(['claude-code']).kind, 'command');
+    assert.equal(classifyLine(['npx', 'claude']).kind, 'command');
+  });
+
+  it('cd y pwd siguen clasificándose como siempre', () => {
+    assert.equal(classifyLine(['cd', 'src']).kind, 'change-directory');
+    assert.equal(classifyLine(['pwd']).kind, 'print-directory');
+    assert.equal(classifyLine(['dotnet', 'build']).kind, 'command');
+  });
+});

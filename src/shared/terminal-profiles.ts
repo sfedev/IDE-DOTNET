@@ -21,6 +21,12 @@
 /** Cómo se ejecuta lo que se escribe en una pestaña de terminal. */
 export type TerminalKind = 'pty' | 'lite';
 
+/** Un programa concreto con sus argumentos, ya troceados. Nunca una línea de shell. */
+export interface TerminalLaunch {
+  file: string;
+  args: readonly string[];
+}
+
 export interface TerminalProfile {
   id: string;
   label: string;
@@ -29,10 +35,31 @@ export interface TerminalProfile {
   file: string | null;
   /** Argumentos del intérprete, ya troceados: nunca una línea de shell. */
   args: readonly string[];
+  /**
+   * Otras formas de lanzar lo mismo, en orden de preferencia, si `file` no está instalado.
+   *
+   * Existe por una herramienta que no es un intérprete del sistema: `claude` se instala de tres
+   * maneras distintas —el instalador nativo, `npm install -g` (que en Windows deja un `.cmd` y no
+   * un `.exe`) y `npx` sin instalar nada— y ninguna de las tres es "la buena". Un catálogo con un
+   * único programa obligaría a elegir una y declarar no disponible a quien tenga otra.
+   *
+   * **Siguen saliendo del catálogo**: son una lista cerrada escrita aquí, no algo que nadie pueda
+   * mandar. La garantía del ADR-059 es que el renderer manda un identificador y nada más, y eso no
+   * cambia.
+   */
+  fallbacks?: readonly TerminalLaunch[];
   /** Plataformas en las que se ofrece (`process.platform`). */
   platforms: readonly string[];
   /** Una línea diciendo qué aporta y qué no. Se enseña en el menú del botón `+`. */
   hint: string;
+  /**
+   * Qué hacer si no está instalado, con la orden concreta.
+   *
+   * Para un intérprete del sistema no hace falta —"pwsh.exe no está instalado" ya lo dice todo—,
+   * pero una herramienta que se instala con npm merece que el IDE diga **cómo**: quien abre el menú
+   * y ve una opción atenuada no tiene por qué saber de dónde sale.
+   */
+  install?: string;
 }
 
 const WINDOWS = ['win32'];
@@ -97,6 +124,25 @@ export const TERMINAL_PROFILES: readonly TerminalProfile[] = [
     hint: 'bash como sesión de inicio.',
   },
   {
+    id: 'claude',
+    label: 'Claude Code',
+    kind: 'pty',
+    // En Windows, `npm install -g` deja un `claude.cmd`, no un `.exe`: es el caso más frecuente y
+    // por eso va primero. El instalador nativo sí deja un ejecutable, y `npx` funciona sin haber
+    // instalado nada. `programExists` resuelve por `PATH` y `PATHEXT`, así que `claude` a secas
+    // encuentra también el script sin extensión de macOS y Linux.
+    file: 'claude',
+    args: [],
+    fallbacks: [
+      { file: 'claude.cmd', args: [] },
+      { file: 'claude.exe', args: [] },
+      { file: 'npx', args: ['--yes', '@anthropic-ai/claude-code'] },
+    ],
+    platforms: ALL,
+    hint: 'El asistente de Anthropic en su propia pestaña, sobre la solución abierta.',
+    install: 'Instálalo con: npm install -g @anthropic-ai/claude-code',
+  },
+  {
     id: 'lite',
     label: 'Terminal asistida',
     kind: 'lite',
@@ -114,6 +160,51 @@ export function profilesFor(platform: string): TerminalProfile[] {
 
 export function findProfile(id: string): TerminalProfile | null {
   return TERMINAL_PROFILES.find((profile) => profile.id === id) ?? null;
+}
+
+/**
+ * Todas las formas de lanzar un perfil, en orden de preferencia.
+ *
+ * La primera es la del propio perfil; detrás van sus alternativas. Un perfil sin programa (la
+ * asistida) no tiene ninguna, y quien la pida se lleva una lista vacía en vez de un `null` que
+ * haya que comprobar en tres sitios.
+ */
+export function launchCandidates(profile: TerminalProfile): TerminalLaunch[] {
+  if (profile.kind !== 'pty' || profile.file === null) return [];
+  return [{ file: profile.file, args: [...profile.args] }, ...(profile.fallbacks ?? [])];
+}
+
+/**
+ * Con cuál de las alternativas se lanza este perfil en esta máquina, o `null` si con ninguna.
+ *
+ * La búsqueda se **inyecta** en vez de hacerse aquí: este módulo es puro y se prueba sin tocar el
+ * disco, y quien sabe mirar el `PATH` es el proceso principal.
+ *
+ * Devuelve la **ruta ya resuelta**, no el nombre que se buscó, y esa diferencia no es cosmética:
+ * en Windows, `CreateProcess` busca por `PATH` pero sólo prueba `.exe`, así que un `npx` —que es un
+ * `npx.cmd`— se encuentra al comprobar y **falla al lanzarse**, con un "Cannot create process,
+ * error code: 2" que no menciona ni el programa ni la extensión.
+ */
+export async function resolveLaunch(
+  profile: TerminalProfile,
+  resolveProgram: (file: string) => Promise<string | null>,
+): Promise<TerminalLaunch | null> {
+  for (const candidate of launchCandidates(profile)) {
+    const resolved = await resolveProgram(candidate.file);
+    if (resolved !== null) return { file: resolved, args: candidate.args };
+  }
+  return null;
+}
+
+/**
+ * Por qué no se puede abrir este perfil, con la orden de instalación si el catálogo la declara.
+ *
+ * Un perfil atenuado sin motivo es peor que uno ausente: el usuario ve una opción que no responde
+ * y no tiene dónde mirar.
+ */
+export function unavailableReason(profile: TerminalProfile): string {
+  const missing = `${profile.file ?? profile.id} no está instalado.`;
+  return profile.install === undefined ? missing : `${missing} ${profile.install}`;
 }
 
 /**

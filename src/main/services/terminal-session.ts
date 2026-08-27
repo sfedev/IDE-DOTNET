@@ -147,6 +147,16 @@ export async function handleBuiltin(argv: readonly string[]): Promise<TerminalLi
     return { intent: intent.kind, cwd: here, output: [here.path] };
   }
 
+  // Quien la abre se lleva la pestaña; quien llama decide cómo. Aquí sólo se dice qué ha pasado,
+  // porque este servicio no conoce el panel ni tiene por qué.
+  if (intent.kind === 'open-claude') {
+    return {
+      intent: intent.kind,
+      cwd: cwd(),
+      output: ['Claude Code necesita una terminal de verdad: se abre en su propia pestaña.'],
+    };
+  }
+
   const next = await changeDirectory(intent.target);
   return { intent: intent.kind, cwd: next, output: [] };
 }

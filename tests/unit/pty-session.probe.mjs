@@ -47,7 +47,7 @@ try {
   let leido = '';
   let salida = null;
 
-  const session = ptyService.create(
+  const session = await ptyService.create(
     { profileId: shellId, cwd: workspace, columns: 100, rows: 30 },
     {
       onData: ({ data }) => {

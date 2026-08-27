@@ -410,3 +410,66 @@ describe('canal del proceso depurado', () => {
     assert.deepEqual(closes, ['ok']);
   });
 });
+
+/**
+ * Claude Code en la terminal.
+ *
+ * Dos superficies distintas y conviene no mezclarlas. Antes de entrar, `claude` es una palabra que
+ * se teclea en la terminal asistida —y que no lanza nada: abre su pestaña—. Dentro de la sesión, lo
+ * que se escribe son órdenes de barra, y ahí este motor no interviene: es una pseudoterminal y el
+ * autocompletado lo pone Claude. Se ofrecen igualmente como referencia cuando la línea empieza por
+ * `/`, que en la asistida no significa ninguna otra cosa.
+ */
+describe('sugerencias de Claude Code', () => {
+  it('claude aparece entre los programas, y dice que abre su pestaña', () => {
+    const [match] = suggest('cla');
+    assert.equal(match.value, 'claude');
+    assert.equal(match.kind, 'program');
+    assert.match(match.detail, /pestaña/);
+  });
+
+  it('detrás de claude van los subcomandos que sirven antes de entrar', () => {
+    const values = suggest('claude ').map((suggestion) => suggestion.value);
+    assert.ok(values.includes('--continue'), 'falta --continue');
+    assert.ok(values.includes('doctor'), 'falta doctor');
+    assert.ok(values.includes('mcp'), 'falta mcp');
+  });
+
+  it('el prefijo filtra los subcomandos como en cualquier otro programa', () => {
+    assert.deepEqual(
+      suggest('claude --c').map((suggestion) => suggestion.value),
+      ['--continue'],
+    );
+  });
+
+  it('una barra al principio ofrece las órdenes de la sesión', () => {
+    const values = suggest('/co').map((suggestion) => suggestion.value);
+    assert.deepEqual(values, ['/compact', '/cost', '/context', '/config']);
+    for (const suggestion of suggest('/co')) assert.equal(suggestion.kind, 'slash');
+  });
+
+  it('están las que el usuario escribe a diario', () => {
+    const values = suggest('/').map((suggestion) => suggestion.value);
+    for (const command of ['/compact', '/bug', '/clear', '/cost', '/doctor', '/help']) {
+      assert.ok(values.includes(command), `falta ${command}`);
+    }
+  });
+
+  /**
+   * La barra no puede robarle el turno a nada. Se comprueba explícitamente porque el orden de las
+   * ramas en `suggest` es lo único que lo separa del caso normal.
+   */
+  it('la barra no interfiere con las sugerencias de siempre', () => {
+    assert.deepEqual(suggest('git st').map((s) => s.value), ['status', 'stash']);
+    assert.ok(suggest('do').some((suggestion) => suggestion.value === 'dotnet'));
+    assert.equal(suggest('git /co').length, 0, 'una barra en medio no es una orden de sesión');
+  });
+
+  it('ninguna orden de sesión se ofrece como programa', () => {
+    // Escribirlas en la asistida no ejecuta nada: son de dentro de la sesión, y ofrecerlas como
+    // programa prometería algo que no pasa.
+    for (const suggestion of suggest('')) {
+      assert.doesNotMatch(suggestion.value, /^\//, `${suggestion.value} se ofrece como programa`);
+    }
+  });
+});

@@ -796,6 +796,12 @@ class DotForgeApp {
       this.panel.setTerminalCwd(result.cwd);
       for (const text of result.output) this.panel.appendTerminalLine(text);
 
+      // `claude` escrito en la asistida no lanza nada: pide su pestaña, que es una de verdad.
+      if (result.intent === 'open-claude') {
+        void this.panel.openOrFocusTerminal('claude');
+        return;
+      }
+
       // La salida de la terminal va a su propio canal, no al de compilación.
       if (result.task !== null) this.panel.attachTerminalTask(result.task.taskId);
     } catch (error) {
@@ -2137,6 +2143,17 @@ class DotForgeApp {
         title: 'DotForge AI: empezar una conversación nueva',
         group: 'IA',
         run: () => this.aiChat.reset(),
+      },
+      {
+        id: 'ai.openClaudeTerminal',
+        icon: 'terminal',
+        title: 'Abrir Claude Code en Terminal',
+        group: 'IA',
+        keybinding: `${modifier}+Shift+C`,
+        // No hay host de extensiones ni webview detrás: es un perfil más del catálogo de la
+        // terminal, corriendo en el PTY sobre la solución abierta (ADR-062). Si `claude` no está
+        // instalado, el aviso que sale de `terminal:create` trae la orden de instalación dentro.
+        run: () => void this.panel.openOrFocusTerminal('claude'),
       },
       {
         id: 'git.commit',
