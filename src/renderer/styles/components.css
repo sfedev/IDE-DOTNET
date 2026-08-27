@@ -1085,6 +1085,18 @@ select.input {
   width: min(460px, 92vw);
 }
 
+/*
+  La columna de texto de la cabecera tiene que poder encoger.
+
+  Un elemento flexible arranca con `min-width: auto`, que es "no encojas por debajo de tu contenido
+  mínimo", y el contenido mínimo de una ruta de Windows es la ruta entera: no tiene ni un solo punto
+  por donde partirla. El resultado medido era un párrafo que llegaba 415 px más allá del borde del
+  cuadro, con `overflow: hidden` cortándolo a media ruta y sin forma de leer el resto.
+*/
+.dialog-header > div {
+  min-width: 0;
+}
+
 .confirm-dialog .dialog-footer {
   justify-content: flex-end;
 }
@@ -1095,10 +1107,31 @@ select.input {
   color: var(--danger);
 }
 
+/*
+  La ruta del archivo, en el aviso de cambios sin guardar.
+
+  Tres cosas, y cada una arregla un modo de fallo distinto:
+   - `overflow-wrap: anywhere` permite partir donde haga falta. `break-all` no vale: parte también
+     lo que sí se podía partir bien, y `Documents\Proyectos` acabaría cortado a mitad de "Docu".
+   - `max-height` con `overflow-y: auto` acota lo que puede crecer. Sin esto, una ruta de proyecto
+     anidada de verdad empuja los botones fuera de la pantalla en una ventana baja, y el diálogo
+     pasa a no poder contestarse con el ratón.
+   - `title` con la ruta absoluta (lo pone `confirm-dialog.ts`): con la ventana estrecha, aunque la
+     ruta se lea a trozos, el tooltip la da entera y se puede copiar de un vistazo.
+*/
 .confirm-detail {
   margin-top: 6px !important;
   color: var(--text-faint) !important;
   font-size: var(--text-xs) !important;
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  max-height: 7.5em;
+  overflow-y: auto;
+  /* La barra de desplazamiento, si aparece, no puede pegarse a la letra. */
+  padding-right: 4px;
+  scrollbar-width: thin;
+  line-height: var(--leading-normal);
 }
 
 .dialog-body {

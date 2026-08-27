@@ -18,6 +18,13 @@
  *
  * Se reutiliza el `#overlay` de siempre, como la paleta y el diálogo de perfiles de inicio: sólo
  * puede haber un modal a la vez y así no hay dos capas peleándose por el mismo hueco.
+ *
+ * Y el `detail` es casi siempre una **ruta de archivo**, que es el peor caso posible para un
+ * contenedor flexible: una ruta de Windows no tiene ni un punto por donde partirla, así que la
+ * columna de texto se negaba a encoger y el párrafo se salía del cuadro, con el `overflow: hidden`
+ * del diálogo cortándolo a media ruta. Se arregla en el CSS (`min-width: 0` en la columna,
+ * `overflow-wrap: anywhere` y un alto máximo con desplazamiento) y aquí con el `title`, que la da
+ * entera pase lo que pase.
  */
 import { byId, clear, el } from '../dom.js';
 import { icon, type IconName } from '../icons.js';
@@ -126,7 +133,12 @@ export function askDialog(options: DialogOptions): Promise<DialogChoice> {
           {},
           el('h2', { text: options.title }),
           el('p', { text: options.message }),
-          options.detail ? el('p', { className: 'confirm-detail', text: options.detail }) : null,
+          // El `title` lleva el detalle entero. Con la ventana estrecha, la ruta se lee partida en
+          // varias líneas y con desplazamiento; el tooltip la da de una pieza, que es lo que hace
+          // falta para copiarla o para reconocerla de un vistazo.
+          options.detail
+            ? el('p', { className: 'confirm-detail', title: options.detail, text: options.detail })
+            : null,
         ),
       ),
       el('div', { className: 'dialog-footer' }, el('span', { className: 'spacer' }), cancel, alternate, confirm),
