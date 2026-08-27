@@ -390,6 +390,33 @@ const uiAction = (() => {
   return flag ? flag.slice('--ui='.length) : null;
 })();
 
+/**
+ * Abre el diálogo de publicación por el camino de una persona: botón derecho y "Publicar…".
+ *
+ * Se recorren los proyectos hasta dar con uno cuyo menú ofrezca la entrada, y eso **es** parte de la
+ * comprobación: en una solución Clean los primeros son bibliotecas, que no se publican, y el menú no
+ * debe ofrecérselo. Fijar el primero daría un fallo silencioso indistinguible de "la entrada no
+ * existe".
+ *
+ * Vive en una constante porque lo usan dos modos: el que se queda en el diálogo y el que además
+ * pulsa "Publicar".
+ */
+const UI_PUBLISH_SCRIPT =
+  '(() => {' +
+  "  const rows = [...document.querySelectorAll('.tree-row.is-project')];" +
+  '  const tryRow = (index) => {' +
+  '    if (index >= rows.length) return;' +
+  "    rows[index].dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 240, clientY: 220 }));" +
+  '    setTimeout(() => {' +
+  "      const item = [...document.querySelectorAll('.context-item')].find((entry) => entry.textContent?.includes('Publicar'));" +
+  '      if (item) { item.click(); return; }' +
+  "      document.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));" +
+  '      tryRow(index + 1);' +
+  '    }, 400);' +
+  '  };' +
+  '  tryRow(0);' +
+  '})()';
+
 const UI_ACTIONS: Record<string, string> = {
   // La barra de actividad se pulsa por `data-tool-id`, no por posición.
   //
@@ -550,16 +577,28 @@ const UI_ACTIONS: Record<string, string> = {
   /**
    * Fase 25: el diálogo de publicación, abierto por el mismo camino que lo abriría una persona.
    *
-   * Botón derecho sobre el primer proyecto del árbol y "Publicar…". Es lo único que comprueba la
-   * cadena entera: que la entrada sólo aparece en un proyecto ejecutable, que el proceso principal
-   * contesta con las últimas opciones y que el cuadro se pinta con ellas. Llamar al diálogo desde
-   * fuera se saltaría las tres cosas.
+   * Botón derecho sobre un proyecto del árbol y "Publicar…". Se recorren los proyectos hasta dar
+   * con uno cuyo menú ofrezca la entrada, y eso **es** parte de la comprobación: en una solución
+   * Clean los primeros son bibliotecas, que no se publican, y el menú no debe ofrecérselo. Fijar el
+   * primero daría un fallo silencioso indistinguible de "la entrada no existe".
    */
-  publish:
-    "document.querySelector('.tree-row.is-project')" +
-    "?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 220, clientY: 200 }));" +
-    'setTimeout(() => [...document.querySelectorAll(".context-item")]' +
-    ".find((item) => item.textContent?.includes('Publicar'))?.click(), 700)",
+  publish: UI_PUBLISH_SCRIPT,
+  /**
+   * Fase 25: publicar de verdad, y ver el resumen con su botón en el panel.
+   *
+   * Encadena el diálogo con el botón "Publicar". Tarda lo que tarde `dotnet publish` —hay que darle
+   * `--wait=` de sobra— y es la única forma de comprobar la mitad que no se ve en un diálogo: que la
+   * tarea sale, que el resumen aterriza en el canal de la tarea y que trae su "Abrir carpeta".
+   */
+  'publish-run':
+    // El `;` no es cosmético: `UI_PUBLISH_SCRIPT` termina en `})()` y sin él la concatenación
+    // produce `})()setTimeout(…)`, que es un error de sintaxis. El modo entero no se ejecuta y no
+    // pasa absolutamente nada, que es indistinguible de "publicar no funciona".
+    `${UI_PUBLISH_SCRIPT};` +
+    // 4 s y no 1,6: el diálogo tarda en abrirse lo que tarde el recorrido de proyectos (400 ms por
+    // biblioteca descartada) más la lectura de las opciones guardadas. Pulsar antes no encuentra el
+    // botón y el modo termina en silencio, que es indistinguible de "publicar no funciona".
+    "setTimeout(() => document.querySelector('.publish-dialog .btn.primary')?.click(), 4000)",
   /**
    * Fase 26: la barra lateral escondida, por el atajo de la propia cabecera.
    *

@@ -5477,12 +5477,20 @@ select.input {
   min-width: 0;
 }
 
+/*
+  Misma regla que en el aviso de cambios sin guardar: se parte donde haga falta y se acota el alto.
+  Sin el tope, una ruta de proyecto muy anidada se come media altura del cuadro y empuja el resumen
+  —que es lo que hay que leer antes de pulsar "Publicar"— fuera de la vista.
+*/
 .publish-project-path {
   overflow-wrap: anywhere;
   word-break: break-word;
   font-family: var(--font-mono);
   font-size: var(--text-xs) !important;
   color: var(--text-faint) !important;
+  max-height: 4.5em;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 .publish-body {
