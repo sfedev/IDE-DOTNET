@@ -469,3 +469,40 @@ export type {
   MonacoTokenRule,
   VsCodeThemeDocument,
 } from '../shared/vsix-contributions.js';
+
+/**
+ * Publicación de un proyecto (`dotnet publish`).
+ *
+ * Las banderas de `dotnet publish` dependen unas de otras —`PublishSingleFile` sin RID no hace
+ * nada— y la ruta de salida acaba siendo una carpeta del disco. Son reglas con casos borde de
+ * verdad: se prueban sin lanzar la CLI.
+ */
+export {
+  coercePublishOptions,
+  DEFAULT_PUBLISH_OPTIONS,
+  describePublish,
+  disabledReason,
+  effectiveRuntime,
+  isSelfContained,
+  isValidFramework,
+  isValidRuntimeIdentifier,
+  PUBLISH_CONFIGURATIONS,
+  PUBLISH_MODES,
+  PUBLISH_MODE_INFO,
+  PUBLISH_RUNTIMES,
+  publishArgs,
+  publishModeInfo,
+  publishOutputPath,
+  sanitizeOutputDir,
+  summarizePublish,
+  supportsReadyToRun,
+  supportsSingleFile,
+  supportsTrimming,
+} from '../shared/dotnet-publish.js';
+export type {
+  PublishConfiguration,
+  PublishMode,
+  PublishModeInfo,
+  PublishOptions,
+  PublishSummary,
+} from '../shared/dotnet-publish.js';
