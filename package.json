@@ -9,6 +9,9 @@
   },
   "license": "MIT",
   "private": true,
+  "engines": {
+    "node": ">=24"
+  },
   "main": "build/main.js",
   "bin": {
     "dotforge": "build/cli.js"

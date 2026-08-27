@@ -4721,3 +4721,25 @@ la prueba de humo pasa. Publicar es
 `git tag -a v2.8.0 -m "DotForge IDE 2.8.0" && git push --follow-tags`; el tag **tiene que ser
 anotado** o el push sale en verde y no se publica nada, y el workflow se para si el tag y
 `package.json` no coincidieran (ADR-060).
+
+**Mantenimiento posterior (misma sesión) — el runtime de las acciones de la CI.** Un run dejó un
+aviso de que Node 20 está obsoleto y la primera lectura fue la equivocada: `node-version:` ya decía
+24 en los tres jobs. El aviso hablaba del **otro** Node de un workflow, el que ejecuta las acciones
+en sí y que declara cada una en su `action.yml`: las seis `actions/*@v4` corren en `node20`. Se
+suben a las últimas (`checkout@v7`, `setup-node@v7`, `setup-dotnet@v6`, `cache@v6`,
+`upload-artifact@v7`, `download-artifact@v8`), todas ya en `node24`, incluidas las del bloque de
+macOS comentado — para que resucitarlo algún día no reintroduzca el runtime viejo.
+
+Comprobado antes de tocar nada: que cada major nuevo declare `using: node24`, y que ninguno haya
+renombrado los `with:` que usamos (`path`/`key`, `name`/`path`/`if-no-files-found`,
+`dotnet-version`, `node-version`, `fetch-depth` siguen existiendo los seis). La prueba estructural
+que exige que todo `uses:` sea `actions/*` no fija versiones, así que sigue protegiendo lo que
+importa —que nadie de terceros corra con el permiso de escritura— sin estorbar la subida.
+
+`package.json` gana `engines: { node: ">=24" }`. Se daba por supuesto en todas partes y no lo
+declaraba nadie: quien clone con Node 20 se entera ahora al instalar, y no al fallarle una prueba
+con un error que no menciona la versión.
+
+**Pendiente de validar:** el par `upload-artifact` / `download-artifact` salta tres majors y ya
+rompió compatibilidad una vez (v3 -> v4). Se valida con `workflow_dispatch` y `draft: true`, que
+ejercita el pipeline entero sin publicar nada que el actualizador in-app pueda ver.

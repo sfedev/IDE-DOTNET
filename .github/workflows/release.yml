@@ -71,14 +71,14 @@ jobs:
         # os: [windows-latest, macos-latest]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: |
             9.0.x
@@ -92,7 +92,7 @@ jobs:
       # entera en vez de arrastrar el problema. Sin `restore-keys`, a propósito: recuperar una
       # caché anterior es justamente lo que hay que evitar.
       - name: Cachear paquetes NuGet
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: nuget-${{ runner.os }}-v2-${{ hashFiles('src/scaffold/context.ts') }}
@@ -123,9 +123,9 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -139,7 +139,7 @@ jobs:
       - run: npm run dist:win
       - run: node scripts/verify-dist.mjs --require win
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dotforge-ide-windows
           path: |
@@ -166,11 +166,11 @@ jobs:
     steps:
       # Historial completo: las notas se componen del rango entre el tag anterior y éste, y un
       # checkout superficial deja `git log` sin nada que contar.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
 
@@ -234,13 +234,13 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: dotforge-ide-windows
           path: dist
 
       # MACOS-DESACTIVADO: cuando vuelva el job de macOS, sus artefactos se recogen aquí.
-      # - uses: actions/download-artifact@v4
+      # - uses: actions/download-artifact@v8
       #   with:
       #     name: dotforge-ide-macos
       #     path: dist
@@ -323,9 +323,9 @@ jobs:
 #    runs-on: macos-latest
 #
 #    steps:
-#      - uses: actions/checkout@v4
+#      - uses: actions/checkout@v7
 #
-#      - uses: actions/setup-node@v4
+#      - uses: actions/setup-node@v7
 #        with:
 #          node-version: 24
 #          cache: npm
@@ -339,7 +339,7 @@ jobs:
 #      - run: npm run dist:mac
 #      - run: node scripts/verify-dist.mjs --require mac
 #
-#      - uses: actions/upload-artifact@v4
+#      - uses: actions/upload-artifact@v7
 #        with:
 #          name: dotforge-ide-macos
 #          path: |

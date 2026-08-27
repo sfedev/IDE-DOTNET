@@ -1158,6 +1158,16 @@ npm run fetch:toolchain -- --platform win32 --arch x64
   además bloquea los scripts de instalación pendientes de aprobación —lo avisa con
   `packages have install scripts not yet covered by allowScripts`—, así que ni siquiera los paquetes
   que sí los declaran los ejecutan. En CI hay que instalarlo en un paso explícito.
+- **En un workflow hay dos Node, y `node-version:` sólo gobierna uno.** El que fijamos con
+  `actions/setup-node` ejecuta *nuestro* código (pruebas, esbuild, electron-builder). El otro lo
+  elige cada acción en su `action.yml` (`runs.using`) y ejecuta *la acción*: toda la generación
+  `actions/*@v4` corre en `node20`. Cuando la CI avisa de que "Node 20 está obsoleto", habla del
+  segundo, y subir `node-version: 24` —que ya estaba— no calla el aviso ni cambia nada. Se arregla
+  subiendo los `uses:`, y conviene comprobar dos cosas antes: que el major nuevo declare
+  `using: node24`, y que no haya renombrado ningún `with:` que usemos. `upload-artifact` y
+  `download-artifact` son **una pareja** y ya rompieron compatibilidad entre majors una vez, así
+  que se validan juntas con `workflow_dispatch` y `draft: true`, que no publica nada que el
+  actualizador in-app pueda ver.
 - **La API de GitHub sin autenticar da 403 en CI, no 429.** Son 60 peticiones por hora **y por IP**,
   y la IP de un runner compartido está agotada casi siempre. El mensaje no menciona el límite, así
   que parece un problema de permisos o de red. Con `GITHUB_TOKEN` en el entorno son 5 000/hora.
