@@ -47,6 +47,12 @@ Botón derecho sobre un proyecto, eliges destino y modo, y el IDE deja la carpet
 para abrirla. Y ordena la ventana: la **barra lateral se esconde** con `Ctrl+B`, y las **pestañas
 dicen de qué proyecto son** —una franja de color por proyecto y la tira colocable a un lado—, que es
 lo que hace navegable una solución con cinco `Program.cs` abiertos.
+La v2.8.0 hace que **actualizarse se explique**. Antes de cerrarse, el IDE te dice qué va a pasar:
+cuánto tarda la instalación, quién la termina y si la aplicación vuelve sola —el botón dice "Cerrar
+e instalar", que es lo que hace—. Y al volver te cuenta cómo fue: **"✅ ¡Actualizado con éxito!"**
+con las novedades de la versión, o el aviso de que la instalación no llegó a completarse —porque se
+canceló el permiso de Windows, por ejemplo— con el botón para reintentarla sin volver a descargar
+nada.
 
 ![DotForge IDE con una solución DDD abierta](docs/screenshot-workspace.png)
 

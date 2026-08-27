@@ -902,8 +902,8 @@ app.on('before-quit', () => {
 /**
  * Actualización pendiente: éste es el único momento en el que se puede aplicar.
  *
- * Va en `will-quit` y **no** en `before-quit`, que es donde estuvo hasta ahora, por una razón
- * concreta: `before-quit` se emite al *empezar* a cerrar, y el cierre todavía se puede cancelar
+ * Va en `will-quit` y **no** en `before-quit`, que es donde estuvo de la v2.1.0 a la v2.7.0, por
+ * una razón concreta: `before-quit` se emite al *empezar* a cerrar, y el cierre se puede cancelar
  * después. El aviso de cambios sin guardar del renderer hace exactamente eso —para el
  * `beforeunload`, pregunta, y con "Seguir editando" anula la salida—, así que el instalador se
  * lanzaba igual y se ponía a reemplazar los archivos de una aplicación que se quedaba abierta,

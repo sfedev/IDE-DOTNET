@@ -4,7 +4,7 @@ Bitácora viva de desarrollo. Se actualiza **en cada iteración** del bucle de t
 
 - **Proyecto:** DotForge IDE — distribución de IDE para C# / .NET 9+ / Blazor
 - **Inicio:** 2026-08-23
-- **Estado global:** 🟢 v2.7.0 — 27 fases cerradas, 387/388 hitos. El único pendiente (F5.7, artefactos de macOS) está bloqueado por plataforma y documentado en la Fase 5.
+- **Estado global:** 🟢 v2.8.0 — 27 fases cerradas, 387/388 hitos. El único pendiente (F5.7, artefactos de macOS) está bloqueado por plataforma y documentado en la Fase 5.
 
 Leyenda: `[ ]` pendiente · `[~]` en curso · `[x]` completado y **verificado con un comando**
 
@@ -4709,3 +4709,15 @@ instalación movida de `before-quit` a `will-quit`.
 - `npx electron . --smoke-test` → `SMOKE_OK`.
 - `npm test` entero en verde: **1597 pruebas unitarias** (1567 antes), 88 de seguridad, 76 de
   empaquetado y las tres arquitecturas compilando y pasando las suyas.
+
+**Subida de versión:** `package.json` pasa a **2.8.0**. La v2.7.0 ya está etiquetada y empujada
+(`v2.7.0` anotado en `origin`), así que estos tres commits van encima de una versión publicada y no
+podían salir con su número: el actualizador decide si hay algo nuevo comparando el tag, y una
+release cuyo `package.json` dijera 2.7.0 dejaría una instalación pendiente que sigue siendo "más
+nueva" que la que corre — se reinstalaría en cada cierre, indefinidamente (ADR-060).
+
+**Estado de la v2.8.0:** lista para etiquetar. `package.json` dice 2.8.0, la suite está en verde y
+la prueba de humo pasa. Publicar es
+`git tag -a v2.8.0 -m "DotForge IDE 2.8.0" && git push --follow-tags`; el tag **tiene que ser
+anotado** o el push sale en verde y no se publica nada, y el workflow se para si el tag y
+`package.json` no coincidieran (ADR-060).

@@ -14,11 +14,11 @@ Su módulo estrella es el **Scaffolding Wizard**: un generador de arquitecturas 
 que produce soluciones .NET **compilables y ejecutables** siguiendo Clean Architecture,
 Arquitectura Hexagonal (Ports & Adapters) o Domain-Driven Design + CQRS.
 
-El **actualizador in-app deja de ser mudo** en los dos extremos del gesto: antes de cerrarse
-pregunta, diciendo cuánto tarda la instalación, quién la termina y si la aplicación vuelve sola —el
-botón dice "Cerrar e instalar", no "Reiniciar y aplicar", porque el IDE no reinicia—, y en el
-arranque siguiente cuenta lo que pasó: "✅ ¡Actualizado con éxito!" con las novedades de la versión,
-o el aviso de que la instalación no llegó a completarse, con el botón para reintentarla.
+Desde la v2.8.0 el **actualizador in-app deja de ser mudo** en los dos extremos del gesto: antes de
+cerrarse pregunta, diciendo cuánto tarda la instalación, quién la termina y si la aplicación vuelve
+sola —el botón dice "Cerrar e instalar", no "Reiniciar y aplicar", porque el IDE no reinicia—, y en
+el arranque siguiente cuenta lo que pasó: "✅ ¡Actualizado con éxito!" con las novedades de la
+versión, o el aviso de que la instalación no llegó a completarse, con el botón para reintentarla.
 
 Desde la v2.7.0 el IDE **publica un proyecto** (`dotnet publish` desde el menú contextual, con su
 diálogo de destinos y modos, la salida en el panel y un botón para abrir la carpeta del resultado),
@@ -291,10 +291,10 @@ La release de GitHub es lo único que el actualizador in-app puede leer, así qu
 del empaquetado, no un trámite posterior. Lo hace la CI al ver el tag:
 
 ```bash
-npm version 2.7.0 --no-git-tag-version && git commit -am "v2.7.0" && git tag -a v2.7.0 -m "DotForge IDE 2.7.0" && git push --follow-tags
+npm version 2.8.0 --no-git-tag-version && git commit -am "v2.8.0" && git tag -a v2.8.0 -m "DotForge IDE 2.8.0" && git push --follow-tags
 ```
 
-- `node scripts/release-notes.mjs --tag v2.7.0` — enseña las notas que se van a publicar, antes de
+- `node scripts/release-notes.mjs --tag v2.8.0` — enseña las notas que se van a publicar, antes de
   empujar nada. Acepta `--previous`, `--artifacts dist` y `--output <archivo>`.
 - **El tag tiene que ser anotado (`-a`).** `git push --follow-tags` **sólo empuja los anotados**: con
   un tag ligero el push sale en verde, el tag se queda en local, el workflow no se dispara y parece
