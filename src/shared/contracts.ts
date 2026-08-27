@@ -724,6 +724,16 @@ export interface AppSettings {
    */
   restoreTerminals: boolean;
   /**
+   * Barra lateral a la vista.
+   *
+   * Se guarda porque quien la esconde para leer código lo hace durante un rato largo, no durante
+   * un minuto: reabrir el IDE y encontrársela otra vez ahí obliga a esconderla en cada arranque.
+   * Lo que **no** se esconde nunca es la barra de actividad: con ella fuera, volver a enseñar la
+   * lateral exigiría recordar el atajo, y una interfaz de la que no se puede salir mirando no es
+   * una interfaz.
+   */
+  sidebarVisible: boolean;
+  /**
    * Personalización de la barra de actividad.
    *
    * `order` son identificadores de herramienta (`ACTIVITY_TOOLS` en `src/shared/activity-bar.ts`),
@@ -754,6 +764,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   dotnetVerbosity: DEFAULT_DOTNET_VERBOSITY,
   autoUpdateCheck: true,
   restoreTerminals: true,
+  sidebarVisible: true,
   activityBar: { order: DEFAULT_ACTIVITY_ORDER },
   ai: DEFAULT_AI_SETTINGS,
 };
@@ -940,6 +951,7 @@ export type MenuCommand =
   | 'edit.go-to-definition'
   | 'edit.rename'
   | 'view.command-palette'
+  | 'view.toggle-sidebar'
   | 'view.explorer'
   | 'view.source-control'
   | 'view.nuget'

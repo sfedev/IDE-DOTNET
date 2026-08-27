@@ -181,6 +181,11 @@ export function buildMenuTemplate(options: MenuTemplateOptions): MenuSection[] {
       items: [
         command('Paleta de comandos', 'view.command-palette', 'CmdOrCtrl+Shift+P'),
         separator,
+        // `Ctrl+B` es donde lo busca todo el mundo, y aquí estaba libre. La entrada dice
+        // "Barra lateral" y no "Ocultar la barra lateral": el menú es estático en Electron una vez
+        // puesto, así que una etiqueta que dependa del estado mentiría la mitad del tiempo.
+        command('Barra lateral', 'view.toggle-sidebar', 'CmdOrCtrl+B'),
+        separator,
         command('Explorador de soluciones', 'view.explorer', 'CmdOrCtrl+Shift+E'),
         command('Buscar en los archivos', 'search.findInFiles'),
         command('Control de código fuente', 'view.source-control', 'CmdOrCtrl+Shift+G'),

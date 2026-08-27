@@ -137,8 +137,25 @@ body {
   overflow: hidden;
 }
 
+/*
+  Barra lateral escondida (Ctrl+B).
+
+  Las dos columnas se van a cero, y además hay que apagar los bordes: una columna de 0 px con
+  `border-right: 1px` sigue pintando esa raya, y el resultado es un filo suelto pegado a la barra de
+  actividad que se lee como un error de dibujo. `display: none` no vale aquí: el `<aside>` conserva
+  su estado interno y las vistas siguen midiendo su ancho al repintar.
+*/
 .body.sidebar-collapsed {
   grid-template-columns: var(--activitybar-width) 0 0 1fr;
+}
+
+.body.sidebar-collapsed .sidebar {
+  border-right: none;
+  visibility: hidden;
+}
+
+.body.sidebar-collapsed .resizer {
+  pointer-events: none;
 }
 
 .activitybar {

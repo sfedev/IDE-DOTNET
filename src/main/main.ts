@@ -560,6 +560,14 @@ const UI_ACTIONS: Record<string, string> = {
     "?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 220, clientY: 200 }));" +
     'setTimeout(() => [...document.querySelectorAll(".context-item")]' +
     ".find((item) => item.textContent?.includes('Publicar'))?.click(), 700)",
+  /**
+   * Fase 26: la barra lateral escondida, por el atajo de la propia cabecera.
+   *
+   * Se pulsa el botón de la cabecera y no se llama al comando: lo que hay que revisar a ojo es que
+   * el editor **recupere el ancho** —Monaco pintaba una franja en blanco a la derecha hasta que su
+   * observador se enteraba— y eso sólo se ve si el camino es el de verdad.
+   */
+  sidebar: "document.querySelector('#sidebar-toggle button')?.click()",
   nesting:
     "[...document.querySelectorAll('.tree-row')]" +
     ".find((row) => row.textContent?.includes('appsettings.json'))" +

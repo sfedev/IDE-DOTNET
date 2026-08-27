@@ -54,7 +54,7 @@ function coerce(raw: unknown): AppSettings {
     settings.tabSize = Math.round(source['tabSize']);
   }
   for (const flag of [
-    'wordWrap', 'minimap', 'formatOnSave', 'lspEnabled', 'autoUpdateCheck', 'restoreTerminals',
+    'wordWrap', 'minimap', 'formatOnSave', 'lspEnabled', 'autoUpdateCheck', 'restoreTerminals', 'sidebarVisible',
   ] as const) {
     if (typeof source[flag] === 'boolean') settings[flag] = source[flag];
   }

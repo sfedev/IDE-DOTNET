@@ -631,6 +631,21 @@ export class EditorView {
    * pantalla de bienvenida. Sólo uno se ve a la vez, y la bienvenida sólo cuando no hay nada
    * abierto de ninguno de los dos tipos.
    */
+  /**
+   * Recalcula el tamaño del editor.
+   *
+   * `automaticLayout: true` observa el contenedor con un `ResizeObserver`, así que en el caso
+   * normal esto no hace falta. Sí hace falta cuando lo que cambia es la **rejilla** que envuelve al
+   * contenedor —esconder la barra lateral, mover la tira de pestañas a un lado—: la notificación
+   * llega en el fotograma siguiente y hasta entonces Monaco pinta con el ancho viejo, que se ve
+   * como una franja en blanco a la derecha del código. Pedirlo a mano lo resuelve en el mismo
+   * fotograma, y llamarlo de más no cuesta nada.
+   */
+  layout(): void {
+    this.editor?.layout();
+    this.diffEditor?.layout();
+  }
+
   private updateVisibility(): void {
     const showingDiff = this.activeDiff !== null;
     const hasCode = this.activePath !== null;

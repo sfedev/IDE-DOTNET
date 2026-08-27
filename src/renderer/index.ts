@@ -380,6 +380,7 @@ class DotForgeApp {
 
     this.renderActivityBar();
     this.renderTitlebarActions();
+    this.applySidebarVisibility(this.settings.sidebarVisible);
     this.startupBar.mount(byId('titlebar-startup'));
     this.registerCommands();
     this.installEventBridges();
@@ -1306,8 +1307,67 @@ class DotForgeApp {
     return node;
   }
 
+  /**
+   * Enseña u oculta la barra lateral.
+   *
+   * Tres cosas, y ninguna sobra:
+   *  - la clase sobre `.body`, que es quien lleva la rejilla de columnas;
+   *  - la preferencia, porque quien la esconde para leer código lo hace durante un rato largo y
+   *    encontrársela otra vez ahí en cada arranque obliga a esconderla en cada arranque;
+   *  - `editor.layout()`, porque lo que cambia es la rejilla que envuelve al editor y no su
+   *    contenedor: el `ResizeObserver` de Monaco se entera en el fotograma siguiente y hasta
+   *    entonces se ve una franja en blanco a la derecha del código.
+   *
+   * Lo que **no** se esconde es la barra de actividad: con ella fuera, volver a enseñar la lateral
+   * exigiría recordar el atajo.
+   */
+  private toggleSidebar(visible?: boolean): void {
+    const next = visible ?? !(this.settings?.sidebarVisible ?? true);
+
+    this.applySidebarVisibility(next);
+    void this.applySettings({ sidebarVisible: next });
+  }
+
+  /** Aplica el estado al DOM. Se llama al arrancar y en cada alternancia. */
+  private applySidebarVisibility(visible: boolean): void {
+    byId('body').classList.toggle('sidebar-collapsed', !visible);
+    this.renderSidebarActions();
+    this.editor.layout();
+    this.panel.fitTerminal();
+  }
+
+  /**
+   * Botón de ocultar en la cabecera de la barra lateral.
+   *
+   * Va aquí y no en cada vista porque la cabecera es común: es la barra lateral la que se esconde,
+   * no el explorador. Se pinta atenuado —es una acción de chrome, no de contenido— y sólo cuando la
+   * barra está a la vista, que es el único momento en el que se puede pulsar.
+   */
+  private renderSidebarActions(): void {
+    const host = byId('sidebar-toggle');
+    clear(host);
+
+    const modifier = this.info?.primaryModifier ?? 'Ctrl';
+    host.appendChild(
+      el(
+        'button',
+        {
+          className: 'icon-btn sidebar-toggle-btn',
+          title: `Ocultar la barra lateral (${modifier}+B)`,
+          attrs: { 'aria-label': 'Ocultar la barra lateral' },
+          on: { click: () => this.toggleSidebar(false) },
+        },
+        icon('sidebar', { size: 15 }),
+      ),
+    );
+  }
+
   /** Deja visible una sola vista de la barra lateral: comparten contenedor. */
   private showSidebar(view: SidebarView): void {
+    // Pulsar una herramienta con la barra escondida la trae de vuelta: es lo que espera quien
+    // acaba de pulsar un icono y no ve aparecer nada.
+    if (this.settings?.sidebarVisible === false) this.toggleSidebar(true);
+
     this.sidebarView = view;
     this.explorer.setVisible(view === 'explorer');
     this.searchView.setVisible(view === 'search');
@@ -2249,6 +2309,16 @@ class DotForgeApp {
         run: () => this.panel.show('http'),
       },
       {
+        id: 'view.toggle-sidebar',
+        // El nombre de VS Code se acepta como alias: quien busca esto lo busca por ahí.
+        aliases: ['workbench.action.toggleSidebar'],
+        icon: 'sidebar',
+        title: 'Mostrar u ocultar la barra lateral',
+        group: 'Ver',
+        keybinding: `${modifier}+B`,
+        run: () => this.toggleSidebar(),
+      },
+      {
         id: 'view.command-palette',
         icon: 'command',
         title: 'Paleta de comandos',
@@ -2416,7 +2486,10 @@ class DotForgeApp {
   }
 
   private async runCommandById(id: string): Promise<void> {
-    const command = this.palette.getCommands().find((entry) => entry.id === id);
+    const command = this.palette
+      .getCommands()
+      .find((entry) => entry.id === id || (entry.aliases?.includes(id) ?? false));
+
     if (command) await command.run();
   }
 

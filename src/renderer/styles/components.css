@@ -5476,3 +5476,18 @@ select.input {
   background: var(--accent-soft);
   border-color: var(--accent);
 }
+
+/*
+  Ocultar la barra lateral, desde su propia cabecera.
+
+  Atenuado a propósito: es una acción de chrome, no de contenido, y compite en la misma fila con
+  las acciones de la vista (filtrar, refrescar), que sí lo son. Al pasar el ratón sube a `--text`,
+  como el resto de los `icon-btn`.
+*/
+.sidebar-toggle-btn {
+  color: var(--text-faint);
+}
+
+.sidebar-toggle-btn:hover {
+  color: var(--text-strong);
+}

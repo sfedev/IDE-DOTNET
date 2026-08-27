@@ -42,13 +42,16 @@
         <div class="titlebar-actions" id="titlebar-actions"></div>
       </header>
 
-      <div class="body">
+      <div class="body" id="body">
         <nav class="activitybar" id="activitybar" aria-label="Barra de actividad"></nav>
 
         <aside class="sidebar" id="sidebar">
           <div class="sidebar-header">
             <span id="sidebar-title">Explorador</span>
+            <!-- Las acciones de la vista y, al final, la de ocultar la barra entera. Van separadas
+                 porque `sidebar-actions` lo vacía y repinta cada vista al hacerse visible. -->
             <div class="sidebar-actions" id="sidebar-actions"></div>
+            <div class="sidebar-actions" id="sidebar-toggle"></div>
           </div>
           <div class="sidebar-content" id="sidebar-content"></div>
         </aside>

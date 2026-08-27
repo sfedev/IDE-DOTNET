@@ -79,6 +79,9 @@ export class SettingsView {
         this.stepperRow('Tabulación', settings.tabSize, 1, 8, (value) => this.host.apply({ tabSize: value })),
         this.toggleRow('Minimapa', settings.minimap, (value) => this.host.apply({ minimap: value })),
         this.toggleRow('Ajuste de línea', settings.wordWrap, (value) => this.host.apply({ wordWrap: value })),
+        this.toggleRow('Barra lateral a la vista', settings.sidebarVisible, (value) =>
+          this.host.apply({ sidebarVisible: value }),
+        ),
         this.activityOrderRow(settings.activityBar.order),
       ]),
 

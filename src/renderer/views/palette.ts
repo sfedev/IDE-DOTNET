@@ -9,6 +9,15 @@ import { icon, type IconName } from '../icons.js';
 
 export interface Command {
   id: string;
+  /**
+   * Otros nombres por los que se puede invocar el comando.
+   *
+   * Existen para los identificadores que la gente ya se sabe de otro editor: quien busca cómo
+   * ocultar la barra lateral escribe `workbench.action.toggleSidebar`, que es como se llama en VS
+   * Code, y no `view.toggle-sidebar`. Los ids propios siguen la convención del IDE —`view.*`,
+   * `build.*`— y no se cambian por esto; se aceptan los dos.
+   */
+  aliases?: readonly string[];
   title: string;
   group: string;
   keybinding?: string;
