@@ -32,6 +32,7 @@ import { delimiter, extname, isAbsolute, join } from 'node:path';
 import {
   findProfile,
   resolveLaunch,
+  substitutionNotice,
   unavailableReason,
   type TerminalProfile,
 } from '../../shared/terminal-profiles.js';
@@ -73,6 +74,13 @@ export interface PtySessionInfo {
   file: string;
   pid: number;
   cwd: string;
+  /**
+   * Aviso a enseñar en la pestaña antes de la primera línea del intérprete.
+   *
+   * Sólo viene cuando se ha lanzado con una alternativa del catálogo en vez de con el programa
+   * principal del perfil. Ausente en el caso normal.
+   */
+  notice?: string;
 }
 
 export interface PtyCallbacks {
@@ -314,12 +322,17 @@ export async function create(options: CreateOptions, callbacks: PtyCallbacks): P
     );
   }
 
+  // Si se ha arrancado con una alternativa, la pestaña lo dice. Callarlo dejaba al usuario con una
+  // terminal que tardaba o fallaba sin motivo aparente.
+  const notice = substitutionNotice(profile, launch);
+
   const info: PtySessionInfo = {
     terminalId,
     profileId: profile.id,
     file: launch.file,
     pid: child.pid,
     cwd: options.cwd,
+    ...(notice === null ? {} : { notice }),
   };
 
   sessions.set(terminalId, { info, process: child });

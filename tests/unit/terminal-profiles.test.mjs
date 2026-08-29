@@ -32,6 +32,7 @@ import {
   profilesFor,
   ptyService,
   resolveLaunch,
+  substitutionNotice,
   unavailableReason,
   PtyUnavailableError,
   TERMINAL_PROFILES,
@@ -304,6 +305,74 @@ describe('resolución del programa a lanzar', () => {
 
   it('sin ninguna de las cuatro, no hay con qué lanzarlo', async () => {
     assert.equal(await resolveLaunch(claude, only()), null);
+  });
+
+  /**
+   * Lo que se lanzó y lo que se pidió no son lo mismo, y la diferencia se conserva.
+   *
+   * Sin ella no hay forma de saber si se está usando la instalación del usuario o un sustituto,
+   * porque `file` trae la ruta ya resuelta y `/fake/bin/npx` no se parece a "claude".
+   */
+  it('la resolución dice con qué se pidió lanzar, no sólo con qué se lanzó', async () => {
+    const principal = await resolveLaunch(claude, only('claude'));
+    assert.equal(principal.requested, 'claude');
+    assert.equal(principal.substituted, false);
+
+    const sustituto = await resolveLaunch(claude, only('npx'));
+    assert.equal(sustituto.requested, 'npx');
+    assert.equal(sustituto.substituted, true);
+  });
+
+  it('un intérprete del sistema nunca se marca como sustituido', async () => {
+    // No tiene alternativas: o está el programa del perfil, o no hay terminal.
+    const pwsh = await resolveLaunch(findProfile('pwsh'), only('pwsh.exe'));
+    assert.equal(pwsh.substituted, false);
+    assert.equal(pwsh.requested, 'pwsh.exe');
+  });
+});
+
+/**
+ * El aviso de sustitución.
+ *
+ * Nace de un fallo real y difícil de adivinar: con `claude` instalado por el instalador nativo, un
+ * IDE abierto desde un Explorador anterior a esa instalación hereda un `PATH` sin su carpeta, no lo
+ * encuentra, y acaba lanzando `npx`, que descarga otra copia de la red. El usuario veía una pestaña
+ * lentísima o rota teniendo Claude Code perfectamente instalado.
+ */
+describe('avisar de que se ha lanzado otra cosa', () => {
+  const claude = findProfile('claude');
+  const only = (...installed) => async (file) => (installed.includes(file) ? `/fake/bin/${file}` : null);
+
+  it('con el programa principal no se avisa de nada', async () => {
+    const launch = await resolveLaunch(claude, only('claude'));
+    assert.equal(substitutionNotice(claude, launch), null);
+  });
+
+  it('con npx se dice qué falta, con qué se ha arrancado y que no es la instalación local', async () => {
+    const launch = await resolveLaunch(claude, only('npx'));
+    const aviso = substitutionNotice(claude, launch);
+
+    assert.match(aviso, /No he encontrado «claude» en el PATH/);
+    assert.match(aviso, /npx --yes @anthropic-ai\/claude-code/);
+    assert.match(aviso, /no es tu instalación local/);
+    // Y qué hacer: sin esto el aviso describe el problema y deja al usuario igual.
+    assert.match(aviso, /reinicia el IDE/);
+  });
+
+  it('con otra forma de instalarlo se avisa igual, pero sin hablar de descargas', async () => {
+    // `claude.cmd` es una instalación local de verdad, la de npm: no se descarga nada.
+    const launch = await resolveLaunch(claude, only('claude.cmd'));
+    const aviso = substitutionNotice(claude, launch);
+
+    assert.match(aviso, /No he encontrado «claude» en el PATH/);
+    assert.match(aviso, /claude\.cmd/);
+    assert.doesNotMatch(aviso, /descarga/);
+  });
+
+  it('el aviso nombra el programa del perfil, no el que se acabó lanzando', async () => {
+    // Decir "no he encontrado npx" cuando lo que falta es claude manda a mirar donde no toca.
+    const launch = await resolveLaunch(claude, only('npx'));
+    assert.match(substitutionNotice(claude, launch), /«claude»/);
   });
 
   /**

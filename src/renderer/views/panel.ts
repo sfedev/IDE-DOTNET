@@ -1660,6 +1660,16 @@ export class PanelView {
       exited: false,
     };
 
+    // El aviso va ANTES de que el intérprete escriba su primera línea: si se pone después, queda
+    // enterrado bajo el banner de PowerShell o bajo lo que npx esté descargando, que es justo
+    // cuando el usuario necesita leerlo.
+    if (session.notice !== undefined) {
+      for (const line of session.notice.split('\n')) {
+        created.term.writeln(`\x1b[33m${line}\x1b[0m`);
+      }
+      created.term.writeln('');
+    }
+
     created.term.onData((data) => void window.dotforge.terminal.write(session.terminalId, data));
     created.term.onResize(({ cols, rows }) => void window.dotforge.terminal.resize(session.terminalId, cols, rows));
 

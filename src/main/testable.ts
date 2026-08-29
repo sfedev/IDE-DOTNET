@@ -90,11 +90,17 @@ export {
   launchCandidates,
   profilesFor,
   resolveLaunch,
+  substitutionNotice,
   TERMINAL_PROFILES,
   terminalTabName,
   unavailableReason,
 } from '../shared/terminal-profiles.js';
-export type { TerminalKind, TerminalLaunch, TerminalProfile } from '../shared/terminal-profiles.js';
+export type {
+  ResolvedLaunch,
+  TerminalKind,
+  TerminalLaunch,
+  TerminalProfile,
+} from '../shared/terminal-profiles.js';
 
 export * as ptyService from './services/terminal-pty-service.js';
 export { MAX_PTY_SESSIONS, MAX_WRITE_CHARS, PtyUnavailableError } from './services/terminal-pty-service.js';

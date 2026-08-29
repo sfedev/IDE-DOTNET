@@ -4819,3 +4819,60 @@ sobre `master` en `6fdba1d`, `tag=v2.8.0`, `dry_run=true`):
 un fallo real, pero tocar la lógica de publicación tiene su propio riesgo —mal hecho, convierte una
 release publicada en borrador y la saca del feed— y no era lo que había que validar hoy. Queda
 anotado aquí y en `CLAUDE.md`; el ensayo, que es lo que hacía falta, ya no depende de ello.
+
+### Iteración 39 — 2026-08-30 — La alternativa de `claude` deja de ser muda
+
+**Objetivo:** un reporte de "Claude CLI no está funcionando" con Claude Code perfectamente
+instalado y una pestaña que tardaba muchísimo o fallaba sin decir nada.
+
+**Diagnóstico.** El montaje del ADR-062 estaba bien: el catálogo, la resolución inyectada, `PATHEXT`
+y la ruta ya resuelta. Lo que falló fue el entorno, y de una forma que nadie adivina:
+
+1. `claude` se instaló con el instalador nativo, que lo deja en `~/.local/bin` y añade esa carpeta
+   al `PATH` **del registro**.
+2. `explorer.exe` llevaba en marcha desde antes de esa instalación. Windows congela el entorno de un
+   proceso al arrancarlo, y todo lo que lanza hereda **ese** bloque, no el registro.
+3. El IDE, abierto desde ese Explorador, recibió un `PATH` sin `~/.local/bin`.
+4. `resolveLaunch` no encontró `claude`, ni `claude.cmd`, ni `claude.exe`, y **sí** encontró `npx`.
+   Así que arrancó `npx --yes @anthropic-ai/claude-code`, que descarga otra copia de la red.
+
+Comprobado sobre la máquina: el `PATH` que reparte el Explorador no tiene `.local\bin` y el del
+registro sí; la carpeta global de npm está vacía y la caché de npx no tiene el paquete, así que
+cada apertura era una descarga.
+
+**El fallo no era la alternativa: era el silencio.** La cadena de respaldo hizo exactamente lo que
+promete el ADR-062 —que quien tenga `claude` instalado de cualquiera de las tres maneras pueda
+abrirlo—, pero al sustituir no lo dijo. El usuario tenía su instalación local y el IDE estaba usando
+otra sin mencionarlo.
+
+**Hecho:**
+- `resolveLaunch` devuelve `ResolvedLaunch`: además de la ruta, **con qué se pidió lanzar**
+  (`requested`) y si hubo sustitución (`substituted`). Hacía falta porque `file` trae la ruta ya
+  resuelta y `C:\...\npx.CMD` no se parece en nada a "claude".
+- `substitutionNotice()` compone el aviso: qué falta, con qué se ha arrancado, que eso no es la
+  instalación local y qué hacer —reiniciar el IDE, y el Explorador o la sesión si se instaló con la
+  sesión ya abierta—.
+- El aviso viaja en `TerminalSessionInfo.notice` y el panel lo escribe en la pestaña **antes** de la
+  primera línea del intérprete. Después queda enterrado bajo lo que npx esté descargando, que es
+  justo cuando hace falta leerlo.
+- Seis pruebas nuevas en `terminal-profiles.test.mjs`. Una comprueba que el aviso nombra **`claude`**
+  y no `npx`: decir "no he encontrado npx" manda a mirar donde no toca.
+
+**Verificado:** `npm run test:unit` en verde (1 604), `tsc --noEmit` limpio, y el servicio abriendo
+intérpretes de verdad en un directorio temporal: `powershell` no trae aviso y `claude`, con el `PATH`
+sin `.local\bin`, resuelve a `npx.CMD` **y trae el aviso entero**.
+
+**Errores encontrados:**
+- *Síntoma:* la prueba nueva reventaba con `SyntaxError: Invalid regular expression flags`.
+  *Causa raíz:* la trampa ya anotada en la Iteración 38 —un heredoc se come un nivel de escapes—,
+  esta vez sobre `/@anthropic-ai\/claude-code/`, que se quedó en `/@anthropic-ai/claude-code/`.
+  *Arreglo:* escribir las expresiones regulares con la herramienta de edición, no a través del
+  heredoc. Van ya tres veces.
+
+**Lo que no se ha hecho, y por qué:** no se comprobó el aviso en la ventana real. El IDE instalado
+estaba abierto y `requestSingleInstanceLock()` no tiene excepción para los modos de diagnóstico, así
+que una segunda instancia se cierra sola. Cerrar el IDE del usuario para mirar una línea amarilla no
+compensa: la cadena entera está cubierta por las pruebas y el servicio se ejercitó de verdad.
+
+**Siguiente:** nada pendiente de esto. Si el bloqueo de instancia única molesta para diagnosticar,
+merecería su propia decisión: hoy impide `--smoke-test` y `--probe=` con el IDE abierto.

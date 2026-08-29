@@ -613,6 +613,13 @@ export interface TerminalSessionInfo {
   file: string;
   pid: number;
   cwd: string;
+  /**
+   * Aviso a escribir en la pestaña antes de la primera línea del intérprete.
+   *
+   * Sólo llega cuando el perfil se ha lanzado con una alternativa del catálogo y no con su
+   * programa principal, que es un caso que el usuario no tiene forma de adivinar.
+   */
+  notice?: string;
 }
 
 /** Trozo de salida de una sesión de pseudoterminal, con sus secuencias de escape intactas. */

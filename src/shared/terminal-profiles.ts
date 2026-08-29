@@ -27,6 +27,21 @@ export interface TerminalLaunch {
   args: readonly string[];
 }
 
+/**
+ * Con qué se acabó lanzando, y si eso es lo que el perfil pedía.
+ *
+ * `requested` es el programa del catálogo, antes de resolver; `file` es la ruta que salió de
+ * buscarlo. La diferencia importa cuando se ha usado una alternativa: `npx --yes
+ * @anthropic-ai/claude-code` no es "claude", es **otra instalación** que se descarga de la red, y
+ * el usuario tiene derecho a saber que no está usando la suya.
+ */
+export interface ResolvedLaunch extends TerminalLaunch {
+  /** El programa que declara el perfil, tal cual está en el catálogo. */
+  requested: string;
+  /** true si el principal no estaba y se ha recurrido a una alternativa. */
+  substituted: boolean;
+}
+
 export interface TerminalProfile {
   id: string;
   label: string;
@@ -188,10 +203,19 @@ export function launchCandidates(profile: TerminalProfile): TerminalLaunch[] {
 export async function resolveLaunch(
   profile: TerminalProfile,
   resolveProgram: (file: string) => Promise<string | null>,
-): Promise<TerminalLaunch | null> {
-  for (const candidate of launchCandidates(profile)) {
+): Promise<ResolvedLaunch | null> {
+  const candidates = launchCandidates(profile);
+  for (const [index, candidate] of candidates.entries()) {
     const resolved = await resolveProgram(candidate.file);
-    if (resolved !== null) return { file: resolved, args: candidate.args };
+    if (resolved !== null) {
+      return {
+        file: resolved,
+        args: candidate.args,
+        requested: candidate.file,
+        // La primera del catálogo es la que el perfil pide; cualquier otra es un sustituto.
+        substituted: index > 0,
+      };
+    }
   }
   return null;
 }
@@ -205,6 +229,39 @@ export async function resolveLaunch(
 export function unavailableReason(profile: TerminalProfile): string {
   const missing = `${profile.file ?? profile.id} no está instalado.`;
   return profile.install === undefined ? missing : `${missing} ${profile.install}`;
+}
+
+/**
+ * Qué decir cuando se ha lanzado con una alternativa, o `null` si se usó la principal.
+ *
+ * Existe por un fallo real y difícil de adivinar. `claude` instalado con el instalador nativo vive
+ * en una carpeta que **el instalador añade al `PATH` del registro**, pero un proceso ya en marcha
+ * —el Explorador de Windows, entre otros— conserva el `PATH` que tenía al arrancar y se lo pasa a
+ * todo lo que lanza. Con el IDE abierto desde ese Explorador, `claude` no se encuentra, la búsqueda
+ * sigue bajando por el catálogo y acaba en `npx`, que **descarga otra copia distinta** de la red.
+ *
+ * Lo que veía el usuario era una pestaña que tardaba muchísimo o fallaba sin explicar nada, con su
+ * Claude Code perfectamente instalado. El silencio era el problema: la alternativa hacía su trabajo
+ * y no decía que estaba usando otra cosa.
+ *
+ * El aviso no interrumpe ni pregunta: se escribe en la propia pestaña, antes de la primera línea
+ * del intérprete, y dice qué falta, con qué se ha arrancado y qué hacer.
+ */
+export function substitutionNotice(profile: TerminalProfile, launch: ResolvedLaunch): string | null {
+  if (!launch.substituted) return null;
+
+  const usado = [launch.requested, ...launch.args].join(' ');
+  const detalle =
+    launch.requested === 'npx'
+      ? `Eso descarga el paquete de npm, que no es tu instalación local.`
+      : `Es otra forma de instalarlo, no la que declara el perfil.`;
+
+  return [
+    `No he encontrado «${profile.file}» en el PATH.`,
+    `Arranco con «${usado}». ${detalle}`,
+    `Si lo tienes instalado, su carpeta no está en el PATH de este proceso: reinicia el IDE`,
+    `—y si lo instalaste con la sesión ya abierta, reinicia también el Explorador o la sesión—.`,
+  ].join('\n');
 }
 
 /**
