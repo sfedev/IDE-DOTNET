@@ -1609,6 +1609,60 @@ pequeño y murió en el grande.
   `UnhandledPromiseRejectionWarning: EPERM` y hay que matarlo; el corregido escribe un aviso y llega
   a `SMOKE_OK`.
 
+### ADR-069 — Cada release publica sus sumas SHA-256, y la firma queda cableada y vacía
+**Fecha:** 2026-09-08
+**Contexto:** Instalando el `Setup-x64.exe` de la v2.9.1 —descargado de la propia release, en un
+equipo corporativo, y eligiendo "solo para mí"— Sophos Intercept X abortó la instalación con
+*"Comportamiento malicioso 'lockdown' evitado en IDE de escritorio para C#"*. `lockdown` es
+Application Lockdown, una regla de comportamiento, no una firma de malware; y la secuencia que ve
+es: un `.exe` sin firmar bajado de internet escribe **otro** `.exe` sin firmar en
+`%LOCALAPPDATA%\Programs` —sin pedir elevación, porque `perMachine: false`—, lo ejecuta al
+instante (`runAfterFinish: true`) y ese proceso llama a la API de GitHub cinco segundos después.
+Ninguno de los cuatro pasos es malicioso y los cuatro juntos son la definición de un *dropper*.
+
+El diagnóstico no es lo que se decide aquí. Lo que se decide es qué falta en el repositorio para
+poder **defender** el binario, y eran dos cosas: no había forma de comprobar que lo descargado es lo
+que construyó la CI, y no había ningún sitio por donde entrase un certificado el día que lo hubiera.
+
+**Decisión:**
+- **La CI publica un `SHA256SUMS.txt` con cada release.** No sustituye a la firma Authenticode: la
+  cubre mientras no la haya. Sin él, la respuesta a "esto lo he compilado yo" no se puede demostrar.
+- **El formato es el de `sha256sum`**, con sus dos espacios, y no un JSON ni una tabla. Es lo que
+  permite verificarlo sin instalar nada (`sha256sum -c`, o `Get-FileHash` a ojo desde PowerShell).
+  Un formato propio obligaría a escribir el verificador, y el verificador que nadie ejecuta no
+  verifica nada. Se comprobó contra el `sha256sum` del sistema, no sólo contra su propio lector.
+- **Las sumas se calculan en el job que publica**, sobre los binarios ya traspasados entre jobs, y
+  se **verifican con `--check`** antes de subir nada: rehashear el disco y comparar es el mismo
+  gesto que hará quien se descargue la release. Un archivo de sumas que nadie ha ejecutado ni una
+  vez es una promesa sin comprobar.
+- **El archivo se adjunta fuera del array `assets`.** Dentro, un `dist/` sin un solo binario pero
+  con su `SHA256SUMS.txt` pasaría por publicación correcta, porque la comprobación de "no llegó
+  nada que adjuntar" dejaría de disparar. Es el mismo razonamiento del ensayo del ADR-060.
+- **Las notas lo mencionan en una línea y sólo si el archivo existe.** Ni una tabla —el mismo cuerpo
+  lo pinta la tarjeta del IDE, que no renderiza Markdown— ni un anuncio a ciegas: mandar a buscar un
+  adjunto inexistente es peor con quien más se fía, que es justo quien va a ir a por él.
+- **La firma se cablea vacía.** `signtoolOptions` declara SHA-256 y sellado RFC 3161, y **ningún
+  certificado**: llega por `CSC_LINK` / `CSC_KEY_PASSWORD`, que es lo único compatible con un secret
+  de GitHub. Con los secrets sin crear, electron-builder ve `cscLink === ""`, no busca más y
+  empaqueta sin firmar — o sea, hoy no cambia absolutamente nada. El día que haya certificado, la
+  única acción es crear dos secrets.
+- **Y con certificado, un artefacto sin firmar para la publicación** (`verify-dist --require-signed`,
+  condicionado a que el secret exista). Sin esa rama, un `.pfx` caducado o una contraseña mal
+  copiada publicarían un binario sin firmar con toda la CI en verde: el patrón de siempre en este
+  repositorio, una comprobación que sólo vigila el camino feliz. Sin certificado **no** se exige,
+  porque una CI en rojo por diseño es la forma más rápida de que nadie vuelva a mirarla.
+
+**Consecuencias:** el actualizador in-app ve ahora un artefacto más en cada release, y hay una
+prueba en `updates.test.mjs` —que importa el nombre del archivo del script que lo escribe, no una
+copia— exigiendo que `assetFor` no se lo lleve nunca en ninguna plataforma: bajarse las sumas en vez
+del instalador dejaría una "actualización" de 200 bytes que no instala nada.
+
+**Lo que esto no arregla:** el aviso de Sophos. Es un falso positivo de comportamiento y lo único
+que lo elimina de raíz es firmar; mientras tanto hace falta una exclusión del administrador, y estas
+sumas son lo que le permite comprobar de dónde sale el binario. Instalar "para todos los usuarios"
+—en `Program Files`, con elevación— o usar el portable evita la secuencia que dispara la regla, pero
+eso es una vuelta al problema, no una solución.
+
 ---
 
 ## Bitácora de iteraciones
@@ -5146,3 +5200,49 @@ este arreglo—, así que desaparecerá solo en el primer arranque de la versió
 **Siguiente:** publicar la corrección. Importa el orden: el código que se rompe es el de la versión
 **recién instalada**, así que actualizar de la 2.9.0 a la siguiente ya se beneficia del arreglo. Lo
 que no se puede arreglar hacia atrás es el `--updated`, que lo manda la versión que se va.
+
+### Iteración 42 — 2026-09-08 — Sumas SHA-256 en cada release y la firma cableada
+**Objetivo:** darle a quien descarga el IDE algo con lo que comprobar el binario, y dejar la firma
+Authenticode lista para el día que haya certificado. Sale de un aviso de Sophos Intercept X al
+instalar la v2.9.1 en un equipo corporativo (ADR-069).
+
+**Hecho:**
+- `scripts/lib/checksums.mjs` — composición y lectura del `SHA256SUMS.txt`, puro y probado.
+  Formato de `sha256sum` (dos espacios; se lee también el separador binario `*`).
+- `scripts/checksums.mjs` — hashea en streaming y escribe, o compara con `--check`.
+- `PUBLISHABLE_EXTENSIONS` / `isPublishableArtifact` suben a `scripts/lib/dist-artifacts.mjs`:
+  eran la misma lista en dos scripts y ahora la necesitaban tres.
+- Las notas de la versión mencionan el archivo, en una línea y sólo si existe de verdad.
+- Workflow: se calculan y se verifican tras el traspaso de artefactos, antes de componer las notas,
+  y se adjuntan **fuera** del array que decide si llegó algún binario.
+- Firma: `signtoolOptions` con SHA-256 y sellado RFC 3161, sin certificado; `CSC_LINK` y
+  `CSC_KEY_PASSWORD` llegan por `env:` al paso que empaqueta, y `verify-dist --require-signed` se
+  activa sólo cuando el secret existe.
+- `npm run checksums` documentado en `CLAUDE.md`.
+
+**Verificado:** `npm run build`, `tsc --noEmit` limpio y la suite completa en verde (1 660 pruebas
+unitarias, 100 de empaquetado). Y el script ejecutado de verdad, no sólo sus pruebas:
+
+| Comprobación | Resultado |
+|---|---|
+| Sumas sobre los artefactos reales de la 2.8.0 (126 + 174 MB) | 0,56 s, `.blockmap` y `win-unpacked` fuera |
+| `sha256sum -c SHA256SUMS.txt` del sistema | ambos `OK` |
+| Un byte añadido a un artefacto | `--check` sale con 1 y nombra el archivo |
+| Directorio sin artefactos publicables | sale con 1 y **no** escribe el archivo |
+| Notas sin el archivo presente | no aparece ninguna mención a SHA-256 |
+| Las notas pasadas por `releaseNotesLines` | la línea 10 se lee como una frase, sin barras ni marcas |
+
+**Errores encontrados:**
+- *Síntoma:* `allow_forking: false` devolvía 422 al blindar los repos públicos. *Causa raíz:* GitHub
+  sólo permite desactivar los forks en repos privados de una organización. *Arreglo:* ninguno
+  posible; se cubre por la vía que sí importa —nadie más tiene acceso de escritura— y se documenta.
+- *Síntoma:* el script no admitía una ruta absoluta en `--dir`. *Causa raíz:* `join(root, dir)`
+  cuelga una ruta absoluta de la raíz del repositorio en vez de respetarla. *Arreglo:* `resolve`.
+
+**Lo que no se ha hecho, y por qué:** no se ha subido la versión ni se ha publicado nada — el
+cambio está en el árbol de trabajo. Y no se ha tocado `author.email` (`dev@dotforge.local`), que
+acaba en el `CompanyName` del ejecutable y no ayuda a la reputación del binario: es un cambio de
+identidad del producto y se decide aparte.
+
+**Siguiente:** publicar una versión para que la primera release con sumas exista, y decidir sobre el
+certificado Authenticode, que es lo único que cierra el asunto de Sophos y de SmartScreen.

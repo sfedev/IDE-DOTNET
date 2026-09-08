@@ -16,6 +16,23 @@
 const VERSION_STAMP = /-\d+\.\d+\.\d+[-.]/;
 
 /**
+ * Extensiones que se adjuntan a una release. El resto de `/dist` es material de compilación.
+ *
+ * Vive aquí y no en cada script porque son tres los que necesitan la misma respuesta —las notas de
+ * la versión, las sumas SHA-256 y el propio workflow— y tres listas separadas divergen en cuanto
+ * alguien añade un destino. El workflow no puede importar esto, así que ahí la lista se repite en
+ * los globs de `gh release upload`; lo vigila una prueba de `packaging.test.mjs`.
+ */
+export const PUBLISHABLE_EXTENSIONS = ['.exe', '.zip', '.dmg'];
+
+/** ¿Es este archivo uno de los que se cuelgan de la release? */
+export function isPublishableArtifact(name) {
+  if (typeof name !== 'string') return false;
+  const lower = name.toLowerCase();
+  return PUBLISHABLE_EXTENSIONS.some((extension) => lower.endsWith(extension));
+}
+
+/**
  * ¿Es este archivo el artefacto de una versión que ya no es la actual?
  *
  * Conservador por diseño: sólo devuelve `true` si el nombre lleva un sello de versión **y** ese

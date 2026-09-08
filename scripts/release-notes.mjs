@@ -18,6 +18,8 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { CHECKSUM_FILE_NAME } from './lib/checksums.mjs';
+import { isPublishableArtifact } from './lib/dist-artifacts.mjs';
 import {
   buildReleaseNotes,
   parseCommitSubjects,
@@ -26,9 +28,6 @@ import {
 } from './lib/release-notes.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-
-/** Extensiones que se adjuntan a una release. El resto de `/dist` es material de compilación. */
-const PUBLISHABLE = ['.exe', '.zip', '.dmg'];
 
 function parseArgs(argv) {
   const options = { tag: null, previous: null, artifacts: null, output: null };
@@ -97,8 +96,19 @@ function artifactsIn(directory) {
   return readdirSync(full, { withFileTypes: true })
     .filter((entry) => entry.isFile())
     .map((entry) => entry.name)
-    .filter((name) => PUBLISHABLE.some((extension) => name.toLowerCase().endsWith(extension)))
+    .filter((name) => isPublishableArtifact(name))
     .sort();
+}
+
+/**
+ * Nombre del archivo de sumas, si está donde van a estar los artefactos.
+ *
+ * Se comprueba en vez de darlo por hecho porque las notas se pueden componer a mano y sin haber
+ * pasado por `checksums.mjs`, y la línea que lo anuncia no puede aparecer entonces.
+ */
+function checksumFileIn(directory) {
+  if (directory === null) return null;
+  return existsSync(join(root, directory, CHECKSUM_FILE_NAME)) ? CHECKSUM_FILE_NAME : null;
 }
 
 const options = parseArgs(process.argv.slice(2));
@@ -118,6 +128,7 @@ const notes = buildReleaseNotes({
   commits: commitsFor(tag, previousTag),
   previousTag,
   artifacts: options.artifacts === null ? [] : artifactsIn(options.artifacts),
+  checksumFile: checksumFileIn(options.artifacts),
 });
 
 if (options.output === null) {

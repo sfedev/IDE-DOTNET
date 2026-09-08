@@ -65,8 +65,36 @@ win:
       arch:
         - x64
   artifactName: ${productName}-${version}-${os}-${arch}.${ext}
-  # Sin firma: no hay certificado. El instalador avisará con SmartScreen hasta que se firme.
   signAndEditExecutable: true
+
+  # Firma Authenticode.
+  #
+  # No hay certificado todavía, así que hoy todo sale sin firmar y el instalador avisa con
+  # SmartScreen. Estas opciones son inertes mientras no lo haya: electron-builder sólo firma cuando
+  # resuelve un certificado, y aquí no se declara ninguno a propósito.
+  #
+  # **El certificado nunca se escribe en este archivo ni se mete en el repositorio.** Llega por
+  # entorno, que es como electron-builder espera recibirlo y lo único compatible con guardarlo en
+  # un secret de GitHub:
+  #
+  #   CSC_LINK           el .pfx en base64 (o una ruta local, para firmar desde tu equipo)
+  #   CSC_KEY_PASSWORD   su contraseña
+  #
+  # Con las dos vacías —lo que pasa hoy en la CI, porque los secrets no existen— electron-builder
+  # ve `cscLink === ""`, no busca más y empaqueta sin firmar. Es decir: esto ya está enchufado y no
+  # cambia nada hasta el día que se cree el secret. Ver el job `build-windows` del workflow.
+  #
+  # El día que haya certificado, además de crear los dos secrets hay que comprobar una cosa: que
+  # `verify-dist.mjs --require-signed` pasa. Sin esa comprobación, un `.pfx` caducado o una
+  # contraseña mal copiada publican un binario sin firmar con toda la CI en verde.
+  signtoolOptions:
+    # SHA-1 está muerto para Authenticode desde 2016: firmar también con él no da compatibilidad,
+    # da una segunda firma que ningún Windows soportado valida.
+    signingHashAlgorithms:
+      - sha256
+    # Sellado de tiempo RFC 3161, y no es opcional: sin él la firma deja de valer el día que caduca
+    # el certificado, en vez de seguir valiendo para lo que se firmó mientras estaba vigente.
+    rfc3161TimeStampServer: http://timestamp.digicert.com
 
 nsis:
   oneClick: false

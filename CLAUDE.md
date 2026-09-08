@@ -287,7 +287,12 @@ npm run dist:win
 - `npm run dist:win` — Windows: instalador NSIS `.exe` + portable `.zip` → `/dist`.
 - `npm run dist:mac` — macOS: `.dmg` + `.zip` con `.app` (arm64 + x64) → `/dist`.
 - `npm run dist:all` — ambos.
-- `npm run verify:dist` — qué hay en `/dist`, tamaño y estado de firma. Acepta `--require win|mac`.
+- `npm run verify:dist` — qué hay en `/dist`, tamaño y estado de firma. Acepta `--require win|mac`
+  y `--require-signed`, que convierte "salió sin firmar" en un fallo (lo pasa la CI **sólo** si hay
+  certificado configurado; sin él, sin firma es el estado normal).
+- `npm run checksums` — escribe `dist/SHA256SUMS.txt` con las sumas de los artefactos publicables.
+  Con `--check` rehashea el disco y lo compara en vez de escribir. Formato de `sha256sum`, para que
+  se verifique con `sha256sum -c` o con `Get-FileHash` sin instalar nada.
 - `npm run prune:dist` — borra de `/dist` los artefactos de versiones anteriores. Lo ejecutan
   solos `pack`, `dist:win`, `dist:mac` y `dist:all` **antes** de empaquetar; acepta `--dry-run`.
 - `npm run clean` — borra `build/` y `dist/`; con `--all`, también el toolchain cacheado.
@@ -574,6 +579,18 @@ npx electron . --smoke-test
   que usa la tarjeta del IDE. Son dos módulos que no se importan y sólo se encuentran en producción.
 - El job que publica hace `fetch-depth: 0`: las notas salen del rango entre tags y un checkout
   superficial las deja vacías **sin que nada falle**.
+- **Cada release lleva su `SHA256SUMS.txt`** (ADR-069). Los binarios no están firmados, así que es
+  lo único que permite comprobar que lo descargado es lo que construyó la CI — y eso deja de ser
+  teórico en cuanto un antivirus corporativo pide que lo demuestres. Se calculan sobre los binarios
+  **ya traspasados** entre jobs, se verifican con `--check` antes de subir nada, y se adjuntan
+  **fuera** del array `assets`: dentro, un `dist/` sin binarios pero con su archivo de sumas pasaría
+  por publicación correcta. Las notas lo mencionan en una línea y sólo si existe.
+- **La firma Authenticode está cableada y vacía.** `signtoolOptions` declara SHA-256 y sellado
+  RFC 3161 y **ningún certificado**: llega por `CSC_LINK` / `CSC_KEY_PASSWORD`, que es lo único
+  compatible con un secret. Sin los secrets, electron-builder ve `cscLink === ""` y empaqueta sin
+  firmar, que es lo que pasa hoy. El día que haya certificado, la única acción es crear los dos
+  secrets — y `--require-signed` se enciende solo, porque a partir de ahí un artefacto sin firmar es
+  un fallo del empaquetado y no el estado normal.
 
 ### Extensiones de Open VSX (`src/main/services/extension-installer.ts`, `src/shared/open-vsx.ts`)
 
@@ -1400,3 +1417,19 @@ npm run fetch:toolchain -- --platform win32 --arch x64
   intento de reproducir el borrado bloqueado daba verde porque el proceso hijo todavía no había
   arrancado: sin comprobar que está vivo (`process.kill(pid, 0)`), lo que se prueba es que borrar una
   carpeta funciona.
+- **Una instalación "solo para mí" es, para un antivirus, un dropper.** `perMachine: false` instala
+  en `%LOCALAPPDATA%\Programs` y `runAfterFinish: true` arranca la aplicación al terminar, así que
+  la secuencia completa es: un `.exe` sin firmar bajado de internet escribe **otro** `.exe` sin
+  firmar en AppData —sin pedir elevación— y lo ejecuta al instante; cinco segundos después, ese
+  proceso llama a la API de GitHub a buscar actualizaciones. Los cuatro pasos son legítimos y juntos
+  son exactamente lo que busca Application Lockdown de Sophos Intercept X, que abortó la instalación
+  de la v2.9.1 en un equipo corporativo. `Program Files` exige elevación y por eso pesa mucho menos
+  en la heurística — el malware lo evita justamente por eso. La única solución de raíz es firmar;
+  hasta entonces, el `SHA256SUMS.txt` de cada release es lo que permite demostrarle a un
+  administrador de dónde sale el binario (ADR-069).
+- **Los forks no se pueden desactivar en un repositorio público de una cuenta personal.** La API
+  responde `422 Allow forks setting can only be changed on org-owned private repositories`, así que
+  "que nadie pueda abrir un PR" no se consigue por ahí. Tampoco hace falta: en un repositorio sin
+  colaboradores, un PR de un desconocido no concede ningún acceso. Lo único que se le acerca es un
+  límite de interacción (`collaborators_only`), que bloquea también las issues y caduca a los 6
+  meses.

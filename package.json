@@ -33,6 +33,7 @@
     "dist:mac": "node scripts/build.mjs && node scripts/prune-dist.mjs && node scripts/dist-mac.mjs",
     "dist:all": "node scripts/build.mjs && node scripts/prune-dist.mjs && electron-builder --win --publish never && node scripts/dist-mac.mjs",
     "verify:dist": "node scripts/verify-dist.mjs",
+    "checksums": "node scripts/checksums.mjs",
     "prune:dist": "node scripts/prune-dist.mjs"
   },
   "keywords": [

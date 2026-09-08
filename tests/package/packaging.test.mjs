@@ -11,7 +11,8 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { isStaleArtifact, selectStaleArtifacts } from '../../scripts/lib/dist-artifacts.mjs';
+import { CHECKSUM_FILE_NAME } from '../../scripts/lib/checksums.mjs';
+import { isStaleArtifact, PUBLISHABLE_EXTENSIONS, selectStaleArtifacts } from '../../scripts/lib/dist-artifacts.mjs';
 import { RELEASE_REPO } from '../../scripts/lib/release-notes.mjs';
 import { UPDATE_FEED } from '../../build/ui-lib.mjs';
 
@@ -41,7 +42,7 @@ describe('package.json', () => {
     for (const script of [
       'build', 'watch', 'dev', 'start', 'icons', 'clean',
       'test', 'test:unit', 'test:scaffold', 'test:package',
-      'pack', 'dist:win', 'dist:mac', 'dist:all', 'verify:dist', 'fetch:toolchain',
+      'pack', 'dist:win', 'dist:mac', 'dist:all', 'verify:dist', 'checksums', 'fetch:toolchain',
     ]) {
       assert.ok(packageJson.scripts[script], `falta el script "${script}"`);
     }
@@ -168,6 +169,76 @@ describe('electron-builder.yml', () => {
 
   it('no publica en ningún sitio automáticamente', () => {
     assert.match(builderConfig, /publish:\s*null/);
+  });
+
+  /**
+   * Firma Authenticode.
+   *
+   * No hay certificado todavía y los artefactos salen sin firmar, que es el estado esperado y lo
+   * que provoca el aviso de SmartScreen. Lo que se comprueba aquí es que el andamiaje está puesto
+   * y **vacío**: el día que exista el certificado, la única acción es crear dos secrets.
+   */
+  describe('firma de Windows', () => {
+    // Las opciones de firma se leen sin los comentarios: el bloque que las explica menciona
+    // `.pfx` y `CSC_LINK`, y una comprobación sobre el texto crudo se daría por satisfecha con la
+    // documentación en vez de con la configuración.
+    const activas = builderConfig
+      .split(/\r?\n/)
+      .filter((line) => !line.trimStart().startsWith('#'))
+      .join('\n');
+
+    it('declara las opciones de signtool, listas para cuando haya certificado', () => {
+      assert.match(activas, /signtoolOptions:/, 'falta el bloque de firma');
+      assert.match(activas, /rfc3161TimeStampServer:\s*https?:\/\/\S+/, 'falta el sellado de tiempo');
+    });
+
+    /**
+     * Sin sellado de tiempo, la firma deja de valer el día que caduca el certificado en vez de
+     * seguir valiendo para lo que se firmó mientras estaba vigente. Es la diferencia entre firmar
+     * una vez y tener que reempaquetar cada versión antigua cada dos años.
+     */
+    it('el sellado de tiempo es RFC 3161, no el protocolo viejo', () => {
+      assert.doesNotMatch(activas, /^\s*timeStampServer:/m, 'timeStampServer es el protocolo antiguo');
+    });
+
+    /**
+     * SHA-1 lleva muerto para Authenticode desde 2016. Firmar también con él no da compatibilidad
+     * con nada que siga soportado: da una segunda firma que ningún Windows actual valida.
+     */
+    it('firma sólo con SHA-256', () => {
+      const at = activas.indexOf('signingHashAlgorithms:');
+      assert.ok(at > 0, 'no se declaran los algoritmos de firma');
+
+      const block = activas.slice(at, at + 120);
+      assert.match(block, /- sha256/);
+      assert.doesNotMatch(block, /- sha1/, 'SHA-1 no lo valida ningún Windows soportado');
+    });
+
+    /**
+     * La regla que de verdad importa de todo este bloque: **el certificado no vive aquí**.
+     *
+     * Declararlo en el YAML significa una de dos cosas, y las dos son malas: o el `.pfx` está en el
+     * repositorio, o hay una ruta que sólo existe en un equipo. Llega por `CSC_LINK` y
+     * `CSC_KEY_PASSWORD`, que es lo que permite guardarlo como secret.
+     */
+    it('ningún certificado ni contraseña se declara en la configuración', () => {
+      for (const option of ['certificateFile', 'certificatePassword', 'certificateSubjectName', 'certificateSha1']) {
+        assert.doesNotMatch(
+          activas,
+          new RegExp(String.raw`^\s*${option}:`, 'm'),
+          `${option} en electron-builder.yml: el certificado tiene que llegar por entorno`,
+        );
+      }
+    });
+
+    it('no hay ningún .pfx en el repositorio', () => {
+      assert.ok(!existsSync(join(root, 'certificate.pfx')));
+      assert.equal(
+        readdirSync(root).filter((name) => name.toLowerCase().endsWith('.pfx')).length,
+        0,
+        'hay un certificado en la raíz del repositorio',
+      );
+    });
   });
 });
 
@@ -427,6 +498,114 @@ describe('publicación de releases', () => {
     assert.match(activas, /gh release upload/, 'no se suben los artefactos');
     assert.match(activas, /dist\/\*\.exe/, 'no se adjunta el instalador');
     assert.match(activas, /dist\/\*\.zip/, 'no se adjunta el portable');
+  });
+
+  /**
+   * Sumas SHA-256 de lo publicado.
+   *
+   * Existen porque los binarios no están firmados: sin ellas, quien descarga un instalador de
+   * 126 MB no tiene absolutamente nada con lo que comprobar que es el que construyó esta CI. No
+   * sustituyen a la firma Authenticode; la cubren mientras no la haya.
+   */
+  describe('sumas de verificación', () => {
+    const publishJob = activas.slice(activas.indexOf('  publish:'));
+
+    it('se calculan sobre los artefactos ya traspasados, no sobre otros', () => {
+      const at = publishJob.indexOf('scripts/checksums.mjs');
+      assert.ok(at > 0, 'no se calculan las sumas de los artefactos');
+      assert.ok(
+        publishJob.indexOf('download-artifact') < at,
+        'las sumas describirían un dist/ que todavía no se ha rellenado',
+      );
+    });
+
+    /**
+     * Un archivo de sumas que nadie ha verificado ni una vez es una promesa sin comprobar. El
+     * `--check` rehashea el disco y lo compara con la lista recién escrita: el mismo gesto que
+     * hará quien se descargue la release, hecho antes de publicarla.
+     */
+    it('se verifican contra el disco antes de publicar', () => {
+      assert.match(publishJob, /checksums\.mjs --dir dist --check/, 'las sumas se escriben y no se comprueban');
+    });
+
+    it('las notas se componen después, para poder mencionar el archivo', () => {
+      assert.ok(
+        publishJob.indexOf('scripts/checksums.mjs') < publishJob.indexOf('scripts/release-notes.mjs'),
+        'las notas anunciarían un archivo de sumas que aún no existe',
+      );
+    });
+
+    it('el archivo se adjunta a la release', () => {
+      assert.match(publishJob, new RegExp(`dist/${CHECKSUM_FILE_NAME}`), 'las sumas no se suben');
+      assert.match(publishJob, /gh release upload[^\n]*"\$checksums"/, 'no se adjuntan junto a los binarios');
+    });
+
+    /**
+     * Y va **fuera** del array `assets`, que es el que decide si hubo traspaso de artefactos. Si
+     * entrara en él, un `dist/` sin un solo binario pero con su archivo de sumas dentro pasaría
+     * por publicación correcta: la comprobación de "no hay nada que adjuntar" dejaría de disparar.
+     */
+    it('no cuenta como binario a la hora de comprobar que llegó algo', () => {
+      const arrays = [...publishJob.matchAll(/assets=\((.+)\)/g)].map((match) => match[1]);
+      assert.ok(arrays.length > 0, 'no se encuentra la lista de artefactos');
+      for (const array of arrays) {
+        assert.ok(
+          !array.includes(CHECKSUM_FILE_NAME),
+          'el archivo de sumas está dentro de assets: un dist/ sin binarios pasaría por bueno',
+        );
+      }
+    });
+
+    /**
+     * El workflow no puede importar `PUBLISHABLE_EXTENSIONS`, así que la lista se repite en sus
+     * globs. Repetida y sin vigilar, diverge en cuanto alguien añada un destino: un `.msi` que se
+     * construye, se hashea y no se sube a ninguna parte.
+     */
+    it('los globs del workflow cubren las mismas extensiones que hashea el script', () => {
+      for (const extension of PUBLISHABLE_EXTENSIONS) {
+        assert.ok(
+          publishJob.includes(`dist/*${extension}`),
+          `el script hashea ${extension} y el workflow no lo adjunta`,
+        );
+      }
+    });
+  });
+
+  /**
+   * Firma Authenticode: el andamiaje, no la firma.
+   *
+   * Hoy los secrets no existen, las variables llegan vacías y electron-builder empaqueta sin
+   * firmar. Lo que se comprueba es que esa ruta esté cableada y que, cuando haya certificado, un
+   * fallo de firma **pare la publicación** en vez de colarse en verde.
+   */
+  describe('firma de los artefactos', () => {
+    const buildJob = activas.slice(activas.indexOf('  build-windows:'), activas.indexOf('  publish:'));
+
+    it('el certificado llega por entorno al paso que empaqueta', () => {
+      assert.match(buildJob, /CSC_LINK:\s*\$\{\{\s*secrets\./, 'el certificado no llega al empaquetado');
+      assert.match(buildJob, /CSC_KEY_PASSWORD:\s*\$\{\{\s*secrets\./, 'falta la contraseña del certificado');
+    });
+
+    /**
+     * Un `.pfx` en base64 dentro de un `run:` acaba impreso en el registro del job, que en un
+     * repositorio público lee cualquiera. Va por `env:`, que GitHub enmascara.
+     */
+    it('el certificado no viaja por línea de comandos', () => {
+      assert.doesNotMatch(buildJob, /run:[^\n]*CSC_LINK/, 'el certificado acabaría en el registro del job');
+    });
+
+    it('con certificado configurado, un artefacto sin firmar para la publicación', () => {
+      assert.match(buildJob, /--require-signed/, 'un fallo de firma pasaría desapercibido');
+      assert.match(buildJob, /secrets\.WINDOWS_CERT_BASE64 != ''/, 'la exigencia de firma no es condicional');
+    });
+
+    /**
+     * Y la otra mitad: sin certificado **no** se exige firma. Sin esta rama, la CI estaría en rojo
+     * todos los días por diseño, que es la forma más rápida de que nadie vuelva a mirarla.
+     */
+    it('sin certificado se sigue publicando sin firmar, que es el estado de hoy', () => {
+      assert.match(buildJob, /verify-dist\.mjs --require win\s*$/m, 'falta el camino sin firma');
+    });
   });
 
   it('las notas de la versión se componen, no se dejan en blanco', () => {

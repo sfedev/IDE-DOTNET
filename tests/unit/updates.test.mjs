@@ -27,6 +27,7 @@ import {
   updateHeadline,
   UPDATE_FEED,
 } from '../../build/ui-lib.mjs';
+import { CHECKSUM_FILE_NAME } from '../../scripts/lib/checksums.mjs';
 
 /** Respuesta real de la API de releases de GitHub, recortada a lo que se usa. */
 const FEED = [
@@ -199,6 +200,34 @@ describe('elección del artefacto', () => {
 
   it('sin artefacto para la plataforma devuelve null en vez de uno cualquiera', () => {
     assert.equal(assetFor({ ...release, assets: [] }, 'linux', 'x64'), null);
+  });
+
+  /**
+   * La CI cuelga de cada release un `SHA256SUMS.txt` para que quien la descargue pueda comprobar
+   * que el binario es el que construyó el workflow — los artefactos no están firmados, así que es
+   * lo único que hay. El actualizador ve ese archivo igual que ve los demás, y descargarlo en vez
+   * del instalador dejaría una "actualización" de 200 bytes que no instala nada.
+   *
+   * El nombre se importa del script que lo escribe, no se copia: son dos carpetas que no se
+   * importan entre sí y sólo se encuentran en producción, igual que `UPDATE_FEED` y `RELEASE_REPO`.
+   */
+  it('el archivo de sumas no se confunde nunca con una actualización', () => {
+    const withChecksums = {
+      ...release,
+      assets: [
+        ...release.assets,
+        { name: CHECKSUM_FILE_NAME, url: 'https://x/sums', size: 200, contentType: 'text/plain' },
+      ],
+    };
+
+    for (const [platform, arch] of [['win32', 'x64'], ['darwin', 'arm64'], ['linux', 'x64']]) {
+      const chosen = assetFor(withChecksums, platform, arch);
+      assert.notEqual(chosen?.name, CHECKSUM_FILE_NAME, `${platform}/${arch} se llevaría las sumas`);
+    }
+
+    // Y con el archivo de sumas como único artefacto, no hay nada que ofrecer: null, no "algo".
+    const onlyChecksums = { ...release, assets: [{ name: CHECKSUM_FILE_NAME, url: 'https://x/s', size: 200, contentType: null }] };
+    assert.equal(assetFor(onlyChecksums, 'win32', 'x64'), null);
   });
 
   /**

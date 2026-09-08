@@ -9,6 +9,12 @@
  *   node scripts/verify-dist.mjs            informe legible
  *   node scripts/verify-dist.mjs --json     salida JSON para CI
  *   node scripts/verify-dist.mjs --require win   falla si faltan los artefactos de Windows
+ *   node scripts/verify-dist.mjs --require-signed  falla si algún .exe salió sin firmar
+ *
+ * `--require-signed` no se pasa siempre: hoy no hay certificado y todo sale sin firmar, que es el
+ * estado esperado. Lo pasa el workflow **sólo cuando hay certificado configurado**, y ahí sí es
+ * obligatorio: sin él, un fallo de firma —una contraseña mal puesta, un `.pfx` caducado— dejaría
+ * pasar un binario sin firmar con toda la CI en verde, que es justo el fallo que nadie mira.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
@@ -20,6 +26,7 @@ const distDir = join(root, 'dist');
 
 const argv = process.argv.slice(2);
 const asJson = argv.includes('--json');
+const requireSigned = argv.includes('--require-signed');
 const required = argv
   .map((argument, index) => (argument === '--require' ? argv[index + 1] : null))
   .filter((value) => value !== null);
@@ -149,6 +156,19 @@ async function main() {
     }
   }
 
+  // Con certificado configurado, un ejecutable sin firmar es un fallo del empaquetado y no un
+  // estado aceptable. Sin `--require-signed` no se dice nada: es lo normal mientras no haya
+  // certificado, y convertirlo en problema pondría la CI en rojo todos los días por diseño.
+  if (requireSigned) {
+    const executables = report.artifacts.filter((artifact) => artifact.signed !== undefined);
+    if (executables.length === 0) {
+      report.problems.push('se exigió firma y no hay ningún .exe que comprobar');
+    }
+    for (const executable of executables.filter((artifact) => !artifact.signed)) {
+      report.problems.push(`${executable.name}: se exigió firma y salió sin firmar`);
+    }
+  }
+
   report.ok = report.problems.length === 0;
 
   if (asJson) {
@@ -180,8 +200,12 @@ async function main() {
     for (const executable of executables) {
       console.log(`    ${executable.signed ? '✓ firmado ' : '· sin firmar'}  ${executable.name}`);
     }
-    console.log('\n  Nota: sin firma, Windows mostrará el aviso de SmartScreen y macOS pedirá');
-    console.log('  confirmación en Gatekeeper. Es lo esperado sin certificado de desarrollador.\n');
+    if (requireSigned) {
+      console.log('\n  Se exigió firma (--require-signed): un artefacto sin firmar es un fallo.\n');
+    } else {
+      console.log('\n  Nota: sin firma, Windows mostrará el aviso de SmartScreen y macOS pedirá');
+      console.log('  confirmación en Gatekeeper. Es lo esperado sin certificado de desarrollador.\n');
+    }
   }
 
   if (report.problems.length > 0) {

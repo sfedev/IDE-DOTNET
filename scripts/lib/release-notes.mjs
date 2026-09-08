@@ -91,9 +91,20 @@ export function compareUrl(previousTag, tag, repo = RELEASE_REPO) {
  * `commits` llega ya troceado (`parseCommitSubjects`). `artifacts` son los nombres de archivo que
  * se van a adjuntar; si viene vacío no se inventa una sección de descargas, porque la propia
  * página de la release ya lista lo que haya.
+ *
+ * `checksumFile` es el nombre del archivo de sumas SHA-256, y sólo se menciona si de verdad se va
+ * a adjuntar: quien lo llama comprueba antes que existe. Anunciar una verificación que no está es
+ * peor que no ofrecerla — manda a buscar un archivo inexistente a quien más se fía.
  */
 export function buildReleaseNotes(options) {
-  const { version, commits = [], previousTag = null, artifacts = [], repo = RELEASE_REPO } = options ?? {};
+  const {
+    version,
+    commits = [],
+    previousTag = null,
+    artifacts = [],
+    checksumFile = null,
+    repo = RELEASE_REPO,
+  } = options ?? {};
 
   if (typeof version !== 'string' || version.trim() === '') {
     throw new TypeError('buildReleaseNotes requiere una versión');
@@ -127,6 +138,15 @@ export function buildReleaseNotes(options) {
     for (const artifact of artifacts) {
       lines.push(`- ${artifact}${describeArtifact(artifact)}`);
     }
+
+    // Los binarios no están firmados, así que esto es lo único que permite comprobar que lo
+    // descargado es lo que construyó la CI. Una línea, no una tabla: el mismo cuerpo lo pinta la
+    // tarjeta del IDE, que no renderiza Markdown, y sesenta y cuatro dígitos por artefacto no
+    // aportan nada ahí. Los hashes van en el archivo adjunto; aquí sólo se dice que existe.
+    if (typeof checksumFile === 'string' && checksumFile.trim() !== '') {
+      lines.push('', `Sumas SHA-256 de estos archivos en ${checksumFile.trim()}, adjunto a esta publicación.`);
+    }
+
     lines.push('');
   }
 

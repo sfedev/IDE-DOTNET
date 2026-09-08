@@ -152,8 +152,38 @@ jobs:
         run: node node_modules/electron/install.js
 
       - run: npm run icons
-      - run: npm run dist:win
-      - run: node scripts/verify-dist.mjs --require win
+
+      # Firma Authenticode, si la hay.
+      #
+      # Los dos secrets no existen todavía, así que las variables llegan vacías, electron-builder no
+      # resuelve ningún certificado y empaqueta sin firmar: exactamente lo que hace hoy. Están aquí
+      # para que el día que exista el certificado no haya que tocar el workflow — se crean los dos
+      # secrets y la siguiente release sale firmada.
+      #
+      # Nunca se imprimen ni se pasan por línea de comandos: un `.pfx` en base64 en un `run:` acaba
+      # en el registro del job, que es público en un repositorio público.
+      - name: Empaquetar para Windows
+        run: npm run dist:win
+        env:
+          CSC_LINK: ${{ secrets.WINDOWS_CERT_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+
+      # Y la mitad que cierra el bucle: con certificado configurado, un artefacto sin firmar deja
+      # de ser el estado normal y pasa a ser un fallo. Sin esta rama, un `.pfx` caducado o una
+      # contraseña mal copiada publicarían un binario sin firmar con toda la CI en verde — el mismo
+      # patrón que el ensayo mudo del job de publicación.
+      - name: Verificar los artefactos de Windows
+        shell: bash
+        env:
+          HAS_CERT: ${{ secrets.WINDOWS_CERT_BASE64 != '' }}
+        run: |
+          if [ "$HAS_CERT" = "true" ]; then
+            echo "Certificado configurado: los artefactos tienen que salir firmados."
+            node scripts/verify-dist.mjs --require win --require-signed
+          else
+            echo "Sin certificado: se empaqueta sin firmar y SmartScreen avisará. Es lo esperado."
+            node scripts/verify-dist.mjs --require win
+          fi
 
       - uses: actions/upload-artifact@v7
         with:
@@ -261,6 +291,22 @@ jobs:
       #     name: dotforge-ide-macos
       #     path: dist
 
+      # Sumas SHA-256 de lo que se va a publicar.
+      #
+      # Va **antes** de componer las notas, porque las notas mencionan el archivo sólo si existe.
+      # Y se calculan aquí, sobre los binarios ya traspasados, no en el job que construye: lo que
+      # tiene que quedar descrito es el archivo que se sube a la release, no uno anterior que
+      # coincidiría por los pelos.
+      #
+      # El `--check` no es redundante: rehashea el disco y lo compara con la lista recién escrita,
+      # que es el mismo gesto que hará quien se descargue la release. Un archivo de sumas que nadie
+      # ha verificado ni una vez es una promesa sin comprobar.
+      - name: Calcular las sumas SHA-256 de los artefactos
+        shell: bash
+        run: |
+          node scripts/checksums.mjs --dir dist
+          node scripts/checksums.mjs --dir dist --check
+
       - name: Componer las notas de la versión
         shell: bash
         run: node scripts/release-notes.mjs --tag "${{ steps.target.outputs.tag }}" --artifacts dist --output release-notes.md
@@ -287,6 +333,10 @@ jobs:
           for asset in "${assets[@]}"; do
             printf '  %s (%s bytes)\n' "$(basename "$asset")" "$(wc -c < "$asset")"
           done
+
+          echo
+          echo "Sumas que se adjuntarían:"
+          sed 's/^/  /' dist/SHA256SUMS.txt
 
           echo
           echo "Notas compuestas para $TAG:"
@@ -329,9 +379,18 @@ jobs:
             exit 1
           fi
 
-          printf 'Adjuntando %d artefactos:\n' "${#assets[@]}"
-          printf '  %s\n' "${assets[@]}"
-          gh release upload "$TAG" "${assets[@]}" --clobber
+          # El archivo de sumas se adjunta aparte y no entra en `assets`: la comprobación de arriba
+          # tiene que seguir preguntando si llegaron los **binarios**. Metido en la lista, un dist/
+          # vacío con su SHA256SUMS.txt dentro pasaría por publicación correcta.
+          checksums=dist/SHA256SUMS.txt
+          if [ ! -f "$checksums" ]; then
+            echo "::error::falta $checksums: la release se publicaría sin forma de verificarla."
+            exit 1
+          fi
+
+          printf 'Adjuntando %d artefactos y sus sumas:\n' "${#assets[@]}"
+          printf '  %s\n' "${assets[@]}" "$checksums"
+          gh release upload "$TAG" "${assets[@]}" "$checksums" --clobber
 
       # Publicar no es lo mismo que estar publicado. Lo que de verdad importa es que el feed que
       # consulta el IDE —la API pública, sin autenticar y sin más filtro que el que aplica

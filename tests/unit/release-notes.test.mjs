@@ -139,6 +139,41 @@ describe('composición del cuerpo', () => {
     assert.ok(!buildReleaseNotes({ version: '2.5.0', commits: COMMITS }).includes('### Descargas'));
   });
 
+  /**
+   * Las sumas SHA-256.
+   *
+   * Se anuncian en **una línea**, no en una tabla: el mismo cuerpo lo pinta la tarjeta del IDE,
+   * que no renderiza Markdown, y sesenta y cuatro dígitos por artefacto no aportan nada ahí. Los
+   * hashes van en el archivo adjunto.
+   */
+  it('menciona el archivo de sumas cuando se va a adjuntar', () => {
+    const notes = buildReleaseNotes({
+      version: '2.9.2',
+      commits: COMMITS,
+      artifacts: ['DotForge IDE-2.9.2-Setup-x64.exe'],
+      checksumFile: 'SHA256SUMS.txt',
+    });
+
+    assert.match(notes, /Sumas SHA-256 .*SHA256SUMS\.txt/);
+    assert.ok(!notes.includes('|'), 'nada de tablas: la tarjeta las pinta como una fila de barras');
+  });
+
+  /**
+   * Y la regla que importa: **no se anuncia lo que no está**. Quien más se fía de una suma de
+   * verificación es justo quien va a ir a buscar el archivo, y mandarlo a un adjunto inexistente
+   * es peor que no ofrecerle nada.
+   */
+  it('sin archivo de sumas no se anuncia ninguna verificación', () => {
+    const sinSumas = buildReleaseNotes({
+      version: '2.9.2',
+      commits: COMMITS,
+      artifacts: ['DotForge IDE-2.9.2-Setup-x64.exe'],
+    });
+
+    assert.ok(!sinSumas.includes('SHA-256'), 'se anuncia una verificación que no se adjunta');
+    assert.ok(!buildReleaseNotes({ version: '2.9.2', commits: COMMITS, checksumFile: 'SHA256SUMS.txt' }).includes('SHA-256'));
+  });
+
   it('una versión ausente es un error, no una release sin nombre', () => {
     assert.throws(() => buildReleaseNotes({ commits: COMMITS }), TypeError);
     assert.throws(() => buildReleaseNotes({ version: '  ' }), TypeError);
