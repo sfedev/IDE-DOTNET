@@ -635,6 +635,27 @@ por tanto **compila** pero no **ejecuta** los proyectos generados. Se añade el 
       `pending.json` de verdad en el disco, una de ellas estructural sobre el evento de cierre)
 - [x] F27.14 Verificado sobre la aplicación real: los tres estados pintados y medidos con `--probe=`
 
+### Fase 28 — Copiar y pegar en las pestañas de intérprete
+- [x] F28.1 `terminal-clipboard.ts` (puro): qué gesto es cada tecla y cada clic. `Ctrl+C` con
+      selección copia y sin ella interrumpe; `Ctrl+V`, `Ctrl+Shift+V` y `Shift+Insert` pegan;
+      `Ctrl+Shift+C` y `Ctrl+Insert` copian; el resto llega al intérprete tal cual (ADR-067)
+- [x] F28.2 En macOS no se toca nada: `Cmd+C` / `Cmd+V` ya los atienden los `role` del menú y
+      `Ctrl+C` en un Mac es siempre interrumpir
+- [x] F28.3 Botón secundario en Windows como en la consola: con selección copia y la suelta; sin
+      ella pega
+- [x] F28.4 Canal `clipboard:read-text` / `clipboard:write-text`: texto plano, sólo para la
+      terminal. `navigator.clipboard` no sirve porque la ventana deniega todos los permisos
+- [x] F28.5 `attachClipboard` en `xterm-bridge.ts`: manejador previo de teclado con
+      `preventDefault()` en los gestos atendidos, para que el `role: 'paste'` del menú no pegue
+      una segunda vez
+- [x] F28.6 Pruebas: 18 (15 del modelo puro y 3 estructurales sobre el cableado)
+- [x] F28.7 Verificado con teclas de verdad sobre la ventana: `Ctrl+V` en `cmd.exe` pintaba `^V`
+      antes del cambio; después, `Shift+Insert` pega una sola vez y `Ctrl+C` sin selección sigue
+      interrumpiendo
+- [x] F28.8 `cls` comprobado y **no reproducido**: ConPTY emite el borrado fila a fila más `ESC[3J`
+      y xterm lo aplica, en desarrollo y en la 2.8.0 instalada. Si vuelve a verse, hace falta el
+      contexto exacto (tamaño del panel, qué había antes)
+
 ---
 
 ## Decisiones técnicas (ADR corto)
@@ -1477,6 +1498,40 @@ compilación: describía un bug del cliente que ya estaba arreglado.
   cuenta los argumentos al deserializar y ante un `null` levanta `InvalidOperationException` fuera
   de todo `try`, matando el servidor con `0xE0434352`. Se arregla en el punto donde se componen los
   mensajes, no en la llamada, porque afecta a cualquier método sin parámetros.
+
+### ADR-067 — El portapapeles de la terminal lo decide el IDE, no el intérprete
+**Fecha:** 2026-09-08
+**Contexto:** En las pestañas de pseudoterminal, `Ctrl+V` pegaba en PowerShell y pintaba `^V` en el
+símbolo del sistema; `Ctrl+C` con texto seleccionado no copiaba en ninguna. xterm manda las dos
+teclas al intérprete como U+0016 y U+0003 y llama a `preventDefault()`, con lo que tampoco llegan a
+los `role` del menú. Que en PowerShell "funcionara" era PSReadLine leyendo el portapapeles del
+sistema por su cuenta: la funcionalidad dependía de qué intérprete hubiera detrás.
+**Opciones:**
+- (a) dejar que los `role` del menú lo hagan, devolviendo `false` sin `preventDefault()` desde el
+  manejador de xterm;
+- (b) `navigator.clipboard` desde el renderer;
+- (c) decidir el gesto en un módulo puro y ejecutarlo con un canal IPC de texto plano.
+
+**Decisión:** (c).
+**Consecuencias:**
+
+- **(a) no cubre lo que la gente teclea.** `Shift+Insert`, `Ctrl+Insert` y `Ctrl+Shift+V` no son
+  aceleradores de ningún `role`, y el botón secundario tampoco. Y hacer depender el pegado de que
+  Electron reenvíe al menú un evento que el renderer no ha consumido es apoyarse en un detalle de
+  plataforma que en macOS ya va por otro camino.
+- **(b) no funciona aquí.** La ventana deniega todos los permisos del navegador
+  (`setPermissionRequestHandler` → `false`), y leer el portapapeles es uno de ellos. Abrir ese
+  permiso para una cosa lo abre para todo lo que corra en el renderer.
+- **`Ctrl+C` son dos cosas y el contexto decide.** Con selección, copia; sin ella, U+0003 al
+  intérprete. Es la convención de Windows Terminal y de VS Code, y la única que no deja o bien un
+  `dotnet watch` que no se puede parar o bien una terminal que no sabe copiar.
+- **En macOS no se toca nada.** `Cmd+C` / `Cmd+V` no los consume xterm, llegan a los `role` y
+  xterm atiende los eventos `copy` y `paste` del DOM. `Ctrl+C` en un Mac es siempre interrumpir.
+- **El `preventDefault()` es parte de la decisión.** Sin él, el evento sigue hasta el acelerador
+  del menú y `role: 'paste'` pega otra vez a través del evento `paste` del DOM. Hay una prueba
+  estructural que exige verlo junto al `return false`.
+- **El canal es de texto plano y sólo lo usa la terminal.** El editor copia y pega a través de
+  Monaco y de los `role` del menú; no hay motivo para que pase por aquí.
 
 ---
 
@@ -4876,3 +4931,67 @@ compensa: la cadena entera está cubierta por las pruebas y el servicio se ejerc
 
 **Siguiente:** nada pendiente de esto. Si el bloqueo de instancia única molesta para diagnosticar,
 merecería su propia decisión: hoy impide `--smoke-test` y `--probe=` con el IDE abierto.
+
+### Iteración 40 — 2026-09-08 — Fase 28: copiar y pegar en las pestañas de intérprete
+
+**Objetivo:** un reporte con dos partes: que `cls` no limpia en PowerShell ni en el símbolo del
+sistema, y que pegar sólo funciona en PowerShell —en `cmd.exe`, `Ctrl+C` y `Ctrl+V` pintan `^C` y
+`^V` y ya—.
+
+**Diagnóstico del portapapeles.** xterm manda `Ctrl+C` y `Ctrl+V` al intérprete como U+0003 y
+U+0016 y llama a `preventDefault()`, así que tampoco llegan a los `role: 'copy'` / `'paste'` del
+menú. Que en PowerShell pegara era PSReadLine leyendo el portapapeles del sistema por su cuenta: la
+funcionalidad dependía de qué programa hubiera detrás. Reproducido con teclas de verdad sobre la
+ventana (`SendKeys` con la ventana del IDE activada): `C:\Git\Roadmap>^V`.
+
+**Diagnóstico del `cls`: no reproducido.** Capturados los bytes que emite ConPTY al recibir `cls`,
+con y sin salida larga previa: `ESC[H`, un `ESC[K\r\n` por fila y `ESC[3J` al final (borra el
+histórico). xterm 6 aplica los tres. Sobre la aplicación —desarrollo y la 2.8.0 instalada—, `cls`
+en `cmd.exe` y en PowerShell deja sólo el prompt, también con la vista desplazada hacia arriba
+antes de teclearlo. Sin el contexto exacto de la máquina en la que falla (tamaño del panel, qué se
+había ejecutado antes) no hay nada que arreglar, y arreglar a ciegas es como se rompen las cosas
+que funcionan.
+
+**Hecho:**
+- `src/shared/terminal-clipboard.ts` (puro): `keyboardGesture` y `mouseGesture` dicen qué gesto es
+  cada tecla y cada clic. `Ctrl+C` con selección copia; sin ella, interrumpe. `Ctrl+V`,
+  `Ctrl+Shift+V` y `Shift+Insert` pegan; `Ctrl+Shift+C` y `Ctrl+Insert` copian; sólo cuenta
+  `keydown`, porque xterm pasa `keypress` y `keyup` por el mismo manejador (ADR-067).
+- En macOS el módulo devuelve `none` para todo: `Cmd+C` / `Cmd+V` ya los atienden los `role` del
+  menú y xterm escucha los eventos `copy` y `paste` del DOM. `Ctrl+C` en un Mac es interrumpir.
+- Botón secundario en Windows como en la consola: con selección copia y la suelta; sin ella pega.
+- Canal `clipboard:read-text` / `clipboard:write-text` (texto plano) en `register.ts`, expuesto
+  como `dotforge.clipboard`. `navigator.clipboard` no era una opción: la ventana deniega todos los
+  permisos del navegador y leer el portapapeles es uno de ellos.
+- `attachClipboard` en `xterm-bridge.ts`: `attachCustomKeyEventHandler` con `preventDefault()` en
+  los gestos atendidos —sin eso el evento sigue hasta el acelerador del menú y `role: 'paste'`
+  pega una segunda vez— y `contextmenu` sobre el contenedor de la pestaña.
+- `PanelHost.platform()`: el panel no sabía dónde corría y el gesto depende de ello.
+- 18 pruebas en `terminal-clipboard.test.mjs`: 15 del modelo y 3 estructurales (el enganche en
+  `panel.ts`, el `preventDefault()` junto al `return false`, y que ningún archivo del renderer use
+  `navigator.clipboard`).
+
+**Verificado:** `npm run build`, `tsc --noEmit` limpio, `npm run test:unit` en verde (59 archivos).
+Y con teclas de verdad sobre la ventana, en `cmd.exe`: `Ctrl+C` sin selección sigue interrumpiendo
+(`echo A` cortado y prompt nuevo) y `Shift+Insert` pega `PEGADO123` **una sola vez**. `Ctrl+V` va
+por el mismo camino del código; su única diferencia es el acelerador del menú, y que
+`preventDefault()` lo apaga es justo lo que la línea base demostró (con xterm consumiendo la tecla,
+el `role` no pegaba).
+
+**Errores encontrados:**
+- *Síntoma:* la sonda de teclas mandó `echo PRUEBA` + Intro al chat que el usuario tenía en
+  primer plano. *Causa raíz:* `AppActivate` falló sin decirlo y `SendKeys` teclea en la ventana que
+  esté delante. *Arreglo:* la sonda comprueba con `GetForegroundWindow` que la ventana activa es la
+  del IDE antes de mandar nada, y devuelve el portapapeles que pisa. Anotado en las trampas.
+- *Síntoma:* la sonda de `--probe=` tecleaba `echohola`: el espacio no llegaba. *Causa raíz:* xterm
+  atiende las letras en `keydown` y los caracteres imprimibles sin tecla propia en `keypress` con
+  `charCode`. *Arreglo:* teclear con `keypress` para todo lo imprimible.
+- *Síntoma:* `.click()` sobre el perfil abría la pestaña sin foco y las teclas iban al `<body>`.
+  *Causa raíz:* `renderTerminal` sólo toma el foco si el elemento enfocado está dentro del panel, y
+  un clic sintético no mueve el foco. Es el comportamiento deseado para el usuario (una tarea de
+  fondo no roba el cursor del editor); la sonda enfoca el `textarea` de xterm a mano.
+
+**Siguiente:** si `cls` vuelve a aparecer, capturar en esa máquina el tamaño de la pestaña
+(`document.querySelectorAll('.xterm-rows > div').length`) y la salida de `mode con`: un ConPTY con
+más filas de las que xterm pinta es el único mecanismo por el que la secuencia capturada dejaría
+texto en pantalla.

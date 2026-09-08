@@ -142,6 +142,7 @@ IDE-DOTNET/
 │   │   ├── file-search.ts      # * Buscar en los archivos: qué casa, qué entra y cómo se recorta (puro)
 │   │   ├── terminal-cwd.ts     # * Navegación de la terminal: qué es un `cd` y cómo se pinta (puro)
 │   │   ├── terminal-profiles.ts # * Perfiles de terminal: catálogo, plataforma y nombre de pestaña (puro)
+│   │   ├── terminal-clipboard.ts # * Copiar y pegar en la terminal: qué gesto es cada tecla y clic (puro)
 │   │   ├── terminal-layout.ts  # * Pestañas guardadas: saneado y plan de reapertura (puro)
 │   │   ├── vsix-contributions.ts # * Temas y fragmentos de un .vsix -> formato de Monaco (puro)
 │   │   ├── json-text.ts        # * JSON escrito por otras herramientas: la marca de orden de bytes (puro)
@@ -668,6 +669,17 @@ npx electron . --smoke-test
   exactamente lo que nadie espera.
 - **La pestaña no se cierra sola cuando el intérprete termina.** Si el `exit` fue un error, lo
   último que escribió es lo único que lo explica.
+- **Copiar y pegar lo decide el IDE, no el intérprete** (ADR-067). xterm manda `Ctrl+C` y `Ctrl+V`
+  al intérprete como U+0003 y U+0016; PowerShell disimulaba porque PSReadLine lee el portapapeles
+  del sistema por su cuenta y `cmd.exe` pintaba `^V`. `keyboardGesture` y `mouseGesture`
+  (`src/shared/terminal-clipboard.ts`) dicen qué es cada gesto: `Ctrl+C` **con selección** copia y
+  **sin ella** interrumpe; `Ctrl+V`, `Ctrl+Shift+V` y `Shift+Insert` pegan; el botón secundario en
+  Windows copia si hay selección y pega si no. En macOS no se toca nada: lo hacen los `role` del
+  menú con `Cmd`.
+- **El portapapeles va por IPC** (`clipboard:read-text` / `clipboard:write-text`, texto plano).
+  `navigator.clipboard` no sirve: la ventana deniega todos los permisos del navegador, y leer el
+  portapapeles es uno. Y el gesto atendido llama a `preventDefault()`: sin eso el evento sigue
+  hasta el `role: 'paste'` del menú y pega dos veces.
 - xterm **no se bundlea**, como Monaco: se sirve desde `build/vendor/xterm/`. Sus `<script>` van
   **antes** que el loader AMD de Monaco en `index.html`; ver la sección de trampas.
 
@@ -1341,3 +1353,12 @@ npm run fetch:toolchain -- --platform win32 --arch x64
   installation to use` y muere para nada, porque el `.node` que se iba a distribuir ya estaba en el
   paquete y funcionando. Se apaga con `npmRebuild: false` en `electron-builder.yml`, y hay una
   prueba que lo exige: es justo la línea que alguien quita porque parece que no hace nada.
+- **Una funcionalidad que "funciona" en un intérprete y no en otro no es del intérprete.** `Ctrl+V`
+  pegaba en PowerShell y pintaba `^V` en `cmd.exe`, y la primera lectura fue "cmd no sabe pegar".
+  Lo que pasaba es que xterm mandaba U+0016 a los dos y PSReadLine, que lee el portapapeles del
+  sistema por su cuenta, tapaba el hueco. Cuando una tecla llega a la terminal como carácter de
+  control, lo que haga después el programa de dentro no dice nada de lo que hizo el IDE.
+- **`SendKeys` teclea en la ventana que esté delante, sea cual sea.** Probar un atajo con teclas
+  de verdad exige activar la ventana del IDE y **comprobar** que se activó (`GetForegroundWindow`)
+  antes de mandar nada: un `AppActivate` que falla en silencio manda "echo PRUEBA" al chat que el
+  usuario tenga abierto. Y hay que guardar y devolver el portapapeles, que la prueba pisa.

@@ -806,6 +806,8 @@ export const IPC = {
   appSettingsSet: 'app:settings:set',
   appOpenExternal: 'app:open-external',
   appShowItemInFolder: 'app:show-item-in-folder',
+  clipboardReadText: 'clipboard:read-text',
+  clipboardWriteText: 'clipboard:write-text',
 
   workspaceOpenDialog: 'workspace:open-dialog',
   workspaceOpenSolutionDialog: 'workspace:open-solution-dialog',
@@ -1051,6 +1053,17 @@ export interface DotForgeApi {
     setSettings(patch: Partial<AppSettings>): Promise<AppSettings>;
     openExternal(url: string): Promise<void>;
     showItemInFolder(path: string): Promise<void>;
+  };
+  /**
+   * Portapapeles del sistema, para las pestañas de pseudoterminal (Fase 28).
+   *
+   * `navigator.clipboard` no sirve: la ventana deniega todos los permisos del navegador, y leer
+   * el portapapeles es uno de ellos. Es la pareja mínima —texto plano, sin formatos— y la usa
+   * sólo la terminal: el editor lo hace a través de Monaco y de los `role` del menú.
+   */
+  clipboard: {
+    readText(): Promise<string>;
+    writeText(text: string): Promise<void>;
   };
   workspace: {
     openDialog(): Promise<string | null>;

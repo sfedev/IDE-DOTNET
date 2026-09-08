@@ -396,7 +396,10 @@ solución cuya arquitectura no se reconoce, no producen ni un aviso.
 **Elige intérprete.** El botón `+` del panel abre una pestaña nueva y pregunta con qué: PowerShell,
 PowerShell 7, el símbolo del sistema (o zsh y bash fuera de Windows) y la **terminal asistida**, que
 es la de siempre. Las de intérprete llevan pseudoterminal de verdad: colores, `Ctrl+C`,
-autocompletado nativo y su propio `cd`. La asistida se queda porque es la única que sabe sugerirte
+autocompletado nativo y su propio `cd`. **Copiar y pegar** funciona igual en todas: `Ctrl+C` con
+texto seleccionado copia (sin él, interrumpe el proceso, como siempre), `Ctrl+V` o `Shift+Insert`
+pegan, y el botón derecho copia la selección o pega si no hay ninguna, como en la consola de
+Windows. La asistida se queda porque es la única que sabe sugerirte
 subcomandos y ramas mientras escribes. Conviven todas las pestañas que quieras, cada una con su
 sesión; cerrar una cierra su intérprete, y cerrar el IDE se las lleva todas.
 

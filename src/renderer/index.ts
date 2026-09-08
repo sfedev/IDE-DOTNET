@@ -250,6 +250,7 @@ class DotForgeApp {
     stopDebug: () => void window.dotforge.debug.stop(),
     servicesChanged: () => this.startupBar.render(),
     notify: (message, level) => this.notify(message, level),
+    platform: () => this.info?.platform ?? 'win32',
   });
 
   /** Gestor de EF Core: migraciones, esquema y cadenas de conexión. */

@@ -552,3 +552,13 @@ export type {
   TabProject,
   TabProjectSettings,
 } from '../shared/editor-tabs.js';
+
+/**
+ * Portapapeles de la terminal (Fase 28).
+ *
+ * Qué gesto es copiar, cuál es pegar y cuál tiene que llegar al intérprete tal cual. `Ctrl+C` con
+ * selección y sin ella son dos cosas distintas, y equivocarse deja o un proceso que no se puede
+ * parar o una terminal que no sabe copiar: se prueba, no se supone.
+ */
+export { keyboardGesture, managesClipboard, mouseGesture, RIGHT_BUTTON } from '../shared/terminal-clipboard.js';
+export type { ClipboardGesture, GestureContext, KeyGesture } from '../shared/terminal-clipboard.js';

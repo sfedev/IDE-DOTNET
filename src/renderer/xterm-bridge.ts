@@ -11,6 +11,8 @@
  * ataría la compilación a un módulo que en ejecución no se importa nunca.
  */
 
+import { keyboardGesture, mouseGesture, type ClipboardGesture } from '../shared/terminal-clipboard.js';
+
 export interface XtermDisposable {
   dispose(): void;
 }
@@ -27,6 +29,16 @@ export interface XtermTerminal {
   loadAddon(addon: unknown): void;
   onData(listener: (data: string) => void): XtermDisposable;
   onResize(listener: (size: { cols: number; rows: number }) => void): XtermDisposable;
+  /**
+   * Manejador previo de teclado. Devolver `false` le dice a xterm que no procese el evento; se
+   * invoca con `keydown`, `keypress` y `keyup`.
+   */
+  attachCustomKeyEventHandler(handler: (event: KeyboardEvent) => boolean): void;
+  hasSelection(): boolean;
+  getSelection(): string;
+  clearSelection(): void;
+  /** Pega como si viniera del portapapeles: respeta el modo de pegado entre corchetes y convierte los saltos. */
+  paste(data: string): void;
   options: Record<string, unknown>;
 }
 
@@ -130,4 +142,65 @@ export function applyTheme(term: XtermTerminal, options: { fontFamily: string; f
   term.options['theme'] = themeColors();
   term.options['fontFamily'] = options.fontFamily;
   term.options['fontSize'] = options.fontSize;
+}
+
+/** Lo que la terminal necesita del portapapeles del sistema: texto plano, en las dos direcciones. */
+export interface TerminalClipboard {
+  readText(): Promise<string>;
+  writeText(text: string): Promise<void>;
+}
+
+/**
+ * Copiar y pegar en una pestaña de pseudoterminal (Fase 28).
+ *
+ * xterm por sí solo manda `Ctrl+C` y `Ctrl+V` al intérprete como U+0003 y U+0016, y llama a
+ * `preventDefault()`, con lo que tampoco llegan a los `role` del menú. PowerShell disimulaba
+ * (PSReadLine lee el portapapeles del sistema por su cuenta); `cmd.exe` pintaba `^V`. Qué gesto es
+ * cada tecla lo decide `terminal-clipboard.ts`, que es puro; aquí sólo se ejecuta.
+ *
+ * El `preventDefault()` de los gestos atendidos es deliberado y no redundante: sin él, el evento
+ * sigue hasta el acelerador del menú (`role: 'paste'`), que pega **otra vez** a través del evento
+ * `paste` del DOM que xterm también escucha.
+ */
+export function attachClipboard(
+  term: XtermTerminal,
+  host: HTMLElement,
+  options: { platform: string; clipboard: TerminalClipboard },
+): void {
+  const context = (): { platform: string; hasSelection: boolean } => ({
+    platform: options.platform,
+    hasSelection: term.hasSelection(),
+  });
+
+  const perform = (gesture: ClipboardGesture): void => {
+    if (gesture === 'copy') {
+      const text = term.getSelection();
+      if (text !== '') void options.clipboard.writeText(text);
+      return;
+    }
+    if (gesture === 'paste') {
+      void options.clipboard.readText().then((text) => {
+        if (text !== '') term.paste(text);
+      });
+    }
+  };
+
+  term.attachCustomKeyEventHandler((event) => {
+    const gesture = keyboardGesture(event, context());
+    if (gesture === 'none') return true;
+    event.preventDefault();
+    perform(gesture);
+    return false;
+  });
+
+  host.addEventListener('contextmenu', (event) => {
+    const gesture = mouseGesture(event.button, context());
+    if (gesture === 'none') return;
+    event.preventDefault();
+    perform(gesture);
+    // Como en la consola de Windows: copiar con el botón secundario suelta la selección, que es la
+    // señal de que se ha copiado.
+    if (gesture === 'copy') term.clearSelection();
+    term.focus();
+  });
 }

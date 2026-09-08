@@ -8,7 +8,7 @@
 import { execFile } from 'node:child_process';
 import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron';
 
 import type {
   AiProbeResult,
@@ -544,6 +544,15 @@ export function registerIpcHandlers(options: IpcOptions = {}): void {
 
   ipcMain.handle(IPC.appShowItemInFolder, (_event, path: unknown): void => {
     shell.showItemInFolder(assertInsideWorkspace(path));
+  });
+
+  // --- Portapapeles -----------------------------------------------------------------------
+  // Sólo texto plano y sólo para la terminal (Fase 28). La ventana deniega todos los permisos del
+  // navegador, así que `navigator.clipboard.readText()` no es una opción en el renderer.
+  ipcMain.handle(IPC.clipboardReadText, (): string => clipboard.readText());
+
+  ipcMain.handle(IPC.clipboardWriteText, (_event, text: unknown): void => {
+    clipboard.writeText(requireString(text, 'text'));
   });
 
   // --- Workspace ----------------------------------------------------------------------------

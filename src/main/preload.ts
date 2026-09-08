@@ -101,6 +101,11 @@ const api: DotForgeApi = {
     showItemInFolder: (path) => ipcRenderer.invoke(IPC.appShowItemInFolder, path) as Promise<void>,
   },
 
+  clipboard: {
+    readText: () => ipcRenderer.invoke(IPC.clipboardReadText) as Promise<string>,
+    writeText: (text) => ipcRenderer.invoke(IPC.clipboardWriteText, text) as Promise<void>,
+  },
+
   workspace: {
     openDialog: () => ipcRenderer.invoke(IPC.workspaceOpenDialog) as Promise<string | null>,
     openSolutionDialog: () => ipcRenderer.invoke(IPC.workspaceOpenSolutionDialog) as Promise<string | null>,

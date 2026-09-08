@@ -27,7 +27,7 @@ import { FOCUS_KEY_ATTRIBUTE } from '../focus-guard.js';
 import { presentProject } from '../file-icons.js';
 import { icon, type IconName } from '../icons.js';
 import { detectListeningUrl, portOf } from '../run-output.js';
-import { applyTheme, createTerminal, type XtermFitAddon, type XtermTerminal } from '../xterm-bridge.js';
+import { applyTheme, attachClipboard, createTerminal, type XtermFitAddon, type XtermTerminal } from '../xterm-bridge.js';
 import {
   applySuggestion,
   caretAfterApply,
@@ -101,6 +101,13 @@ export interface PanelHost {
    * que es la peor de las respuestas posibles.
    */
   notify(message: string, level: 'info' | 'ok' | 'warn' | 'error'): void;
+  /**
+   * Plataforma en la que corre el IDE, tal y como la dice el proceso principal.
+   *
+   * La necesita el portapapeles de la terminal: en macOS lo atienden los `role` del menú y
+   * `Ctrl+C` es siempre interrumpir; en el resto, lo decide el IDE (Fase 28).
+   */
+  platform(): string;
 }
 
 /**
@@ -1671,6 +1678,7 @@ export class PanelView {
     }
 
     created.term.onData((data) => void window.dotforge.terminal.write(session.terminalId, data));
+    attachClipboard(created.term, host, { platform: this.host.platform(), clipboard: window.dotforge.clipboard });
     created.term.onResize(({ cols, rows }) => void window.dotforge.terminal.resize(session.terminalId, cols, rows));
 
     this.terminals.push(terminal);
