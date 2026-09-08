@@ -14,6 +14,12 @@ Su módulo estrella es el **Scaffolding Wizard**: un generador de arquitecturas 
 que produce soluciones .NET **compilables y ejecutables** siguiendo Clean Architecture,
 Arquitectura Hexagonal (Ports & Adapters) o Domain-Driven Design + CQRS.
 
+Desde la v2.9.0 las pestañas de intérprete **copian y pegan** como cualquier terminal de Windows
+(ADR-067): `Ctrl+C` con selección copia y sin ella interrumpe, `Ctrl+V` y `Shift+Insert` pegan, y
+el botón derecho copia o pega según haya selección. Lo decide el IDE en un módulo puro, no el
+intérprete: pegar "funcionaba" en PowerShell porque PSReadLine lee el portapapeles por su cuenta, y
+en el símbolo del sistema salía `^V`.
+
 Desde la v2.8.0 el **actualizador in-app deja de ser mudo** en los dos extremos del gesto: antes de
 cerrarse pregunta, diciendo cuánto tarda la instalación, quién la termina y si la aplicación vuelve
 sola —el botón dice "Cerrar e instalar", no "Reiniciar y aplicar", porque el IDE no reinicia—, y en

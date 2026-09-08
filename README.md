@@ -53,6 +53,11 @@ e instalar", que es lo que hace—. Y al volver te cuenta cómo fue: **"✅ ¡Ac
 con las novedades de la versión, o el aviso de que la instalación no llegó a completarse —porque se
 canceló el permiso de Windows, por ejemplo— con el botón para reintentarla sin volver a descargar
 nada.
+La v2.9.0 hace que las pestañas de intérprete **copien y peguen** como cualquier terminal de
+Windows: `Ctrl+C` con texto seleccionado copia (sin él, interrumpe, como siempre), `Ctrl+V` o
+`Shift+Insert` pegan, y el botón derecho copia la selección o pega si no hay ninguna. Hasta ahora
+pegar sólo funcionaba en PowerShell, y no por el IDE: era PSReadLine leyendo el portapapeles por su
+cuenta; en el símbolo del sistema salía `^V`.
 
 ![DotForge IDE con una solución DDD abierta](docs/screenshot-workspace.png)
 
