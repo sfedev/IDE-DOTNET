@@ -14,54 +14,35 @@ Windows · macOS · 100% open source
 
 ## Qué es
 
-DotForge IDE es una distribución de IDE construida sobre **Electron + Monaco Editor** y pensada
-específicamente para el flujo de trabajo de un desarrollador .NET: abrir una solución, entender su
-estructura, escribir C# y Razor con IntelliSense, compilar, ejecutar, depurar y gestionar paquetes
-NuGet sin salir de la ventana.
+DotForge IDE es un entorno de desarrollo de escritorio construido sobre **Electron + Monaco
+Editor**, pensado para el flujo de trabajo de un desarrollador .NET: abrir una solución, entender su
+estructura, escribir C# y Razor con IntelliSense, compilar, ejecutar, depurar, publicar y gestionar
+paquetes NuGet sin salir de la ventana.
 
-Su módulo diferencial es el **asistente de arquitecturas**: genera soluciones .NET completas —
-Clean Architecture, Hexagonal o DDD + CQRS — que **compilan, pasan sus pruebas y se ejecutan**
-desde el primer minuto, con un CRUD funcional de ejemplo. Desde la v1.4.0 lleva además un
-**asistente de IA que conoce esa arquitectura** y ayuda sin romperla, y desde la v1.5.0 un
-**panel visual de control de código fuente**, pastillas de estado de los procesos en marcha y un
-control del nivel de detalle de la salida de la CLI de .NET. La v1.6.0 añade el **gestor visual de
-Entity Framework Core** y un **cliente HTTP integrado** para probar la API que estás escribiendo, y
-la v1.7.0 un **visor de registro estructurado**, un **linter de reglas de arquitectura** y
-autocompletado de Docker, Azure y npm en la terminal. La v1.8.0 añade un **panel de contenedores y
-Docker Compose** para levantar los servicios de apoyo sin salir del IDE, y la v1.9.0 cierra el
-círculo del día a día: **explorador de pruebas** con lentes de código sobre cada `[Fact]`,
-**resaltado de C# estilo Visual Studio** alimentado por el compilador, **monitor de rendimiento**,
-**túneles públicos** para probar webhooks y **auditoría de vulnerabilidades** de los paquetes.
-La v2.0.0 hace que todo eso descanse sobre algo que por fin funciona: el **IntelliSense de C#**.
-La versión del servidor de Roslyn se fija y se verifica en vez de coger la última compilación
-publicada, cada instalación se comprueba archivo a archivo antes de lanzarla, y si el servidor
-falla el IDE **conmuta solo a OmniSharp** sin que tengas que enterarte.
-La v2.1.0 añade lo que le faltaba a la distribución: el IDE **se actualiza solo** —te avisa en una
-tarjeta y se instala al cerrar, sin interrumpirte— y trae un **explorador de extensiones de Open
-VSX** para buscar, instalar y desinstalar `.vsix` desde el registro abierto.
-La v2.5.0 convierte el panel inferior en una terminal de verdad: **varias pestañas y un selector de
-intérprete** —PowerShell, el símbolo del sistema o la terminal asistida de siempre—, con colores,
-`Ctrl+C` y autocompletado nativo.
-La v2.7.0 cierra el ciclo de "escribir, compilar, ejecutar" con el paso que faltaba: **publicar**.
-Botón derecho sobre un proyecto, eliges destino y modo, y el IDE deja la carpeta lista con un botón
-para abrirla. Y ordena la ventana: la **barra lateral se esconde** con `Ctrl+B`, y las **pestañas
-dicen de qué proyecto son** —una franja de color por proyecto y la tira colocable a un lado—, que es
-lo que hace navegable una solución con cinco `Program.cs` abiertos.
-La v2.8.0 hace que **actualizarse se explique**. Antes de cerrarse, el IDE te dice qué va a pasar:
-cuánto tarda la instalación, quién la termina y si la aplicación vuelve sola —el botón dice "Cerrar
-e instalar", que es lo que hace—. Y al volver te cuenta cómo fue: **"✅ ¡Actualizado con éxito!"**
-con las novedades de la versión, o el aviso de que la instalación no llegó a completarse —porque se
-canceló el permiso de Windows, por ejemplo— con el botón para reintentarla sin volver a descargar
-nada.
-La v2.9.0 hace que las pestañas de intérprete **copien y peguen** como cualquier terminal de
-Windows: `Ctrl+C` con texto seleccionado copia (sin él, interrumpe, como siempre), `Ctrl+V` o
-`Shift+Insert` pegan, y el botón derecho copia la selección o pega si no hay ninguna. Hasta ahora
-pegar sólo funcionaba en PowerShell, y no por el IDE: era PSReadLine leyendo el portapapeles por su
-cuenta; en el símbolo del sistema salía `^V`.
-La v2.9.1 arregla un fallo de la anterior que dejaba el IDE **sin poder abrirse** después de
-instalar una actualización: al limpiar la descarga aplicada, el arranque se topaba con el instalador
-todavía en marcha y moría antes de llegar a la ventana, dejando un proceso invisible que bloqueaba
-cualquier intento posterior de abrir el IDE.
+Su módulo diferencial es el **generador de arquitecturas**: produce soluciones .NET completas
+—Clean Architecture, Hexagonal o DDD + CQRS— que **compilan, pasan sus pruebas y se ejecutan** desde
+el primer minuto, con un CRUD funcional de ejemplo. Y no se queda en generarlas: lo que produce es
+lo que el resto del IDE sabe leer después. El linter conoce las reglas de dependencia de cada
+arquitectura y avisa cuando se rompen; el asistente de IA responde respetándolas.
+
+**100 % componentes open source.** Sin dependencias del VS Code Marketplace —se usa
+[Open VSX](https://open-vsx.org)— y sin binarios propietarios del C# Dev Kit.
+
+### De un vistazo
+
+| Área | Qué hay |
+|---|---|
+| [**Escribir**](#editor) | IntelliSense de C# con Roslyn (OmniSharp de respaldo), resaltado semántico decidido por el compilador, gramática Razor/Blazor propia y pestañas que dicen de qué proyecto son |
+| [**Generar**](#el-generador-de-arquitecturas) | Clean, Hexagonal y DDD + CQRS, desde un asistente visual o desde la CLI `dotforge`, sobre el mismo motor |
+| [**Compilar y ejecutar**](#compilación-y-ejecución) | `build`, `run`, `watch` y `test` con la salida en el panel, detección del puerto en el que escucha la aplicación y control del nivel de detalle de la CLI |
+| [**Depurar**](#depuración) | Puntos de interrupción, paso a paso, variables y pila de llamadas con NetCoreDbg |
+| [**Publicar**](#publicar-un-proyecto) | `dotnet publish` con diálogo de destinos y modos, y un botón para abrir la carpeta del resultado |
+| [**Datos y API**](#base-de-datos-y-entity-framework-core) | Gestor visual de EF Core (migraciones, esquema, cadenas de conexión) y [cliente HTTP integrado](#cliente-http-integrado) para archivos `.http` |
+| [**Calidad**](#explorador-de-pruebas) | Explorador de pruebas con lentes sobre cada `[Fact]`, [linter de arquitectura](#linter-de-reglas-de-arquitectura), [auditoría de vulnerabilidades](#auditoría-de-seguridad-de-nuget) y [visor de registro estructurado](#registro-estructurado) |
+| [**Entorno**](#terminal-varias-pestañas-navegación-docker-azure-y-npm) | Terminal con varias pestañas y selector de intérprete, [contenedores y Docker Compose](#contenedores-y-docker-compose), [monitor de rendimiento](#monitor-de-rendimiento) y [túneles públicos](#túnel-público-para-webhooks) |
+| [**Git**](#control-de-código-fuente) | Panel visual con preparados y cambios, editor de diferencias lado a lado y commit, push, pull y ramas |
+| [**IA**](#asistente-de-ia) | Asistente que conoce la arquitectura de la solución abierta, con Anthropic, OpenAI o un modelo local |
+| [**Distribución**](#actualizaciones-automáticas) | Se actualiza solo y explica qué va a pasar, con [extensiones de Open VSX](#extensiones-de-open-vsx) instalables desde el propio IDE |
 
 ![DotForge IDE con una solución DDD abierta](docs/screenshot-workspace.png)
 
@@ -69,6 +50,7 @@ cualquier intento posterior de abrir el IDE.
 
 ## Índice
 
+- [De un vistazo](#de-un-vistazo)
 - [Características](#características)
 - [Buscar en los archivos](#buscar-en-los-archivos)
 - [Publicar un proyecto](#publicar-un-proyecto)
@@ -97,6 +79,7 @@ cualquier intento posterior de abrir el IDE.
 - [Compilar y empaquetar](#compilar-y-empaquetar)
 - [Pruebas](#pruebas)
 - [Componentes open source](#componentes-open-source)
+- [Novedades](#novedades)
 - [Limitaciones conocidas](#limitaciones-conocidas)
 - [Documentación del proyecto](#documentación-del-proyecto)
 
@@ -541,14 +524,22 @@ una licencia que sí permite consumirlos desde otro producto.
 - El IDE comprueba si hay una versión posterior **cinco segundos después de arrancar**, y también
   cuando pulsas "Buscar ahora" en Ajustes.
 - Si la hay, aparece una tarjeta flotante con la versión, las notas de la publicación y dos
-  opciones: **Actualizar**, que descarga con barra de progreso y deja el botón "Reiniciar y
-  aplicar"; o **Descartar**, que esconde el aviso, sigue descargando en segundo plano e instala
-  sola la próxima vez que cierres el IDE.
+  opciones: **Actualizar**, que descarga con barra de progreso; o **Descartar**, que esconde el
+  aviso, sigue descargando en segundo plano e instala sola la próxima vez que cierres el IDE.
+- **Antes de cerrarse te dice qué va a pasar**: cuánto tarda la instalación, quién la termina y si
+  la aplicación vuelve sola. El botón dice lo que hace —"Cerrar e instalar"— y nunca promete un
+  reinicio: el IDE no reinicia, se cierra y deja trabajando al instalador.
+- **Y al volver te cuenta cómo fue**: "✅ ¡Actualizado con éxito!" con las novedades de la versión,
+  o el aviso de que la instalación no llegó a completarse —porque se canceló el permiso de Windows,
+  por ejemplo— con el botón para reintentarla sin volver a descargar nada.
 - La comprobación automática se apaga desde Ajustes → **Actualizaciones**. El botón "Buscar ahora"
   sigue funcionando con ella apagada.
 - En Windows la instalación es silenciosa (instalador NSIS). En macOS se abre la imagen de disco al
   cerrar y hay que arrastrar la app a Aplicaciones: sin certificado de firma no hay forma honesta
   de hacerlo solo, y la tarjeta lo dice en vez de fingir lo contrario.
+- Cada release publica un **`SHA256SUMS.txt`** con las sumas de sus artefactos, para comprobar que
+  lo descargado es lo que construyó la CI. Los binarios no están firmados todavía, así que Windows
+  avisará con SmartScreen: ver [Limitaciones conocidas](#limitaciones-conocidas).
 
 ### Producto
 
@@ -919,6 +910,33 @@ Sin componentes del VS Code Marketplace ni binarios propietarios del C# Dev Kit.
 En las soluciones **generadas**: EF Core, Serilog, Scalar y xUnit, todos con licencias permisivas.
 **MediatR queda deliberadamente fuera** por su cambio a licencia comercial; el despachador CQRS es
 propio.
+
+---
+
+## Novedades
+
+Cada versión, en una línea. Las notas completas de cada publicación están en
+[Releases](https://github.com/sfedev/IDE-DOTNET/releases).
+
+| Versión | Qué trajo |
+|---|---|
+| **2.9.1** | Arreglo: limpiar la descarga de una actualización dejaba el IDE **sin poder abrirse**, con un proceso invisible bloqueando cualquier intento posterior |
+| **2.9.0** | Las pestañas de intérprete **copian y pegan** como cualquier terminal de Windows. Hasta aquí, pegar sólo "funcionaba" en PowerShell — y no por el IDE |
+| **2.8.0** | Actualizarse **se explica**: antes de cerrar dice qué va a pasar y cuánto tarda, y al volver cuenta si se instaló o por qué no |
+| **2.7.0** | **Publicar** un proyecto desde el menú contextual. `Ctrl+B` esconde la barra lateral y las **pestañas dicen de qué proyecto son** |
+| **2.6.0** | **Claude Code dentro del IDE** (`Ctrl+Shift+C`), los temas y fragmentos de las extensiones instaladas por fin se aplican, y la terminal recuerda sus pestañas |
+| **2.5.0** | El panel inferior pasa a ser una terminal de verdad: **varias pestañas y selector de intérprete**, con colores, `Ctrl+C` y autocompletado nativo |
+| **2.4.0** | **Buscar dentro de los archivos** (`Ctrl+Shift+F`), con banderas, globs y salto a la línea y columna exactas |
+| **2.3.0** | La terminal **navega por el disco** (`cd` de verdad) y la **barra de menú superior** enseña el IDE entero |
+| **2.2.0** | Un paquete NuGet se instala **en varios proyectos a la vez**, y la barra de actividad se ordena arrastrando |
+| **2.1.0** | El IDE **se actualiza solo**, y trae un **explorador de extensiones de Open VSX** |
+| **2.0.0** | El **IntelliSense de C# funciona**: la versión de Roslyn se fija y se verifica, y si el servidor falla se conmuta solo a OmniSharp |
+| **1.9.0** | **Explorador de pruebas**, **resaltado semántico** estilo Visual Studio, **monitor de rendimiento**, **túneles públicos** y **auditoría de vulnerabilidades** |
+| **1.8.0** | **Contenedores y Docker Compose**: los servicios de apoyo del proyecto, con su estado y sus botones |
+| **1.7.0** | **Visor de registro estructurado**, **linter de reglas de arquitectura** y autocompletado de Docker, Azure y npm |
+| **1.6.0** | **Gestor visual de EF Core** y **cliente HTTP integrado** para probar la API que estás escribiendo |
+| **1.5.0** | **Panel visual de control de código fuente**, pastillas de estado por proceso y verbosidad de la CLI de .NET |
+| **1.4.0** | **Asistente de IA** que conoce la arquitectura de la solución abierta y responde sin romperla |
 
 ---
 
