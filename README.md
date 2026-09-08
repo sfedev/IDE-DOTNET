@@ -58,6 +58,10 @@ Windows: `Ctrl+C` con texto seleccionado copia (sin él, interrumpe, como siempr
 `Shift+Insert` pegan, y el botón derecho copia la selección o pega si no hay ninguna. Hasta ahora
 pegar sólo funcionaba en PowerShell, y no por el IDE: era PSReadLine leyendo el portapapeles por su
 cuenta; en el símbolo del sistema salía `^V`.
+La v2.9.1 arregla un fallo de la anterior que dejaba el IDE **sin poder abrirse** después de
+instalar una actualización: al limpiar la descarga aplicada, el arranque se topaba con el instalador
+todavía en marcha y moría antes de llegar a la ventana, dejando un proceso invisible que bloqueaba
+cualquier intento posterior de abrir el IDE.
 
 ![DotForge IDE con una solución DDD abierta](docs/screenshot-workspace.png)
 
