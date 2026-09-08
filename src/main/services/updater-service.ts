@@ -139,7 +139,14 @@ export async function initialize(options: UpdaterEnvironment): Promise<UpdateSta
   candidateAsset = null;
 
   const record = await readPending();
-  if (record === null) return state;
+  if (record === null) {
+    // Sin promesa que cumplir, lo que quede en `updates/` es basura: una descarga interrumpida, o
+    // el instalador que la limpieza anterior no pudo borrar porque todavía estaba en marcha. Éste
+    // es el único momento en el que se puede recoger — sin registro pendiente nadie vuelve a mirar
+    // esta carpeta— y son 130 MB por versión.
+    await removeUpdatesDir();
+    return state;
+  }
 
   const plan = installPlan(options.platform, record.file);
   const verdict = judgePending(record, {
@@ -236,7 +243,39 @@ async function writePending(record: PendingInstall): Promise<void> {
 /** Borra la descarga y la promesa: se aplicó, o dejó de valer. */
 async function discardPending(): Promise<void> {
   pending = null;
-  await rm(updatesDir(), { recursive: true, force: true });
+  await removeUpdatesDir();
+}
+
+/**
+ * Borra la carpeta de descargas, y **no lanza pase lo que pase** (ADR-068).
+ *
+ * Aquí vivía el peor fallo que ha tenido el IDE, y merece contarse entero porque no se parece a lo
+ * que uno busca. Al instalar una actualización en Windows, el instalador **relanza el IDE antes de
+ * terminar de salir él**: durante ese solape hay dos procesos, y uno de ellos es el `.exe` que
+ * acaba de arrancar al otro. El IDE recién abierto lee el registro pendiente, dictamina "instalada"
+ * y borra la carpeta — con el instalador todavía dentro de ella y en ejecución. Windows no deja
+ * borrar la imagen de un proceso vivo, así que `rm` levanta `EPERM`.
+ *
+ * `force: true` **no** cubre eso: sólo se traga que la ruta no exista. Y esta llamada estaba en el
+ * camino de arranque, antes de registrar el IPC, el menú y la ventana, así que la excepción se
+ * llevaba por delante todo lo que venía detrás: un proceso vivo, **sin ventana** y sosteniendo el
+ * bloqueo de instancia única. A partir de ahí el IDE no se podía abrir de ninguna manera —cada
+ * intento chocaba con el bloqueo y salía en silencio—, y el único rastro en el disco era una
+ * carpeta con el instalador dentro y sin `pending.json`: el borrado se llevó el archivo pequeño y
+ * murió en el grande.
+ *
+ * Limpiar 130 MB de una descarga ya aplicada es tarea doméstica. No puede impedir que el IDE
+ * arranque, así que se reintenta un poco —`rm` reintenta ante `EPERM`, que es justo este caso— y,
+ * si no sale, se deja para el arranque siguiente, cuando el instalador ya no exista.
+ */
+async function removeUpdatesDir(): Promise<void> {
+  try {
+    await rm(updatesDir(), { recursive: true, force: true, maxRetries: 3, retryDelay: 150 });
+  } catch (error) {
+    console.warn(
+      `[updater] no se ha podido limpiar la carpeta de actualizaciones: ${(error as Error).message}`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------------------------

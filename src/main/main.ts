@@ -6,7 +6,7 @@
  */
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { app, BrowserWindow, Menu, shell, type BrowserWindowConstructorOptions } from 'electron';
+import { app, BrowserWindow, dialog, Menu, shell, type BrowserWindowConstructorOptions } from 'electron';
 
 import { readdirSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -221,9 +221,16 @@ function runSmokeTest(window: BrowserWindow): void {
   });
 }
 
-/** Una sola instancia: dos IDEs sobre el mismo workspace se pisarían los archivos. */
+/**
+ * Una sola instancia: dos IDEs sobre el mismo workspace se pisarían los archivos.
+ *
+ * Se sale con `app.exit(0)` y no con `app.quit()`: `quit()` es una petición —anuncia la salida,
+ * emite `before-quit` y `will-quit`, y el módulo sigue ejecutándose entretanto—, y en este archivo
+ * `will-quit` es justamente donde se lanza el instalador de una actualización pendiente. Una
+ * segunda instancia no tiene nada que cerrar ni nada que instalar: se va, y sin efectos.
+ */
 if (!app.requestSingleInstanceLock()) {
-  app.quit();
+  app.exit(0);
 }
 
 function iconPath(): string | undefined {
@@ -781,12 +788,26 @@ function createWindow(): BrowserWindow {
   return window;
 }
 
+/**
+ * El arranque ha llegado hasta la ventana. Lo mira `second-instance` para no abrir una segunda
+ * mientras la primera todavía se está montando.
+ */
+let startupComplete = false;
+
 app.on('second-instance', () => {
   const window = BrowserWindow.getAllWindows()[0];
   if (window) {
     if (window.isMinimized()) window.restore();
     window.focus();
+    return;
   }
+
+  // Sin ventana y con el arranque terminado: es una instancia que se quedó a medias y que, por
+  // tener el bloqueo, deja el IDE inarrancable — cada intento del usuario choca con ella y sale en
+  // silencio (ADR-068). Abrir una ventana convierte ese callejón sin salida en el gesto que el
+  // usuario acaba de hacer. El guardia importa: durante el arranque todavía no hay ventana y
+  // crearla aquí abriría dos.
+  if (startupComplete) createWindow();
 });
 
 app.whenReady().then(async () => {
@@ -811,13 +832,23 @@ app.whenReady().then(async () => {
 
   // El actualizador recupera aquí lo que quedó descargado en una sesión anterior: si el usuario
   // pulsó "Descartar" y el IDE se fue abajo, la promesa de instalar al cerrar sigue en pie.
-  await updaterService.initialize({
-    userDataPath: app.getPath('userData'),
-    currentVersion: app.getVersion(),
-    platform: process.platform,
-    arch: process.arch,
-    quit: () => app.quit(),
-  });
+  //
+  // Va en su propio `try`: es un servicio accesorio y **ningún fallo suyo puede impedir que el IDE
+  // abra una ventana**. No es una precaución teórica: la limpieza de la descarga ya aplicada
+  // lanzaba `EPERM` cuando el instalador que acababa de relanzar el IDE seguía vivo, y como esta
+  // línea está antes del IPC, del menú y de la ventana, se llevaba el arranque entero por delante
+  // (ADR-068).
+  try {
+    await updaterService.initialize({
+      userDataPath: app.getPath('userData'),
+      currentVersion: app.getVersion(),
+      platform: process.platform,
+      arch: process.arch,
+      quit: () => app.quit(),
+    });
+  } catch (error) {
+    console.error(`[updater] no se ha podido inicializar: ${(error as Error).message}`);
+  }
 
   registerIpcHandlers({ diagnostic: isSmokeTest || uiAction !== null || screenshotTarget !== null });
 
@@ -873,9 +904,37 @@ app.whenReady().then(async () => {
     setTimeout(() => void updaterService.check(), STARTUP_CHECK_DELAY_MS);
   }
 
+  startupComplete = true;
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+}).catch((error: unknown) => {
+  // Red de seguridad del arranque (ADR-068).
+  //
+  // Todo lo que monta el IDE cuelga de este `then`, así que una excepción a mitad dejaba el
+  // proceso **vivo y sin ventana**: sin ventana nunca se emite `window-all-closed`, nadie cierra
+  // nada, y el bloqueo de instancia única sigue en pie. El síntoma para el usuario es el peor
+  // posible: el IDE no se abre, ni desde el menú de inicio ni desde el explorador, y no aparece
+  // ningún error en ninguna parte.
+  //
+  // Salir es más honesto que enseñar una ventana a medias: un arranque interrumpido no ha
+  // registrado el IPC, así que su interfaz no respondería a nada. Se dice lo que ha pasado y se
+  // cierra, que es lo único que devuelve al usuario a un estado del que puede salir volviendo a
+  // abrir el IDE.
+  const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
+  console.error(`[arranque] el IDE no ha podido arrancar: ${detail}`);
+
+  if (!isSmokeTest && screenshotTarget === null) {
+    dialog.showErrorBox(
+      'DotForge IDE no ha podido arrancar',
+      `${error instanceof Error ? error.message : String(error)}
+
+Vuelve a abrirlo. Si se repite, cuéntalo con este mensaje.`,
+    );
+  }
+
+  app.exit(1);
 });
 
 app.on('window-all-closed', () => {

@@ -540,6 +540,18 @@ npx electron . --smoke-test
 - El instalador se lanza `detached` y con `stdio: 'ignore'`: el padre está desapareciendo, y un hijo
   que hereda sus descriptores muere con él a mitad de la instalación. Por lo mismo no se usa
   `shell.openPath`, que devuelve una promesa que nadie va a poder esperar.
+- **Limpiar la descarga no puede impedir que el IDE arranque** (ADR-068). El instalador relanza el
+  IDE **antes de terminar de salir él**, así que el IDE recién abierto borra la carpeta de descargas
+  con el instalador dentro y en marcha: Windows no deja borrar la imagen de un proceso vivo y `rm`
+  levanta `EPERM` (`force: true` sólo se traga que la ruta no exista). Se reintenta, se traga el
+  fallo y el arranque siguiente **recoge** lo que quedó — sin registro pendiente nadie volvía a
+  mirar esa carpeta, y son 130 MB.
+- **Nada del arranque puede terminar sin ventana** (ADR-068). El actualizador se inicializa dentro de
+  su propio `try` y la cadena de `whenReady` tiene un `catch` que informa y cierra. Ver la sección de
+  trampas: un proceso vivo y sin ventana deja el IDE **imposible de abrir**, y sin ningún error.
+- **`--updated` va en el plan de instalación**, además de `/S` y `--force-run`: es lo que hace que
+  NSIS espere a que el IDE termine de cerrarse en vez de matarlo mientras desmonta sus terminales.
+  Es el `CloseApplications=yes` de un instalador de Inno Setup.
 - El servicio **no importa `electron`**: `userData`, la versión y el cierre se le inyectan.
 
 ### Publicación de releases (`.github/workflows/release.yml`, `scripts/release-notes.mjs`)
@@ -1368,3 +1380,23 @@ npm run fetch:toolchain -- --platform win32 --arch x64
   de verdad exige activar la ventana del IDE y **comprobar** que se activó (`GetForegroundWindow`)
   antes de mandar nada: un `AppActivate` que falla en silencio manda "echo PRUEBA" al chat que el
   usuario tenga abierto. Y hay que guardar y devolver el portapapeles, que la prueba pisa.
+- **`fs.rm` con `force: true` no se traga un archivo bloqueado.** `force` sólo ignora que la ruta no
+  exista; ante `EPERM` o `EBUSY` lanza, y en Windows no se puede borrar la imagen de un proceso vivo.
+  Al actualizar, el instalador relanza el IDE **antes de terminar de salir él**, así que el IDE
+  recién abierto borraba la carpeta de descargas con el instalador dentro y corriendo. El borrado se
+  lleva los archivos pequeños y muere en el grande, que es la firma que queda en el disco: la carpeta
+  con el instalador y sin `pending.json`.
+- **Un `then` sin `catch` en el arranque deja el IDE imposible de abrir.** Todo lo que monta el IDE
+  cuelga de `app.whenReady().then(...)`, así que una excepción a mitad deja el proceso **vivo y sin
+  ventana**. Sin ventana no se emite `window-all-closed`, nadie cierra nada, y el bloqueo de
+  instancia única sigue en pie: cada intento posterior de abrir el IDE choca con él y sale en
+  silencio, desde el menú de inicio y desde el explorador por igual. No aparece ningún error en
+  ninguna parte, y sólo se sale de ahí con el administrador de tareas. Lo provocó una limpieza de
+  130 MB que no se pudo hacer.
+- **`app.quit()` es una petición, no una salida.** Anuncia el cierre, emite `before-quit` y
+  `will-quit`, y el módulo sigue ejecutándose entretanto — y en `main.ts` `will-quit` es donde se
+  lanza el instalador de una actualización pendiente. Para irse de verdad y sin efectos, `app.exit()`.
+- **Una prueba de una condición de carrera que no verifica la condición mide otra cosa.** El primer
+  intento de reproducir el borrado bloqueado daba verde porque el proceso hijo todavía no había
+  arrancado: sin comprobar que está vivo (`process.kill(pid, 0)`), lo que se prueba es que borrar una
+  carpeta funciona.

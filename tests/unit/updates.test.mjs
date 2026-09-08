@@ -281,7 +281,26 @@ describe('plan de instalación', () => {
   it('en Windows el instalador NSIS se lanza en silencio', () => {
     const plan = installPlan('win32', 'C:\\Users\\x\\AppData\\updates\\Setup.exe');
     assert.equal(plan.kind, 'silent');
-    assert.deepEqual(plan.args, ['/S', '--force-run']);
+    assert.deepEqual(plan.args, ['/S', '--updated', '--force-run']);
+  });
+
+  /**
+   * `--updated` es la bandera que hace que el instalador **espere** a que el IDE termine de
+   * cerrarse, en vez de darlo por muerto y ponerse a reemplazar los archivos de un proceso que
+   * todavía está desmontando sus terminales y su servidor de lenguaje. Es el equivalente de
+   * `CloseApplications=yes` de un instalador de Inno Setup.
+   *
+   * NSIS relanza después el IDE pasándole esta misma cadena como argumento, así que acaba en el
+   * `argv` de un IDE recién abierto: toda bandera de este plan tiene que seguir pareciendo una
+   * bandera, porque el argumento posicional que abre una carpeta descarta lo que empieza por `-`.
+   */
+  it('el plan silencioso avisa de que el IDE se está cerrando', () => {
+    const plan = installPlan('win32', 'C:\\x\\Setup.exe');
+    assert.ok(plan.args.includes('--updated'));
+
+    for (const flag of plan.args) {
+      assert.ok(flag.startsWith('-') || flag.startsWith('/'), `${flag} no parece una bandera`);
+    }
   });
 
   /**

@@ -395,14 +395,24 @@ export function installPlan(platform: NodeJS.Platform, file: string): InstallPla
   if (platform === 'win32' && lower.endsWith('.exe')) {
     // `/S` es el modo silencioso de NSIS, que es el instalador que genera electron-builder.
     //
+    // `--updated` es el que le dice al instalador que esto es una actualización y que el IDE
+    // **se está cerrando ahora mismo** (ADR-068). Sin él, NSIS no espera a nadie: da por hecho que
+    // la aplicación es un estorbo, la mata a la primera y se pone a reemplazar los archivos de un
+    // proceso que todavía está desmontando sus terminales y su servidor de lenguaje. Con él,
+    // duerme, comprueba y reintenta hasta que no queda nada vivo bajo la carpeta de instalación.
+    // Es lo mismo que `CloseApplications=yes` en un instalador de Inno Setup.
+    //
     // `--force-run` es la otra mitad, y es la que hace que la promesa de la tarjeta —"se vuelve a
     // abrir al terminar"— sea verdad: un instalador NSIS asistido (`oneClick: false`) instalado en
-    // silencio **no** relanza la aplicación por su cuenta. Es la misma pareja de banderas que
-    // manda `electron-updater` cuando instala una actualización, y NSIS ignora lo que no reconoce.
+    // silencio **no** relanza la aplicación por su cuenta.
+    //
+    // Son las tres que manda `electron-updater`, y NSIS ignora lo que no reconoce. `--updated`
+    // además llega al IDE relanzado como argumento: no estorba porque el argumento posicional que
+    // abre una carpeta descarta todo lo que empiece por `-`, y hay una prueba que lo vigila.
     return {
       kind: 'silent',
       command: file,
-      args: ['/S', '--force-run'],
+      args: ['/S', '--updated', '--force-run'],
       note: 'Se instalará en silencio al cerrar el IDE y DotForge se abrirá de nuevo al terminar.',
     };
   }

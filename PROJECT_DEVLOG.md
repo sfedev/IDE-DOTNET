@@ -656,6 +656,29 @@ por tanto **compila** pero no **ejecuta** los proyectos generados. Se añade el 
       y xterm lo aplica, en desarrollo y en la 2.8.0 instalada. Si vuelve a verse, hace falta el
       contexto exacto (tamaño del panel, qué había antes)
 
+### Fase 29 — El IDE siempre arranca después de actualizarse
+- [x] F29.1 `removeUpdatesDir` no lanza nunca: limpiar una descarga ya aplicada es tarea doméstica
+      y no puede impedir que el IDE abra una ventana (ADR-068)
+- [x] F29.2 Reintentos en el borrado: `rm` reintenta ante `EPERM`, que es exactamente el caso —el
+      instalador sigue vivo porque acaba de relanzar el IDE
+- [x] F29.3 Recogida en el arranque siguiente: sin registro pendiente nadie volvía a mirar la
+      carpeta, así que un instalador huérfano de 130 MB se quedaba en el disco de por vida
+- [x] F29.4 `updaterService.initialize` dentro de su propio `try`: es un servicio accesorio
+- [x] F29.5 `catch` en la cadena de arranque: informa y cierra, en vez de dejar un proceso vivo y
+      sin ventana que además sostiene el bloqueo de instancia única
+- [x] F29.6 Una segunda instancia sale con `app.exit(0)` y no con `app.quit()`, que es una petición
+      y deja el módulo ejecutándose — y en este archivo `will-quit` lanza instaladores
+- [x] F29.7 `second-instance` abre ventana si no hay ninguna y el arranque ya terminó: convierte el
+      callejón sin salida en el gesto que el usuario acaba de hacer
+- [x] F29.8 `--updated` en el plan de instalación: hace que NSIS **espere** a que el IDE termine de
+      cerrarse, como `CloseApplications=yes` en Inno Setup
+- [x] F29.9 Pruebas: 6 nuevas (una reproduce el `EPERM` de verdad en Windows, dos son estructurales
+      sobre la cadena de arranque, y las demás cubren la recogida y las banderas)
+- [x] F29.10 Verificado sobre la aplicación real, antes y después, con un `userData` aislado y un
+      instalador falso en marcha: el código publicado se queda sin ventana con
+      `UnhandledPromiseRejectionWarning: EPERM` y hay que matarlo; el corregido escribe un aviso y
+      llega a `SMOKE_OK`
+
 ---
 
 ## Decisiones técnicas (ADR corto)
@@ -1532,6 +1555,59 @@ sistema por su cuenta: la funcionalidad dependía de qué intérprete hubiera de
   estructural que exige verlo junto al `return false`.
 - **El canal es de texto plano y sólo lo usa la terminal.** El editor copia y pega a través de
   Monaco y de los `role` del menú; no hay motivo para que pase por aquí.
+
+### ADR-068 — Limpiar una actualización no puede impedir que el IDE arranque
+**Fecha:** 2026-09-08
+**Contexto:** Al instalar una actualización en Windows, el instalador **relanza el IDE antes de
+terminar de salir él**: durante ese solape hay dos procesos, y uno de ellos es el `.exe` que acaba
+de arrancar al otro. El IDE recién abierto leía el registro pendiente, dictaminaba "instalada" y
+borraba la carpeta de descargas — con el instalador dentro y en ejecución. Windows no deja borrar la
+imagen de un proceso vivo, así que `rm` levantaba `EPERM`; `force: true` no cubre eso, sólo se traga
+que la ruta no exista. Y la llamada estaba en el camino de arranque, antes del IPC, del menú y de la
+ventana, dentro de un `then` sin `catch`.
+
+El resultado era el peor fallo que ha tenido el IDE: un proceso **vivo, sin ventana** y sosteniendo
+el bloqueo de instancia única. Sin ventana nunca se emite `window-all-closed`, así que nadie cerraba
+nada; y con el bloqueo puesto, cada intento posterior de abrir el IDE —desde el menú de inicio, desde
+el explorador, desde donde fuera— chocaba con él y salía en silencio. **El IDE no se podía volver a
+abrir de ninguna manera y no había ningún error a la vista.** El único rastro en el disco era una
+carpeta de descargas con el instalador dentro y sin `pending.json`: el borrado se llevó el archivo
+pequeño y murió en el grande.
+
+**Opciones:**
+- (a) comprobar antes si el archivo se puede borrar;
+- (b) no borrar nunca en el arranque y dejarlo siempre para más tarde;
+- (c) que la limpieza sea de mejor esfuerzo y que **nada** del arranque pueda terminar sin ventana.
+
+**Decisión:** (c), en tres capas.
+**Consecuencias:**
+
+- **(a) no sirve.** Entre la comprobación y el borrado el instalador sigue pudiendo estar vivo, y en
+  Windows la forma de saber si un archivo está bloqueado es intentarlo. La pregunta correcta no es
+  "¿puedo borrarlo?" sino "¿qué pasa si no puedo?".
+- **Limpiar es tarea doméstica y ahora lo dice el código.** Se reintenta —`rm` reintenta ante
+  `EPERM`, que es justo este caso— y, si no sale, se deja para el arranque siguiente. Ese arranque
+  **recoge lo que quedó**: sin registro pendiente nadie volvía a mirar esa carpeta, así que un
+  instalador huérfano de 130 MB se quedaba en el disco para siempre.
+- **El actualizador arranca dentro de su propio `try`.** Es un servicio accesorio: que no pueda
+  contar si la actualización se aplicó es una pena, que impida abrir una ventana es una avería.
+- **La cadena de arranque tiene un `catch` que informa y cierra.** Enseñar una ventana a medias sería
+  peor: un arranque interrumpido no ha registrado el IPC, así que su interfaz no respondería a nada.
+  Cerrar devuelve al usuario a un estado del que puede salir volviendo a abrir el IDE, que es
+  exactamente lo que antes no podía hacer.
+- **Una segunda instancia sale con `app.exit(0)`, no con `app.quit()`.** `quit()` es una petición:
+  anuncia la salida, emite `before-quit` y `will-quit`, y el módulo sigue ejecutándose entretanto —
+  y en `main.ts` `will-quit` es donde se lanza el instalador de una actualización pendiente.
+- **Y `second-instance` abre ventana si no hay ninguna**, con el arranque ya terminado. Es la red
+  que convierte "el IDE no se abre y no sé por qué" en el gesto que el usuario acaba de hacer.
+- **El instalador recibe además `--updated`**, que es lo que hace que NSIS **espere** a que el IDE
+  termine de cerrarse en vez de matarlo mientras desmonta sus terminales y su servidor de lenguaje.
+  Es el equivalente de `CloseApplications=yes` de un instalador de Inno Setup, que es como resuelve
+  esto el proyecto DocGen.
+- **Se verificó antes y después sobre la aplicación real**, con un `userData` aislado
+  (`--user-data-dir`) y un instalador falso en marcha: el código publicado se queda sin ventana con
+  `UnhandledPromiseRejectionWarning: EPERM` y hay que matarlo; el corregido escribe un aviso y llega
+  a `SMOKE_OK`.
 
 ---
 
@@ -4995,3 +5071,78 @@ el `role` no pegaba).
 (`document.querySelectorAll('.xterm-rows > div').length`) y la salida de `mode con`: un ConPTY con
 más filas de las que xterm pinta es el único mecanismo por el que la secuencia capturada dejaría
 texto en pantalla.
+
+### Iteración 41 — 2026-09-08 — Fase 29: el IDE se quedaba sin poder abrirse tras actualizarse
+
+**Objetivo:** un reporte de la v2.9.0 recién publicada, con dos partes: al actualizar desde la
+aplicación, el IDE no volvió a abrirse con el aviso de "actualizado"; y además **no se podía abrir
+de ninguna manera**, tampoco buscándolo en el explorador de archivos. Como referencia, el proyecto
+DocGen —una aplicación WPF con instalador de Inno Setup— hace lo mismo y sale bien.
+
+**Diagnóstico.** El rastro estaba en el disco y era muy raro: la carpeta de descargas del
+actualizador conservaba el instalador de 126 MB y **no** tenía `pending.json`. Ninguna ruta del
+código borra sólo ese archivo: la limpieza borra la carpeta entera. Es decir, el borrado empezó, se
+llevó el archivo pequeño y murió en el grande.
+
+Por qué: el instalador de NSIS **relanza el IDE antes de terminar de salir él**, así que el IDE
+recién abierto dictamina "instalada" y borra la carpeta con el instalador dentro y en marcha.
+Windows no deja borrar la imagen de un proceso vivo → `EPERM`. Y `force: true` no cubre eso: sólo se
+traga que la ruta no exista.
+
+A partir de ahí, la forma del arranque hace el resto. `await updaterService.initialize(...)` está en
+mitad de `app.whenReady().then(async () => { … })`, **antes** de registrar el IPC, de instalar el
+menú y de crear la ventana, y ese `then` no tenía `catch`. La excepción se llevó por delante todo lo
+que venía detrás: proceso vivo, sin ventana y con el bloqueo de instancia única puesto. Sin ventana
+no se emite `window-all-closed`, así que nadie cerraba nada; y con el bloqueo puesto, cada intento de
+abrir el IDE chocaba con él y salía en silencio. De ahí las dos mitades del reporte, que resultaron
+ser el mismo fallo.
+
+**Lo que aportó DocGen.** Su `DiscardPending` envuelve el borrado en un `try/catch` de
+`IOException`/`UnauthorizedAccessException` y sigue. Y su instalador declara `CloseApplications=yes`
+y relanza la aplicación desde su propia entrada `[Run]`, con `nowait postinstall` y sin
+`skipifsilent`. Las dos ideas se han traído: la limpieza no puede lanzar, y el instalador tiene que
+esperar a que la aplicación se cierre en vez de correr una carrera con ella.
+
+**Hecho:**
+- `removeUpdatesDir()` no lanza nunca, reintenta —`rm` reintenta ante `EPERM`— y deja lo que no pudo
+  borrar para el arranque siguiente, que ahora **recoge** la carpeta cuando no hay registro
+  pendiente. Sin eso, un instalador huérfano de 130 MB se quedaba en el disco de por vida.
+- `updaterService.initialize` va dentro de su propio `try`, y la cadena de arranque tiene un `catch`
+  que informa con un cuadro de error y cierra el proceso (ADR-068).
+- Una segunda instancia sale con `app.exit(0)` y no con `app.quit()`, que es una petición y deja el
+  módulo ejecutándose — con `will-quit` lanzando instaladores por el camino.
+- `second-instance` abre una ventana si no hay ninguna y el arranque ya terminó.
+- El plan de instalación pasa `--updated` además de `/S --force-run`: es lo que hace que NSIS espere
+  a que el IDE termine de cerrarse. Es el `CloseApplications=yes` de DocGen.
+- 6 pruebas nuevas. Una reproduce el `EPERM` de verdad (en Windows no se puede borrar el directorio
+  de trabajo de un proceso, que es la forma determinista de provocarlo) y comprueba que el arranque
+  llega igualmente al aviso; dos son estructurales sobre la forma de la cadena de arranque.
+
+**Verificado:** `npm run build`, `tsc --noEmit` limpio y `npm test` completo en verde (unit,
+security, package y scaffold). Y sobre la aplicación real, antes y después, con un `userData`
+aislado (`--user-data-dir`) y un instalador falso corriendo dentro de la carpeta de descargas:
+
+| Código | Resultado |
+|---|---|
+| v2.9.0 publicada | `UnhandledPromiseRejectionWarning: EPERM`, sin ventana, colgado hasta matarlo |
+| corregido | aviso `[updater] no se ha podido limpiar…` y `SMOKE_OK` |
+
+**Errores encontrados:**
+- *Síntoma:* la primera prueba del borrado decía que `rm` no fallaba. *Causa raíz:* el proceso hijo
+  todavía no había arrancado cuando se intentó borrar; 700 ms no bastaban. *Arreglo:* comprobar que
+  el hijo está vivo (`process.kill(pid, 0)`) antes de medir. Una prueba de una condición de carrera
+  que no verifica la condición mide otra cosa.
+- *Síntoma:* la primera puesta en escena no ejercitaba nada. *Causa raíz:* el registro pendiente
+  decía versión `9.9.9`, que es **posterior** a la que corre, así que el veredicto no era "instalada"
+  y la limpieza ni se llamaba. *Arreglo:* la versión del registro tiene que ser la que corre.
+- *Síntoma:* dos intentos de escribir el guion de puesta en escena murieron con
+  `Invalid Unicode escape sequence`. *Causa raíz:* la trampa de siempre —un heredoc se come un nivel
+  de escapes— sobre rutas de Windows. *Arreglo:* la herramienta de edición. Van cuatro.
+
+**Lo que no se ha hecho, y por qué:** no se ha borrado a mano el instalador de 126 MB que quedó en la
+carpeta de descargas de este equipo. La v2.9.0 instalada no sabe recogerlo —la recogida es parte de
+este arreglo—, así que desaparecerá solo en el primer arranque de la versión siguiente.
+
+**Siguiente:** publicar la corrección. Importa el orden: el código que se rompe es el de la versión
+**recién instalada**, así que actualizar de la 2.9.0 a la siguiente ya se beneficia del arreglo. Lo
+que no se puede arreglar hacia atrás es el `--updated`, que lo manda la versión que se va.

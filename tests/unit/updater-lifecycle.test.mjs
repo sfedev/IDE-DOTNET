@@ -265,3 +265,102 @@ describe('el instalador se lanza cuando la salida ya es un hecho', () => {
     );
   });
 });
+
+/**
+ * El peor fallo que ha tenido el IDE, y el que menos se parece a lo que uno busca.
+ *
+ * Al instalar una actualización, el instalador **relanza el IDE antes de terminar de salir él**.
+ * Durante ese solape el IDE recién abierto dictamina "instalada" y borra la carpeta de descargas —
+ * con el instalador dentro y en marcha—. Windows no deja borrar la imagen de un proceso vivo, así
+ * que `rm` levanta `EPERM`, y como la limpieza estaba en el camino de arranque, antes del IPC, del
+ * menú y de la ventana, la excepción se llevaba por delante todo lo que venía detrás: un proceso
+ * vivo, **sin ventana** y sosteniendo el bloqueo de instancia única. A partir de ahí el IDE no se
+ * podía abrir de ninguna manera, y sin ningún error a la vista.
+ *
+ * Limpiar una descarga ya aplicada es tarea doméstica y no puede impedir que el IDE arranque.
+ */
+describe('la limpieza de la descarga no puede tumbar el arranque', () => {
+  // En Windows no se puede borrar el directorio de trabajo de un proceso, que es la forma
+  // determinista de reproducir aquí lo que allí provoca un instalador todavía en marcha. En POSIX
+  // sí se puede, así que no hay nada que reproducir y la prueba se salta con el motivo escrito.
+  const soloWindows = process.platform === 'win32' ? false : 'el borrado sólo falla así en Windows';
+
+  it('la carpeta no se puede borrar y el arranque llega igualmente al aviso', { skip: soloWindows }, async () => {
+    const root = freshRoot();
+    seedPending(root, { entry: { version: '2.8.0', attempts: 1, notes: ['· Algo nuevo'], releaseUrl: null } });
+
+    const updates = join(root, 'updates');
+    const anterior = process.cwd();
+    process.chdir(updates);
+
+    let state;
+    try {
+      state = await updaterService.initialize(environment(root, '2.8.0'));
+    } finally {
+      process.chdir(anterior);
+    }
+
+    // Que la carpeta siga ahí es lo que demuestra que el borrado falló de verdad: sin eso, esta
+    // prueba pasaría también con el fallo dentro.
+    assert.equal(existsSync(updates), true, 'el borrado tenía que haber fallado');
+    assert.equal(state.outcome?.kind, 'just-updated', 'y aun así se felicita al usuario');
+    assert.equal(updaterService.hasPendingInstall(), false);
+  });
+
+  /**
+   * La otra mitad: lo que la limpieza no pudo borrar no se queda ahí para siempre. Sin registro
+   * pendiente nadie vuelve a mirar esa carpeta, así que un instalador huérfano de 130 MB se
+   * quedaba en el disco de por vida.
+   */
+  it('el arranque siguiente recoge el instalador que quedó huérfano', async () => {
+    const root = freshRoot();
+    const huerfano = join(root, 'updates', 'DotForge IDE-2.9.0-Setup-x64.exe');
+    writeFileSync(huerfano, 'lo que la limpieza anterior no pudo borrar');
+
+    const state = await updaterService.initialize(environment(root, '2.9.0'));
+
+    assert.equal(existsSync(huerfano), false, 'la descarga huérfana se recoge');
+    assert.equal(state.outcome, null, 'y no se inventa ningún aviso: no hay nada que contar');
+  });
+});
+
+/**
+ * Red de seguridad del arranque.
+ *
+ * Es estructural porque lo que vigila sólo se manifiesta dentro de Electron y sólo cuando algo
+ * falla: todo lo que monta el IDE cuelga de un único `then`, y una excepción a mitad dejaba el
+ * proceso vivo y sin ventana. Sin ventana no se emite `window-all-closed`, nadie cierra nada y el
+ * bloqueo de instancia única sigue en pie, así que ningún intento posterior de abrir el IDE
+ * consigue nada — ni desde el menú de inicio ni desde el explorador.
+ */
+describe('el arranque no puede terminar sin ventana', () => {
+  const main = readFileSync(join(repoRoot, 'src', 'main', 'main.ts'), 'utf8');
+
+  it('la cadena de arranque atrapa lo que falle y cierra en vez de quedarse invisible', () => {
+    const ready = main.indexOf('app.whenReady()');
+    assert.ok(ready > 0, 'existe la cadena de arranque');
+
+    const cola = main.slice(ready);
+    assert.match(cola, /\}\)\.catch\(/, 'whenReady tiene un catch');
+    assert.match(cola, /app\.exit\(1\)/, 'un arranque roto cierra el proceso');
+  });
+
+  it('el actualizador arranca dentro de un try: es accesorio y no puede impedir la ventana', () => {
+    const inicio = main.indexOf('updaterService.initialize({');
+    assert.ok(inicio > 0, 'el actualizador se inicializa en el arranque');
+
+    const antes = main.slice(0, inicio);
+    assert.match(antes.slice(-260), /try \{/, 'la llamada va dentro de un try');
+  });
+
+  /**
+   * `app.quit()` es una petición: anuncia la salida y el módulo sigue ejecutándose entretanto — y
+   * en este archivo `will-quit` es donde se lanza el instalador. Una segunda instancia no tiene
+   * nada que cerrar ni nada que instalar.
+   */
+  it('una segunda instancia se va sin efectos', () => {
+    const guardia = main.indexOf('requestSingleInstanceLock()');
+    assert.ok(guardia > 0);
+    assert.match(main.slice(guardia, guardia + 200), /app\.exit\(0\)/);
+  });
+});
