@@ -5259,3 +5259,39 @@ por "Cerrar e instalar" justamente porque el IDE no reinicia.
 
 **Siguiente:** decidir sobre el certificado Authenticode, que es lo único que cierra el asunto de
 Sophos y de SmartScreen. Con él, la única acción es crear dos secrets: el resto ya está cableado.
+
+### Iteración 43 — 2026-09-08 — El primer SHA256SUMS.txt no servía para nada
+**Objetivo:** arreglar el archivo de sumas que publicó la v2.9.2, que era correcto e inútil.
+
+**Qué pasó:** la v2.9.2 salió publicada, con su `SHA256SUMS.txt` colgando y el workflow entero en
+verde —incluido el `--check` que rehashea el disco y compara—. Al bajarse el instalador de la
+release y verificarlo como haría cualquiera, `sha256sum -c` falló en las **dos** entradas:
+
+```
+sha256sum: 'DotForge IDE-2.9.2-Setup-x64.exe': No such file or directory
+```
+
+El hash era exacto (`dad164b9…` coincidía con el binario descargado). Lo que no coincidía era el
+nombre: **GitHub renombra los assets al subirlos** y sustituye el espacio por un punto, así que el
+manifiesto llevaba el nombre de compilación y el usuario tenía el de descarga.
+
+**Por qué la CI no lo vio:** su `--check` corre sobre el `dist/` del runner, donde los nombres
+todavía llevan espacio. Nada que ocurra **antes** de la subida puede detectar lo que la subida
+cambia. Es el mismo agujero conceptual que el ensayo mudo del ADR-060, y la lección se generaliza:
+un artefacto publicado sólo se verifica descargándolo.
+
+**Hecho:** `publishedAssetName` en `scripts/lib/checksums.mjs`, aplicado en los dos caminos —al
+escribir el manifiesto y al comprobarlo— para que `--check` siga comparando cosas comparables sobre
+los archivos locales. Sólo se normaliza el espacio: `artifactName` no produce nada más, e inventar
+el resto de la tabla de GitHub sería adivinar.
+
+**Verificado:** además de las pruebas, la ida y vuelta completa sobre artefactos con el nombre real
+(con espacio), copiados después con el nombre que pone GitHub: `--check` sigue en verde sobre los
+locales y `sha256sum -c` del sistema devuelve `OK` en los dos sobre los "descargados".
+
+**Errores encontrados:**
+- *Síntoma:* la verificación de la release recién publicada falló entera. *Causa raíz:* el
+  renombrado de assets de GitHub. *Arreglo:* normalizar el nombre publicado. Anotado en las trampas.
+
+**Siguiente:** publicar la 2.9.3 — la 2.9.2 se queda con un archivo de sumas que no se puede usar,
+y no se puede reemplazar sin reescribir una release que ya está publicada.

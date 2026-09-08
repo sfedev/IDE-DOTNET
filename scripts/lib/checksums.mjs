@@ -24,6 +24,30 @@
 /** Nombre del archivo de sumas que se adjunta a la release. En mayúsculas, por convención. */
 export const CHECKSUM_FILE_NAME = 'SHA256SUMS.txt';
 
+/**
+ * El nombre con el que un artefacto acaba publicado en la release.
+ *
+ * **GitHub renombra los assets al subirlos**: sustituye por puntos los caracteres que no admite en
+ * el nombre de un asset, y el espacio es uno de ellos. `DotForge IDE-2.9.2-Setup-x64.exe` se
+ * descarga como `DotForge.IDE-2.9.2-Setup-x64.exe`.
+ *
+ * Sin esto, el manifiesto lleva el nombre de compilación y quien lo descarga tiene el de descarga,
+ * así que `sha256sum -c` falla con "No such file or directory" en **todas** las entradas — con los
+ * hashes correctos. Pasó en la v2.9.2, que es la primera release que publicó sumas. Una
+ * verificación que no encuentra el archivo no dice que esté mal: dice que no se ha comprobado
+ * nada, y se lee igual de rojo.
+ *
+ * Se normaliza sólo el espacio, no todo lo que GitHub pueda tocar: el nombre lo compone
+ * `artifactName` de electron-builder a partir de `productName`, y sólo produce letras, dígitos,
+ * puntos, guiones y ese espacio. Inventar el resto de la tabla sería adivinar.
+ */
+export function publishedAssetName(name) {
+  if (typeof name !== 'string') {
+    throw new TypeError('publishedAssetName requiere un nombre de archivo');
+  }
+  return name.replace(/ /g, '.');
+}
+
 /** Un SHA-256 en hexadecimal: 64 dígitos, en minúsculas. */
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 

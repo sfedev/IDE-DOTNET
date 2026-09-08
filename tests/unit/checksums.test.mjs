@@ -13,6 +13,7 @@ import {
   CHECKSUM_FILE_NAME,
   formatChecksumFile,
   parseChecksumFile,
+  publishedAssetName,
   verifyChecksums,
 } from '../../scripts/lib/checksums.mjs';
 import { isPublishableArtifact, PUBLISHABLE_EXTENSIONS } from '../../scripts/lib/dist-artifacts.mjs';
@@ -20,6 +21,49 @@ import { isPublishableArtifact, PUBLISHABLE_EXTENSIONS } from '../../scripts/lib
 const HASH_A = 'a'.repeat(64);
 const HASH_B = 'b'.repeat(64);
 const HASH_C = 'c'.repeat(64);
+
+/**
+ * El nombre con el que el artefacto acaba en la release.
+ *
+ * Esto es un arreglo con fecha: la v2.9.2 publicó el primer `SHA256SUMS.txt` del proyecto y no
+ * servía para nada. Los hashes eran correctos y el archivo era inútil, porque GitHub renombra los
+ * assets al subirlos —los espacios pasan a puntos— y el manifiesto llevaba el nombre de
+ * compilación. `sha256sum -c` fallaba en las dos entradas con "No such file or directory": la
+ * comprobación no decía que el binario estuviera mal, decía que no había comprobado nada, y se lee
+ * igual de rojo.
+ */
+describe('el nombre publicado de un artefacto', () => {
+  it('los espacios se convierten en puntos, que es lo que hace GitHub', () => {
+    assert.equal(
+      publishedAssetName('DotForge IDE-2.9.2-Setup-x64.exe'),
+      'DotForge.IDE-2.9.2-Setup-x64.exe',
+    );
+  });
+
+  it('un nombre sin espacios se queda como está', () => {
+    assert.equal(publishedAssetName('SHA256SUMS.txt'), 'SHA256SUMS.txt');
+    assert.equal(publishedAssetName('app-1.0.0-x64.zip'), 'app-1.0.0-x64.zip');
+  });
+
+  it('es idempotente: aplicarlo dos veces no cambia nada', () => {
+    const once = publishedAssetName('DotForge IDE-2.9.2-win-x64.zip');
+    assert.equal(publishedAssetName(once), once);
+  });
+
+  /**
+   * Se normaliza el espacio y nada más. El nombre lo compone `artifactName` de electron-builder a
+   * partir de `productName`, y sólo produce letras, dígitos, puntos, guiones y ese espacio;
+   * inventar el resto de la tabla de GitHub sería adivinar.
+   */
+  it('no toca los puntos ni los guiones que ya venían', () => {
+    assert.equal(publishedAssetName('a.b-c_d.exe'), 'a.b-c_d.exe');
+  });
+
+  it('el resultado sigue siendo un nombre válido para el manifiesto', () => {
+    const name = publishedAssetName('DotForge IDE-2.9.2-Setup-x64.exe');
+    assert.doesNotThrow(() => formatChecksumFile([{ name, sha256: HASH_A }]));
+  });
+});
 
 describe('formato del archivo de sumas', () => {
   it('escribe el formato de sha256sum: hash, dos espacios y nombre', () => {

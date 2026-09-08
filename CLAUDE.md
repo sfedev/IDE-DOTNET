@@ -1433,3 +1433,17 @@ npm run fetch:toolchain -- --platform win32 --arch x64
   colaboradores, un PR de un desconocido no concede ningún acceso. Lo único que se le acerca es un
   límite de interacción (`collaborators_only`), que bloquea también las issues y caduca a los 6
   meses.
+- **GitHub renombra los artefactos al subirlos a una release.** Sustituye por puntos los caracteres
+  que no admite en el nombre de un asset, y el espacio es uno: `DotForge IDE-2.9.2-Setup-x64.exe` se
+  construye así y se descarga como `DotForge.IDE-2.9.2-Setup-x64.exe`. El primer `SHA256SUMS.txt`
+  del proyecto —el de la v2.9.2— salió con el nombre de compilación, así que `sha256sum -c` fallaba
+  en **todas** las entradas con "No such file or directory", con los hashes correctos. Una
+  verificación que no encuentra el archivo no dice que el binario esté mal: dice que no ha
+  comprobado nada, y se lee igual de rojo. Lo normaliza `publishedAssetName`, en los dos caminos
+  —al escribir el manifiesto y al comprobarlo—, y sólo el espacio: el resto de la tabla de GitHub
+  sería adivinar, y `artifactName` no produce nada más.
+- **Un artefacto publicado sólo se verifica descargándolo.** El `--check` de la CI corre sobre el
+  `dist/` del runner, donde los nombres todavía llevan espacio: por eso pasó en verde sobre un
+  archivo que no servía. Lo que zanjó la duda fue bajarse el `.exe` de la release y pasarle el
+  `sha256sum` del sistema, que es el gesto que hace el usuario. Nada que ocurra antes de la subida
+  puede detectar lo que la subida cambia.

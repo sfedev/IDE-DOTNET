@@ -26,6 +26,7 @@ import {
   CHECKSUM_FILE_NAME,
   formatChecksumFile,
   parseChecksumFile,
+  publishedAssetName,
   verifyChecksums,
 } from './lib/checksums.mjs';
 
@@ -61,7 +62,14 @@ function sha256Of(path) {
   });
 }
 
-/** Los artefactos publicables del directorio, hasheados y ordenados por nombre. */
+/**
+ * Los artefactos publicables del directorio, hasheados y ordenados por nombre.
+ *
+ * El nombre que se anota es el **publicado** (`publishedAssetName`), no el del disco: este archivo
+ * existe para verificar lo que alguien se descarga de la release, y ahí los nombres llevan puntos
+ * donde aquí hay espacios. Se aplica en los dos caminos —al escribir y al comprobar— para que
+ * `--check` siga comparando cosas comparables sobre los archivos locales.
+ */
 async function checksumsIn(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
   const names = entries
@@ -71,7 +79,7 @@ async function checksumsIn(directory) {
 
   const results = [];
   for (const name of names) {
-    results.push({ name, sha256: await sha256Of(join(directory, name)) });
+    results.push({ name: publishedAssetName(name), sha256: await sha256Of(join(directory, name)) });
   }
   return results;
 }
