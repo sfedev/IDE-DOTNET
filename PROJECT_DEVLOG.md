@@ -5244,5 +5244,18 @@ cambio está en el árbol de trabajo. Y no se ha tocado `author.email` (`dev@dot
 acaba en el `CompanyName` del ejecutable y no ayuda a la reputación del binario: es un cambio de
 identidad del producto y se decide aparte.
 
-**Siguiente:** publicar una versión para que la primera release con sumas exista, y decidir sobre el
-certificado Authenticode, que es lo único que cierra el asunto de Sophos y de SmartScreen.
+**Ensayo antes de publicar** (`dry_run`, run 34242961037): en verde y **diciendo lo que validó**.
+El empaquetado corrió por primera vez con `CSC_LINK` en el entorno —vacío— e imprimió "Sin
+certificado: se empaqueta sin firmar"; llegaron los dos artefactos con sus 126 764 877 y
+174 260 812 bytes; las sumas se calcularon y se verificaron contra el disco; y las notas
+mencionaron el archivo. La v2.9.1 quedó intacta, comprobado por lo único que lo demuestra: sus
+artefactos conservan el mismo `id` (`gh release upload --clobber` no los reutiliza).
+
+También se reescribió el "Qué es" del README, que eran once párrafos ordenados por versión —y con
+cuatro versiones sin mencionar— para contar qué hace el producto hoy. El historial pasa a una
+sección propia, "Novedades", con una línea por versión. De paso salió a la luz que la sección de
+actualizaciones seguía describiendo el botón "Reiniciar y aplicar", que el ADR-066 había cambiado
+por "Cerrar e instalar" justamente porque el IDE no reinicia.
+
+**Siguiente:** decidir sobre el certificado Authenticode, que es lo único que cierra el asunto de
+Sophos y de SmartScreen. Con él, la única acción es crear dos secrets: el resto ya está cableado.

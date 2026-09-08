@@ -920,6 +920,7 @@ Cada versión, en una línea. Las notas completas de cada publicación están en
 
 | Versión | Qué trajo |
 |---|---|
+| **2.9.2** | Cada release publica un **`SHA256SUMS.txt`** con el que comprobar que el binario descargado es el que construyó la CI, y la firma Authenticode queda cableada a la espera de certificado |
 | **2.9.1** | Arreglo: limpiar la descarga de una actualización dejaba el IDE **sin poder abrirse**, con un proceso invisible bloqueando cualquier intento posterior |
 | **2.9.0** | Las pestañas de intérprete **copian y pegan** como cualquier terminal de Windows. Hasta aquí, pegar sólo "funcionaba" en PowerShell — y no por el IDE |
 | **2.8.0** | Actualizarse **se explica**: antes de cerrar dice qué va a pasar y cuánto tarda, y al volver cuenta si se instaló o por qué no |
