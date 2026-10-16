@@ -192,6 +192,7 @@ jobs:
             dist/*.exe
             dist/*.zip
           if-no-files-found: error
+          retention-days: 7  # solo es el relevo entre jobs; los instaladores quedan en la release
 
   # La release publicada es el combustible del actualizador in-app. Hasta la v2.5.0 este workflow
   # construía los artefactos y los dejaba como "artifacts" del run, que caducan a los 90 días y no
@@ -451,3 +452,4 @@ jobs:
 #            dist/*.dmg
 #            dist/*.zip
 #          if-no-files-found: error
+#          retention-days: 7  # solo es el relevo entre jobs; los instaladores quedan en la release
